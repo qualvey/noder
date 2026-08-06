@@ -1,0 +1,399 @@
+{
+    "log": {
+        "level": "info",
+        "timestamp": true
+    },
+    "experimental": {
+        "clash_api": {
+            "external_controller": "0.0.0.0:9090",
+            "external_ui": "./zash",
+            "external_ui_download_url": "https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip",
+            "access_control_allow_private_network": true,
+            "default_mode": "rule",
+            "external_ui_download_detour": "Proxy"
+        },
+        "cache_file": {
+            "enabled": true,
+            "store_dns": true
+        }
+    },
+    "services": [
+        {
+            "type": "api",
+            "listen": "::",
+            "listen_port": 9900,
+            "access_control_allow_origin": [
+                "*"
+            ],
+            "access_control_allow_private_network": true,
+            "dashboard": {
+                "enabled": true
+            }
+        }
+    ],
+    "ntp": {
+        "enabled": true,
+        "server": "time.cloudflare.com",
+        "server_port": 123,
+        "interval": "30m"
+    },
+    "certificate": {
+        "store": "mozilla"
+    },
+    "http_clients": [
+        {
+            "tag": "Proxy",
+            "detour": "Proxy"
+        }
+    ],
+    "endpoints": [
+        {
+            "type": "tailscale",
+            "tag": "ts-ep",
+            "auth_key": "tskey-auth-YOUR_TAILSCALE_KEY"
+        }
+    ],
+    "dns": {
+        "servers": [
+            {
+                "tag": "google",
+                "type": "https",
+                "server": "8.8.8.8",
+                "detour": "Proxy"
+            },
+            {
+                "tag": "h3-ali",
+                "type": "h3",
+                "server": "dns.alidns.com",
+                "domain_resolver": "local"
+            },
+            {
+                "tag": "ali",
+                "type": "udp",
+                "server": "223.5.5.5"
+            },
+            {
+                "type": "fakeip",
+                "tag": "fakeip",
+                "inet4_range": "198.18.0.0/15",
+                "inet6_range": "fc00::/18"
+            },
+            {
+                "type": "local",
+                "tag": "local"
+            }
+        ],
+        "rules": [
+            {
+                "domain": [
+                    "crs.cr.adobe.com",
+                    "ims-prod06.adobelogin.com",
+                    "cc-api-data.adobe.io",
+                    "lcs-cops.adobe.io",
+                    "hbrt.adobe.com",
+                    "cctypekit.adobe.io",
+                    "udps.adobe.com",
+                    "ims-na1.adobelogin.com",
+                    "p13n.adobe.io",
+                    "assets.adobedtm.com",
+                    "ic.adobe.io",
+                    "adobeid-na1.services.adobe.com",
+                    "cc-cdn.adobe.com"
+                ],
+                "action": "reject",
+                "method": "drop"
+            },
+            {
+                "rule_set": [
+                    "category-ads-all"
+                ],
+                "action": "reject"
+            },
+            {
+                "clash_mode": "global",
+                "server": "google"
+            },
+            {
+                "type": "logical",
+                "mode": "and",
+                "rules": [
+                    {
+                        "rule_set": [
+                            "gfw"
+                        ],
+                        "invert": true
+                    },
+                    {
+                        "clash_mode": "direct"
+                    }
+                ],
+                "server": "h3-ali"
+            },
+            {
+                "rule_set": [
+                    "geosite-geolocation-cn",
+                    "geosite-cn"
+                ],
+                "server": "h3-ali"
+            }
+        ],
+        "strategy": "ipv4_only",
+        "reverse_mapping": true,
+        "optimistic": true,
+        "final": "google"
+    },
+    "inbounds": [
+        {
+            "type": "mixed",
+            "tag": "mixed",
+            "listen": "8080",
+            "set_system_proxy": false
+        },
+        {
+            "tag": "tun-in",
+            "interface_name": "sing-tun",
+            "type": "tun",
+            "address": [
+                "172.19.0.0/30"
+            ],
+            "mtu": 1400,
+            "auto_route": true,
+            "strict_route": true,
+            "route_exclude_address": [
+                "192.168.0.0/16",
+                "fc00::/7",
+                "116.62.232.15/32"
+            ],
+            "stack": "mixed"
+        }
+    ],
+    "outbounds": [
+        {
+            "type": "direct",
+            "tag": "direct"
+        },
+        {
+            "tag": "Proxy",
+            "type": "selector",
+            "interrupt_exist_connections": true,
+            "outbounds": [
+                "urltest"
+            ]
+        },
+        {
+            "tag": "urltest",
+            "type": "urltest",
+            "outbounds": []
+        }
+    ],
+    "route": {
+        "auto_detect_interface": true,
+        "final": "Proxy",
+        "default_domain_resolver": {
+            "server": "ali"
+        },
+        "rules": [
+            {
+                "port": 853,
+                "action": "reject"
+            },
+            {
+                "action": "sniff"
+            },
+            {
+                "rule_set": [
+                    "category-ads-all"
+                ],
+                "action": "reject",
+                "no_drop": true
+            },
+            {
+                "protocol": "ssh",
+                "action": "bypass",
+                "outbound": "direct"
+            },
+            {
+                "type": "logical",
+                "mode": "or",
+                "rules": [
+                    {
+                        "port": 53
+                    },
+                    {
+                        "protocol": "dns"
+                    }
+                ],
+                "action": "hijack-dns"
+            },
+            {
+                "domain_suffix": [
+                    "adobe.com",
+                    "adobe.io"
+                ],
+                "outbound": "reject"
+            },
+            {
+                "clash_mode": "direct",
+                "action": "bypass",
+                "outbound": "direct"
+            },
+            {
+                "protocol": "bittorrent",
+                "action": "bypass",
+                "outbound": "direct"
+            },
+            {
+                "protocol": "ntp",
+                "outbound": "direct"
+            },
+            {
+                "ip_is_private": true,
+                "action": "bypass",
+                "outbound": "direct"
+            },
+            {
+                "clash_mode": "global",
+                "outbound": "Proxy"
+            },
+            {
+                "type": "logical",
+                "mode": "and",
+                "rules": [
+                    {
+                        "protocol": [
+                            "quic",
+                            "stun",
+                            "dtls"
+                        ]
+                    }
+                ],
+                "action": "reject"
+            },
+            {
+                "domain_suffix": [
+                    "example.com",
+                    "example.com"
+                ],
+                "action": "bypass",
+                "outbound": "direct"
+            },
+            {
+                "rule_set": "gfw",
+                "outbound": "Proxy"
+            },
+            {
+                "rule_set": [
+                    "geosite-geolocation-cn",
+                    "geosite-cn"
+                ],
+                "action": "bypass",
+                "outbound": "direct"
+            },
+            {
+                "rule_set": "geoip-cn",
+                "action": "bypass",
+                "outbound": "direct"
+            },
+            {
+                "type": "logical",
+                "mode": "and",
+                "rules": [
+                    {
+                        "rule_set": "geoip-cn"
+                    },
+                    {
+                        "rule_set": "geosite-geolocation-!cn",
+                        "invert": true
+                    }
+                ],
+                "action": "bypass",
+                "outbound": "direct"
+            }
+        ],
+        "rule_set": [
+            {
+                "tag": "geoip-cn",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+                "http_client": "Proxy"
+            },
+            {
+                "tag": "geosite-geolocation-cn",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs",
+                "http_client": "Proxy"
+            },
+            {
+                "tag": "geosite-geolocation-!cn",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
+                "http_client": "Proxy"
+            },
+            {
+                "tag": "geosite-cn",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+                "http_client": "Proxy"
+            },
+            {
+                "tag": "douyin",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://github.com/SagerNet/sing-geosite/raw/refs/heads/rule-set/geosite-douyin.srs"
+            },
+            {
+                "tag": "category-ads-all",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs",
+                "http_client": "Proxy"
+            },
+            {
+                "tag": "binance",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://github.com/SagerNet/sing-geosite/raw/refs/heads/rule-set/geosite-binance.srs"
+            },
+            {
+                "tag": "tiktok",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://github.com/SagerNet/sing-geosite/raw/refs/heads/rule-set/geosite-tiktok.srs"
+            },
+            {
+                "tag": "geosite-game!cn",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://github.com/SagerNet/sing-geosite/raw/refs/heads/rule-set/geosite-category-games-!cn.srs"
+            },
+            {
+                "tag": "geosite-bytedance!cn",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://github.com/SagerNet/sing-geosite/raw/refs/heads/rule-set/geosite-bytedance@!cn.srs"
+            },
+            {
+                "tag": "geosite-ebay",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://github.com/SagerNet/sing-geosite/raw/refs/heads/rule-set/geosite-ebay.srs"
+            },
+            {
+                "tag": "rednote",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-xiaohongshu.srs"
+            },
+            {
+                "tag": "gfw",
+                "type": "remote",
+                "format": "binary",
+                "url": "https://github.com/QuixoticHeart/rule-set/raw/refs/heads/ruleset/singbox/version5/gfw.srs"
+            }
+        ]
+    }
+}

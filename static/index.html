@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sing-Box 节点与订阅中间件管理面板</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- 顶部 Navigation Header -->
+  <header class="header">
+    <div class="container header-wrapper">
+      <div class="brand">
+        <div class="brand-icon">⚡</div>
+        <div>
+          <div class="brand-title">Sing-Box Sub Middleman</div>
+          <div class="brand-subtitle">节点管理与动态订阅生成系统 (TUIC / VLESS REALITY / AnyTLS 版)</div>
+        </div>
+      </div>
+      <div class="header-controls">
+        <div class="admin-token-box">
+          <label for="adminTokenInput">Admin Token:</label>
+          <input type="password" id="adminTokenInput" placeholder="输入密钥" value="admin-secret">
+          <button class="btn btn-secondary btn-sm" id="saveTokenBtn">保存</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- 概览指标仪表盘 Metrics -->
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-info">
+          <h4>托管节点总数</h4>
+          <div class="value" id="metricTotalNodes">0</div>
+        </div>
+        <div class="metric-icon icon-node">🌐</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-info">
+          <h4>活跃订阅用户</h4>
+          <div class="value" id="metricTotalUsers">0</div>
+        </div>
+        <div class="metric-icon icon-user">👤</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-info">
+          <h4>支持核心协议</h4>
+          <div class="value" id="metricProtocols">TUIC / VLESS / AnyTLS</div>
+        </div>
+        <div class="metric-icon icon-protocol">🔒</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-info">
+          <h4>服务 API 状态</h4>
+          <div class="value" style="color: var(--accent-emerald);" id="metricStatus">运行中</div>
+        </div>
+        <div class="metric-icon icon-status">✅</div>
+      </div>
+    </div>
+
+    <!-- 标签页切换 Tab Navigation -->
+    <div class="tab-navigation">
+      <button class="tab-btn active" data-tab="nodes">节点管理 (Nodes)</button>
+      <button class="tab-btn" data-tab="users">用户管理 (Users)</button>
+      <button class="tab-btn" data-tab="help">使用指引与 API</button>
+    </div>
+
+    <!-- 1. 节点管理 Tab Content -->
+    <section id="tab-nodes" class="tab-content">
+      <div class="section-header">
+        <div class="section-title">代理节点列表 (支持 TUIC / VLESS REALITY / AnyTLS)</div>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:0.82rem; color:var(--text-muted); cursor:pointer;">
+            <input type="checkbox" id="selectAllNodesCb"> 全选节点
+          </label>
+          <button class="btn btn-danger btn-sm" id="bulkDeleteNodesBtn" style="display: none;">
+            🗑️ 批量删除 (<span id="selectedNodeCount">0</span>)
+          </button>
+          <button class="btn btn-primary" id="openAddNodeModalBtn">
+            <span>+</span> 新增节点
+          </button>
+        </div>
+      </div>
+      <div class="cards-grid" id="nodesContainer">
+        <!-- 动态由 JavaScript 渲染 -->
+      </div>
+    </section>
+
+    <!-- 2. 用户管理 Tab Content -->
+    <section id="tab-users" class="tab-content" style="display: none;">
+      <div class="section-header">
+        <div class="section-title">订阅用户列表 (支持多节点绑定)</div>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <button class="btn btn-danger btn-sm" id="bulkDeleteUsersBtn" style="display: none;">
+            🗑️ 批量删除 (<span id="selectedUserCount">0</span>)
+          </button>
+          <button class="btn btn-primary" id="openAddUserModalBtn">
+            <span>+</span> 新增用户
+          </button>
+        </div>
+      </div>
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 40px; text-align: center;">
+                <input type="checkbox" id="selectAllUsersCb">
+              </th>
+              <th>ID</th>
+              <th>用户备注</th>
+              <th>鉴权 Token</th>
+              <th>专属 UUID / 密码</th>
+              <th>状态</th>
+              <th>绑定节点</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="usersTableBody">
+            <!-- 动态由 JavaScript 渲染 -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 3. 使用指引 Tab Content -->
+    <section id="tab-help" class="tab-content" style="display: none;">
+      <div class="section-header">
+        <div class="section-title">Sing-Box 客户端导入指南 & 用户 API</div>
+      </div>
+      <div style="background: var(--bg-card); padding: 24px; border-radius: var(--radius-lg); border: 1px solid var(--border-glass);">
+        <h4 style="margin-bottom: 12px; color: var(--primary);">1. 用户订阅导出 API</h4>
+        <div class="code-viewer" style="margin-bottom: 16px;">GET http://127.0.0.1:8000/sub?token={USER_TOKEN}</div>
+
+        <h4 style="margin-bottom: 12px; color: var(--primary);">2. 用户节点列表查询 API</h4>
+        <div class="code-viewer" style="margin-bottom: 16px;">GET http://127.0.0.1:8000/node?token={USER_TOKEN}</div>
+
+        <h4 style="margin-bottom: 12px; color: var(--primary);">3. 用户 Token 验证与数据查询 API</h4>
+        <div class="code-viewer" style="margin-bottom: 20px;">GET http://127.0.0.1:8000/api/user/verify?token={USER_TOKEN}</div>
+
+        <p style="color: var(--text-muted); font-size: 0.9rem;">
+          系统已全面兼容 doc/vless.md 定义的 VLESS REALITY 规格：支持 <code>public_key</code>、<code>short_id</code>、<code>flow: xtls-rprx-vision</code> 与 <code>uTLS: chrome</code> 指纹！
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <!-- 节点 Modal 框 (包含 REALITY 公钥/Short ID 属性) -->
+  <div class="modal-overlay" id="nodeModal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title" id="nodeModalTitle">新增代理节点</div>
+        <button class="modal-close closeModalBtn">&times;</button>
+      </div>
+      <form id="nodeForm">
+        <!-- 从 JSON 快捷导入节点 -->
+        <div style="margin-bottom: 14px; background: rgba(59,130,246,0.1); padding: 10px; border-radius: 8px; border: 1px dashed rgba(59,130,246,0.4);">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:0.8rem; color:var(--primary); font-weight:600;">📋 从 JSON 导入 <span style="font-weight:normal; font-size:0.75rem; color:var(--text-muted);">(按 Ctrl+V 快捷提取)</span></span>
+            <button type="button" class="btn btn-secondary btn-sm" id="toggleJsonImportBtn">展开/折叠导入</button>
+          </div>
+          <div id="jsonImportContainer" style="display: none; margin-top: 10px;">
+            <textarea id="nodeJsonInput" class="form-control" rows="4" style="font-family: var(--font-mono); font-size: 0.78rem;" placeholder='粘贴 Outbound JSON 文本，如：&#10;{ "type": "vless", "tag": "my-node", "server": "1.2.3.4", "server_port": 443, "flow": "xtls-rprx-vision", "tls": { ... } }'></textarea>
+            <button type="button" class="btn btn-primary btn-sm" id="parseJsonBtn" style="margin-top: 8px; width: 100%;">解析并一键填充</button>
+          </div>
+        </div>
+
+        <input type="hidden" id="nodeId">
+        <div class="form-group">
+          <label for="nodeName">节点名称</label>
+          <input type="text" id="nodeName" class="form-control" placeholder="例如：VLESS REALITY 专线 01" required>
+        </div>
+        <div class="form-group">
+          <label for="nodeRemark">管理员备注 (仅管理员可见)</label>
+          <input type="text" id="nodeRemark" class="form-control" placeholder="如：香港 HKT 物理机 2026到期">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="nodeProtocol">协议类型 (仅限 3 种)</label>
+            <select id="nodeProtocol" class="form-control">
+              <option value="tuic">TUIC</option>
+              <option value="vless">VLESS</option>
+              <option value="anytls">AnyTLS</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="nodePort">端口</label>
+            <input type="number" id="nodePort" class="form-control" placeholder="8443" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="nodeServer">服务器地址 (IP / 域名)</label>
+          <input type="text" id="nodeServer" class="form-control" placeholder="1.2.3.4 或 hk.example.com" required>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="nodeSecurity">传输安全 (Security)</label>
+            <select id="nodeSecurity" class="form-control">
+              <option value="tls">TLS</option>
+              <option value="reality" id="optionSecurityReality">REALITY (TUIC不可用)</option>
+              <option value="auto">auto</option>
+              <option value="none">none</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="nodeSni">TLSSNI / ServerName</label>
+            <input type="text" id="nodeSni" class="form-control" placeholder="aws.amazon.com">
+          </div>
+        </div>
+
+        <!-- REALITY 专属配置区域 -->
+        <div id="groupReality" style="display: none; background: rgba(15, 23, 42, 0.4); padding: 12px; border-radius: 8px; border: 1px solid var(--border-glass); margin-bottom: 16px;">
+          <div class="form-group">
+            <label for="nodePublicKey">Public Key (REALITY 公钥 <span style="color:var(--accent-rose)">*</span>)</label>
+            <input type="text" id="nodePublicKey" class="form-control" placeholder="如 99BZ0JCnaSB55YEQYOCV66GhKTiK2ZGMPR3b6D_Q3wo">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="nodeShortId">Short ID (简短 ID <span style="color:var(--accent-rose)">*</span>)</label>
+              <input type="text" id="nodeShortId" class="form-control" placeholder="如 1a91">
+            </div>
+            <div class="form-group">
+              <label for="nodeFingerprint">uTLS 指纹 (Fingerprint)</label>
+              <input type="text" id="nodeFingerprint" class="form-control" placeholder="chrome" value="chrome">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="nodeFlow">Flow (流控方式)</label>
+            <input type="text" id="nodeFlow" class="form-control" placeholder="xtls-rprx-vision" value="xtls-rprx-vision">
+          </div>
+        </div>
+
+        <div class="form-row" id="groupTransport">
+          <div class="form-group">
+            <label for="nodeTransport">传输层 (Transport)</label>
+            <select id="nodeTransport" class="form-control">
+              <option value="direct">direct</option>
+              <option value="ws">WebSocket (ws)</option>
+              <option value="grpc">gRPC</option>
+              <option value="http">HTTP</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="nodePath">路径 (Path)</label>
+            <input type="text" id="nodePath" class="form-control" placeholder="/path">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary closeModalBtn">取消</button>
+          <button type="submit" class="btn btn-primary">保存节点</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 用户 Modal 框 (支持节点复选多选) -->
+  <div class="modal-overlay" id="userModal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title" id="userModalTitle">新增订阅用户</div>
+        <button class="modal-close closeModalBtn">&times;</button>
+      </div>
+      <form id="userForm">
+        <!-- 快捷提取 UUID / Password 文本框 -->
+        <div style="margin-bottom: 14px; background: rgba(59,130,246,0.1); padding: 10px; border-radius: 8px; border: 1px dashed rgba(59,130,246,0.4);">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:0.8rem; color:var(--primary); font-weight:600;">📋 快捷提取凭证 <span style="font-weight:normal; font-size:0.75rem; color:var(--text-muted);">(按 Ctrl+V 快捷提取)</span></span>
+            <button type="button" class="btn btn-secondary btn-sm" id="toggleUserJsonBtn">展开/折叠提取</button>
+          </div>
+          <div id="userJsonContainer" style="display: none; margin-top: 10px;">
+            <textarea id="userJsonInput" class="form-control" rows="3" style="font-family: var(--font-mono); font-size: 0.78rem;" placeholder='粘贴配置文本/JSON 片段，如：&#10;"uuid": "ef66463c-4bcb-4b20-bd42-9249758611ba",&#10;"password": "1bttcp92ies-nfij_qjjfw"'></textarea>
+            <button type="button" class="btn btn-primary btn-sm" id="parseUserJsonBtn" style="margin-top: 8px; width: 100%;">解析提取 UUID & Password</button>
+          </div>
+        </div>
+
+        <input type="hidden" id="userId">
+        <div class="form-group">
+          <label for="userName">用户姓名 / 简称</label>
+          <input type="text" id="userName" class="form-control" placeholder="如：张三" required>
+        </div>
+        <div class="form-group">
+          <label for="userRemark">管理员内部备注 (仅管理员可见)</label>
+          <input type="text" id="userRemark" class="form-control" placeholder="如：测试客户，2026年到期">
+        </div>
+        <div class="form-group">
+          <label for="userToken">鉴权 Token (留空自动生成 UUID)</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="userToken" class="form-control" placeholder="自动生成 Token">
+            <button type="button" class="btn btn-secondary" id="genTokenBtn">随机生成</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="userUuid">专属 UUID (用于 VLESS / TUIC / AnyTLS)</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="userUuid" class="form-control" placeholder="专属 UUID">
+            <button type="button" class="btn btn-secondary" id="genUuidBtn">随机 UUID</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="userPassword">专属 Password (用于 TUIC / AnyTLS)</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="userPassword" class="form-control" placeholder="专属密码">
+            <button type="button" class="btn btn-secondary" id="genPwdBtn">随机密码</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>绑定上游节点 (支持多选)</label>
+          <div id="userNodesCheckboxes" class="checkboxes-group">
+            <!-- 动态渲染多选框 -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary closeModalBtn">取消</button>
+          <button type="submit" class="btn btn-primary">保存用户</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 订阅 JSON 预览 Modal 框 -->
+  <div class="modal-overlay" id="configModal">
+    <div class="modal" style="max-width: 720px;">
+      <div class="modal-header">
+        <div class="modal-title">Sing-Box 多节点拼接配置 JSON 预览</div>
+        <button class="modal-close closeModalBtn">&times;</button>
+      </div>
+      <div class="code-viewer" id="configJsonViewer">正在加载配置...</div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary closeModalBtn">关闭</button>
+        <button class="btn btn-primary" id="copyConfigJsonBtn">复制 JSON 配置</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 鼠标位置浮层二次确认弹窗 Popover -->
+  <div id="deleteConfirmPopover" class="delete-confirm-popover">
+    <div class="delete-confirm-title" id="popoverTitle">⚠️ 确定要删除该项吗？</div>
+    <div class="delete-confirm-actions">
+      <button type="button" class="btn btn-secondary btn-sm" id="popoverCancelBtn">取消</button>
+      <button type="button" class="btn btn-danger btn-sm" id="popoverConfirmBtn">确定删除</button>
+    </div>
+  </div>
+
+  <!-- Toast 提示容器 -->
+  <div class="toast-container" id="toastContainer"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
