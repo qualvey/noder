@@ -28,6 +28,10 @@ ADMIN_SECRET_TOKEN = os.getenv("ADMIN_SECRET_TOKEN", "admin-secret")
 
 ALLOWED_PROTOCOLS = {"tuic", "vless", "anytls"}
 
+# 允许用户通过 config_override 覆盖的顶层配置键
+# 目前限制 route / dns，后期扩展只需往此集合添加键名
+ALLOWED_OVERRIDE_KEYS = {"route", "dns"}
+
 # ------------------------------------------------------------------
 # 2. SQLModel 数据库模型与 Pydantic Schema
 # 方案 3：节点单独分表 (不存凭证)，用户表存储凭证，支持用户关联多个节点
@@ -90,6 +94,7 @@ class UserBase(SQLModel):
     uuid: Optional[str] = Field(default=None)      # 用户专属 UUID (用于 VLESS / TUIC / AnyTLS)
     password: Optional[str] = Field(default=None)  # 用户专属密码 (用于 TUIC / AnyTLS 等)
     remark: Optional[str] = Field(default=None)    # 管理员备注 (仅管理员可见)
+    config_override: Optional[str] = Field(default=None)  # JSON 文本：该用户专属配置覆盖 (目前支持 route/dns)
 
 class User(UserBase, table=True):
     __table_args__ = {"extend_existing": True}
@@ -109,6 +114,7 @@ class UserRead(UserBase):
     uuid: Optional[str] = None
     password: Optional[str] = None
     node_ids: List[int] = Field(default_factory=list)
+    config_override: Optional[str] = None
 
 class UserUpdate(SQLModel):
     name: Optional[str] = None
@@ -117,6 +123,7 @@ class UserUpdate(SQLModel):
     password: Optional[str] = None
     is_active: Optional[bool] = None
     remark: Optional[str] = None
+    config_override: Optional[str] = None
     node_ids: Optional[List[int]] = None
 
 # 辅助校验函数
@@ -146,6 +153,35 @@ def validate_node_protocol_and_security(protocol: str, security: Optional[str], 
                 detail="VLESS REALITY protocol strictly requires both 'public_key' and 'short_id'."
             )
 
+# 校验并规范化用户 config_override (JSON 字符串)
+# 返回规范化后的 dict；为空字符串/None 返回 None
+def parse_config_override(raw: Optional[str]) -> Optional[dict]:
+    if raw is None:
+        return None
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        data = json.loads(s)
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"config_override 必须是合法 JSON: {e}"
+        )
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="config_override 的 JSON 必须是对象 (object)"
+        )
+    # 只允许白名单内的键，防止覆盖 outbounds / log 等动态注入或系统字段
+    for key in data.keys():
+        if key not in ALLOWED_OVERRIDE_KEYS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"config_override 不允许覆盖字段 '{key}'。允许的字段: {', '.join(sorted(ALLOWED_OVERRIDE_KEYS))}"
+            )
+    return data
+
 # ------------------------------------------------------------------
 # 3. 数据库初始化与生命周期
 # ------------------------------------------------------------------
@@ -161,6 +197,11 @@ def create_db_and_tables():
                 pass
         try:
             conn.execute(text("ALTER TABLE user ADD COLUMN remark VARCHAR"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE user ADD COLUMN config_override VARCHAR"))
             conn.commit()
         except Exception:
             pass
@@ -391,6 +432,14 @@ def generate_singbox_config(nodes: List[Node], user: User) -> dict:
     outbounds.extend(node_outbounds)
 
     config["outbounds"] = outbounds
+
+    # 3. 应用该用户的 config_override (白名单字段整体覆盖，目前 route / dns)
+    override = parse_config_override(user.config_override)
+    if override:
+        for key in ALLOWED_OVERRIDE_KEYS:
+            if key in override:
+                config[key] = override[key]
+
     return config
 
 # ------------------------------------------------------------------
@@ -531,12 +580,18 @@ def create_user(user_data: UserCreate, session: Session = Depends(get_session)):
     if user_data.node_ids:
         bound_nodes = session.exec(select(Node).where(Node.id.in_(user_data.node_ids))).all()
 
+    # 校验并规范化 config_override (合法 JSON 且仅含白名单键)
+    override_json = None
+    if user_data.config_override is not None:
+        override_json = json.dumps(parse_config_override(user_data.config_override), ensure_ascii=False)
+
     user = User(
         name=user_data.name,
         token=token,
         uuid=user_uuid,
         password=user_pwd,
         is_active=user_data.is_active,
+        config_override=override_json,
         nodes=bound_nodes
     )
     session.add(user)
@@ -550,7 +605,8 @@ def create_user(user_data: UserCreate, session: Session = Depends(get_session)):
         token=user.token,
         uuid=user.uuid,
         password=user.password,
-        node_ids=[n.id for n in user.nodes]
+        node_ids=[n.id for n in user.nodes],
+        config_override=user.config_override
     )
     return res
 
@@ -566,7 +622,8 @@ def list_users(session: Session = Depends(get_session)):
             token=u.token,
             uuid=u.uuid,
             password=u.password,
-            node_ids=[n.id for n in u.nodes]
+            node_ids=[n.id for n in u.nodes],
+            config_override=u.config_override
         ))
     return res
 
@@ -582,7 +639,8 @@ def get_user(user_id: int, session: Session = Depends(get_session)):
         token=user.token,
         uuid=user.uuid,
         password=user.password,
-        node_ids=[n.id for n in user.nodes]
+        node_ids=[n.id for n in user.nodes],
+        config_override=user.config_override
     )
 
 @app.put("/api/users/{user_id}", response_model=UserRead, dependencies=[Depends(verify_admin_token)], summary="更新用户")
@@ -604,6 +662,14 @@ def update_user(user_id: int, user_data: UserUpdate, session: Session = Depends(
             bound_nodes = session.exec(select(Node).where(Node.id.in_(node_ids))).all()
             user.nodes = bound_nodes
 
+    # 校验并规范化 config_override；传空字符串/None 表示清除覆盖
+    if "config_override" in update_dict:
+        raw = update_dict.pop("config_override")
+        override_json = None
+        if raw is not None and (raw or "").strip():
+            override_json = json.dumps(parse_config_override(raw), ensure_ascii=False)
+        update_dict["config_override"] = override_json
+
     for key, value in update_dict.items():
         setattr(user, key, value)
     
@@ -617,7 +683,8 @@ def update_user(user_id: int, user_data: UserUpdate, session: Session = Depends(
         token=user.token,
         uuid=user.uuid,
         password=user.password,
-        node_ids=[n.id for n in user.nodes]
+        node_ids=[n.id for n in user.nodes],
+        config_override=user.config_override
     )
 
 @app.delete("/api/users/{user_id}", dependencies=[Depends(verify_admin_token)], summary="删除用户")

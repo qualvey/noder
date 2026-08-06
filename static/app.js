@@ -771,6 +771,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('userForm').reset();
     document.getElementById('userId').value = '';
     document.getElementById('userRemark').value = '';
+    document.getElementById('userConfigOverride').value = '';
     if (userJsonContainer) userJsonContainer.style.display = 'none';
     document.getElementById('userToken').value = crypto.randomUUID();
     document.getElementById('userUuid').value = crypto.randomUUID();
@@ -786,6 +787,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('userId').value = user.id;
     document.getElementById('userName').value = user.name;
     document.getElementById('userRemark').value = user.remark || '';
+    document.getElementById('userConfigOverride').value = user.config_override || '';
     document.getElementById('userToken').value = user.token;
     document.getElementById('userUuid').value = user.uuid || '';
     document.getElementById('userPassword').value = user.password || '';
@@ -814,6 +816,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const payload = {
       name: document.getElementById('userName').value,
       remark: document.getElementById('userRemark').value || null,
+      config_override: (document.getElementById('userConfigOverride').value || '').trim() || null,
       token: document.getElementById('userToken').value || undefined,
       uuid: document.getElementById('userUuid').value || undefined,
       password: document.getElementById('userPassword').value || undefined,
