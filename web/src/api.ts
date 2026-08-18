@@ -69,6 +69,16 @@ export const api = {
     remove: (id: number) => request<{ message: string }>(`/api/files/${id}`, { method: 'DELETE' }),
     refresh: (id: number) => request<DistFile>(`/api/files/${id}/refresh`, { method: 'POST' }),
   },
+  settings: {
+    sharedToken: () => request<{ token: string }>('/api/settings/shared-token'),
+    resetSharedToken: () => request<{ token: string }>('/api/settings/shared-token/reset', { method: 'POST' }),
+  },
+  // 用户侧下载（无需 Admin Token）：ZIP 个性化渲染走用户 token
+  downloadZip: async (id: number, token: string): Promise<Blob> => {
+    const res = await fetch(`${apiBase()}/dl/${id}?${new URLSearchParams({ token }).toString()}`)
+    if (!res.ok) throw new ApiError(res.status, `下载失败 (${res.status})`)
+    return res.blob()
+  },
   // 用户侧订阅预览（无需 Admin Token）
   sub: async (token: string): Promise<Record<string, unknown>> => {
     const res = await fetch(`${apiBase()}/sub?token=${encodeURIComponent(token)}`)

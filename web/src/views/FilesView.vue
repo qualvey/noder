@@ -1,70 +1,88 @@
 <script setup lang="ts">
-// 文件分发：APK 静态 / ZIP 模板渲染 / text 原样；本地文件 / 远程链接 / 文本内容三选一
+// 文件分发：先选类型（普通文件 / zip / 文本），按类型展示对应输入
+// 普通文件与文本用共享 token 下载（可重置）；zip 按用户个性化渲染，在用户列表右键下载
 import { inject, onMounted, ref } from 'vue'
 import { api, apiBase } from '../api'
-import type { DistFile, User } from '../types'
+import type { DistFile } from '../types'
 import { formatFileSize } from '../utils'
 
 const toast = inject('toast') as (msg: string, type?: 'info' | 'error') => void
 const popover = inject('popover') as { show: (el: Element, title: string, cb: () => void) => void }
 
 const files = ref<DistFile[]>([])
-const users = ref<User[]>([])
 const showModal = ref(false)
-const userTokens = ref<Record<number, string>>({})
+const sharedToken = ref('')
+const fileInput = ref<HTMLInputElement | null>(null)
 
-// 上传表单
+type FileType = 'apk' | 'zip' | 'text'
 const form = ref({
-  fileType: 'auto',
+  type: 'apk' as FileType,
   templateName: '',
   name: '',
   remark: '',
   sourceUrl: '',
   contentText: '',
 })
-const fileInput = ref<HTMLInputElement | null>(null)
+
+const typeOptions: { value: FileType; label: string; desc: string }[] = [
+  { value: 'apk', label: '普通文件', desc: 'URL 或上传文件二选一' },
+  { value: 'zip', label: 'ZIP 配置包', desc: '内含 config.yaml 模板，按用户渲染' },
+  { value: 'text', label: '文本', desc: '字符串原样分发' },
+]
 
 async function fetchData() {
   try {
-    const [f, u] = await Promise.all([api.files.list(), api.users.list()])
+    const [f, s] = await Promise.all([api.files.list(), api.settings.sharedToken()])
     files.value = f
-    users.value = u
-    // 每行默认选第一个用户
-    if (!Object.keys(userTokens.value).length && u.length) {
-      const map: Record<number, string> = {}
-      for (const file of f) map[file.id] = u[0].token
-      userTokens.value = map
-    }
+    sharedToken.value = s.token
   } catch (e) {
     toast((e as Error).message, 'error')
   }
 }
 
 function openCreate() {
-  Object.assign(form.value, { fileType: 'auto', templateName: '', name: '', remark: '', sourceUrl: '', contentText: '' })
+  Object.assign(form.value, { type: 'apk', templateName: '', name: '', remark: '', sourceUrl: '', contentText: '' })
   if (fileInput.value) fileInput.value.value = ''
   showModal.value = true
+}
+
+function pickType(t: FileType) {
+  form.value.type = t
 }
 
 async function submitUpload() {
   const hasFile = fileInput.value?.files?.length
   const hasUrl = form.value.sourceUrl.trim().length > 0
   const hasContent = form.value.contentText.trim().length > 0
-  const chosen = [hasFile, hasUrl, hasContent].filter(Boolean).length
-  if (chosen === 0) {
-    toast('请选择文件、填写远程链接或输入文本内容', 'error')
-    return
-  }
-  if (chosen > 1) {
-    toast('本地文件 / 远程链接 / 文本内容只能三选一', 'error')
-    return
+
+  // 按类型约束输入来源
+  if (form.value.type === 'text') {
+    if (!hasContent) {
+      toast('文本类型需要输入字符串内容', 'error')
+      return
+    }
+  } else if (form.value.type === 'zip') {
+    if (!hasFile) {
+      toast('ZIP 类型需要上传文件', 'error')
+      return
+    }
+  } else {
+    // 普通文件：URL 或上传文件二选一
+    if (hasFile && hasUrl) {
+      toast('普通文件：URL 与上传文件只能二选一', 'error')
+      return
+    }
+    if (!hasFile && !hasUrl) {
+      toast('普通文件需要上传文件或填写 URL', 'error')
+      return
+    }
   }
 
   const fd = new FormData()
   if (hasFile) fd.append('file', fileInput.value!.files![0])
-  else if (hasUrl) fd.append('source_url', form.value.sourceUrl.trim())
-  else fd.append('content_text', form.value.contentText)
-  fd.append('file_type', form.value.fileType)
+  if (hasUrl) fd.append('source_url', form.value.sourceUrl.trim())
+  if (hasContent) fd.append('content_text', form.value.contentText)
+  fd.append('file_type', form.value.type)
   fd.append('template_name', form.value.templateName.trim())
   fd.append('name', form.value.name.trim())
   fd.append('remark', form.value.remark.trim())
@@ -79,11 +97,28 @@ async function submitUpload() {
   }
 }
 
-function copyLink(fileId: number) {
-  const token = userTokens.value[fileId] || ''
-  const url = `${location.origin}${apiBase()}/dl/${fileId}?token=${encodeURIComponent(token)}`
-  navigator.clipboard.writeText(url)
-  toast('下载链接已复制到剪贴板')
+// 普通文件/文本：复制共享 token 链接
+function copySharedLink(f: DistFile) {
+  if (!sharedToken.value) return
+  const url = `${location.origin}${apiBase()}/dl/${f.id}?token=${encodeURIComponent(sharedToken.value)}`
+  navigator.clipboard.writeText(url).then(() => toast('共享下载链接已复制'), () => toast('复制失败', 'error'))
+}
+
+async function copySharedToken() {
+  await navigator.clipboard.writeText(sharedToken.value)
+  toast('共享 Token 已复制')
+}
+
+function resetSharedToken(btn: Element) {
+  popover.show(btn, '⚠️ 重置共享 Token？旧链接将全部失效', async () => {
+    try {
+      const r = await api.settings.resetSharedToken()
+      sharedToken.value = r.token
+      toast('共享 Token 已重置，旧链接全部失效')
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+  })
 }
 
 function toggleActive(f: DistFile) {
@@ -125,10 +160,18 @@ onMounted(fetchData)
 <template>
   <section class="tab-content" style="display: block">
     <div class="section-header">
-      <div class="section-title">文件分发 (APK 全员共用 / ZIP 模板按用户个性化渲染 / text 原样分发)</div>
+      <div class="section-title">文件分发 (普通文件 / ZIP 配置包 / 文本)</div>
       <div style="display: flex; gap: 10px; align-items: center">
         <button class="btn btn-primary" @click="openCreate"><span>+</span> 上传分发文件</button>
       </div>
+    </div>
+
+    <div class="shared-token-bar">
+      <span style="font-weight: 600">🔑 共享下载 Token</span>
+      <span style="color: var(--text-muted); font-size: 0.8rem">(普通文件 / 文本文件下载鉴权，与用户 Token 独立)</span>
+      <code class="shared-token-value">{{ sharedToken }}</code>
+      <button class="btn btn-secondary btn-sm" @click="copySharedToken">复制</button>
+      <button class="btn btn-danger btn-sm" @click="resetSharedToken($event.currentTarget as Element)">重置 (旧链接失效)</button>
     </div>
 
     <div class="table-container">
@@ -142,7 +185,7 @@ onMounted(fetchData)
             <th>来源</th>
             <th>ZIP 模板文件</th>
             <th>状态</th>
-            <th>下载链接 (带用户 Token)</th>
+            <th>下载方式</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -156,7 +199,11 @@ onMounted(fetchData)
               {{ f.name }}
               <div v-if="f.remark" style="font-size: 0.72rem; color: var(--text-muted)">{{ f.remark }}</div>
             </td>
-            <td><span class="badge" :class="f.file_type === 'zip' ? 'badge-vless' : 'badge-tuic'">{{ f.file_type.toUpperCase() }}</span></td>
+            <td>
+              <span class="badge" :class="f.file_type === 'zip' ? 'badge-vless' : f.file_type === 'text' ? 'badge-anytls' : 'badge-tuic'">
+                {{ f.file_type === 'apk' ? '普通文件' : f.file_type.toUpperCase() }}
+              </span>
+            </td>
             <td>{{ formatFileSize(f.size) }}</td>
             <td>
               <span v-if="f.source_url" :title="f.source_url" style="cursor: help">🔗 远程</span>
@@ -169,12 +216,12 @@ onMounted(fetchData)
               <span v-else style="color: var(--accent-rose)">🔴 停用</span>
             </td>
             <td>
-              <div style="display: flex; gap: 6px; align-items: center">
-                <select v-model="userTokens[f.id]" style="max-width: 150px; padding: 4px 6px; border-radius: 6px; background: var(--bg-card); color: var(--text); border: 1px solid var(--border-glass); font-size: 0.75rem">
-                  <option v-for="u in users" :key="u.id" :value="u.token">{{ u.name }} ({{ u.token.slice(0, 8) }}…)</option>
-                </select>
-                <button class="btn btn-secondary btn-sm" @click="copyLink(f.id)">复制链接</button>
-              </div>
+              <template v-if="f.file_type === 'zip'">
+                <span style="font-size: 0.75rem; color: var(--text-muted)">📦 用户列表右键下载（按用户个性化）</span>
+              </template>
+              <template v-else>
+                <button class="btn btn-secondary btn-sm" @click="copySharedLink(f)">复制共享链接</button>
+              </template>
             </td>
             <td>
               <div style="display: flex; gap: 6px">
@@ -189,8 +236,8 @@ onMounted(fetchData)
     </div>
 
     <div v-pre style="margin-top: 14px; background: var(--bg-card); padding: 14px; border-radius: var(--radius-lg); border: 1px solid var(--border-glass); font-size: 0.82rem; color: var(--text-muted)">
-      <b>📄 ZIP 模板占位符：</b><code>{{uuid}}</code> <code>{{password}}</code> <code>{{token}}</code> <code>{{name}}</code> <code>{{node_list_yaml}}</code> <code>{{node_list_json}}</code> <code>{{outbounds_yaml}}</code> <code>{{outbounds_json}}</code> —
-      下载时按用户凭证实时渲染；其余文件原样分发。硬编码 token/uuid 也会自动按用户替换。未指定模板文件名时自动取 ZIP 内第一个 .yaml/.yml 文件。text 类型为死字符原样分发。
+      <b>📄 ZIP 模板占位符：</b><code>{{uuid}}</code> <code>{{password}}</code> <code>{{token}}</code> <code>{{name}}</code> <code>{{node_list_yaml}}</code> <code>{{node_list_json}}</code> <code>{{outbounds_yaml}}</code> <code>{{outbounds_json}}</code> <code>{{mihomo_proxies_yaml}}</code> —
+      下载时按用户凭证实时渲染；其余文件原样分发。硬编码 token/uuid 也会自动按用户替换。未指定模板文件名时自动取 ZIP 内第一个 .yaml/.yml 文件。文本类型为死字符原样分发。
     </div>
   </section>
 
@@ -201,43 +248,69 @@ onMounted(fetchData)
         <div class="modal-title">上传分发文件</div>
         <button class="modal-close" @click="showModal = false">&times;</button>
       </div>
-      <form @submit.prevent="submitUpload">
-        <div class="form-group">
-          <label>选择文件 (APK 或 ZIP，与远程链接/文本内容三选一)</label>
-          <input ref="fileInput" type="file" class="form-control" />
-          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px">APK：全员公用直接分发；ZIP：内含一个 yaml 模板，下载时按用户凭证渲染后再打包。</div>
+      <form @submit.prevent="submitUpload" class="modal-form">
+        <div class="form-group form-span">
+          <label>类型（先选择）</label>
+          <div class="type-segmented">
+            <button
+              v-for="opt in typeOptions"
+              :key="opt.value"
+              type="button"
+              class="type-btn"
+              :class="{ active: form.type === opt.value }"
+              @click="pickType(opt.value)"
+            >
+              <span style="font-weight: 600">{{ opt.label }}</span>
+              <span style="font-size: 0.72rem; opacity: 0.75">{{ opt.desc }}</span>
+            </button>
+          </div>
         </div>
+
+        <!-- 普通文件：URL 或文件二选一 -->
+        <template v-if="form.type === 'apk'">
+          <div class="form-group">
+            <label>上传文件 (方式一)</label>
+            <input ref="fileInput" type="file" class="form-control" />
+          </div>
+          <div class="form-group">
+            <label>远程 URL (方式二，每天自动刷新缓存)</label>
+            <input v-model="form.sourceUrl" type="url" class="form-control" placeholder="https://example.com/app.apk" />
+          </div>
+          <div class="form-group form-span" style="font-size: 0.75rem; color: var(--text-muted)">
+            ⚠️ 两种方式二选一，同时填写会拒绝。远程链接首次提交即拉取并缓存一天。
+          </div>
+        </template>
+
+        <!-- ZIP 配置包 -->
+        <template v-else-if="form.type === 'zip'">
+          <div class="form-group form-span">
+            <label>上传 ZIP 配置包（内含 config.yaml 模板）</label>
+            <input ref="fileInput" type="file" class="form-control" accept=".zip" />
+          </div>
+          <div class="form-group form-span">
+            <label>模板文件名 (留空自动识别第一个 .yaml/.yml)</label>
+            <input v-model="form.templateName" class="form-control" placeholder="如 config.yaml" />
+          </div>
+        </template>
+
+        <!-- 文本 -->
+        <template v-else>
+          <div class="form-group form-span">
+            <label>文本内容（原样分发，不做渲染）</label>
+            <textarea v-model="form.contentText" class="form-control" rows="6" style="font-family: var(--font-mono); font-size: 0.78rem"
+              placeholder="直接粘贴文本内容，所有用户下载到完全相同的内容"></textarea>
+          </div>
+        </template>
+
         <div class="form-group">
-          <label>远程链接 (可选，每天自动刷新缓存)</label>
-          <input v-model="form.sourceUrl" type="url" class="form-control" placeholder="https://example.com/app.apk" />
-          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px">填写后服务端从远程拉取并缓存一天，过期自动重新拉取；可手动「刷新」强制更新。</div>
-        </div>
-        <div class="form-group">
-          <label>文本内容 (可选，死字符原样分发)</label>
-          <textarea v-model="form.contentText" class="form-control" rows="5" style="font-family: var(--font-mono); font-size: 0.78rem"
-            placeholder="直接粘贴文本内容，原样分发给所有用户，如：&#10;token: 7df5db42-8df5-49ea-8700-a7b59d1b48d1&#10;config_file: config.json"></textarea>
-          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px">不做任何渲染/替换，所有用户下载到完全相同的内容。文件名取「显示名称」。</div>
-        </div>
-        <div class="form-group">
-          <label>文件类型</label>
-          <select v-model="form.fileType" class="form-control">
-            <option value="auto">自动识别 (按扩展名)</option>
-            <option value="apk">APK (静态分发)</option>
-            <option value="zip">ZIP (模板渲染)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>ZIP 内模板文件名 (留空自动识别第一个 .yaml/.yml)</label>
-          <input v-model="form.templateName" class="form-control" placeholder="如 config.yaml" />
-        </div>
-        <div class="form-group">
-          <label>显示名称 (留空用上传文件名)</label>
+          <label>显示名称 (留空用文件名)</label>
           <input v-model="form.name" class="form-control" placeholder="如 客户端安装包" />
         </div>
         <div class="form-group">
           <label>备注</label>
           <input v-model="form.remark" class="form-control" placeholder="如 仅供付费用户下载" />
         </div>
+
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" @click="showModal = false">取消</button>
           <button type="submit" class="btn btn-primary">上传</button>
@@ -246,3 +319,57 @@ onMounted(fetchData)
     </div>
   </div>
 </template>
+
+<style scoped>
+.shared-token-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--bg-card);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+}
+
+.shared-token-value {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--primary);
+  background: var(--bg-input);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.type-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.type-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-glass);
+  background: var(--bg-input);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.type-btn:hover {
+  border-color: var(--primary);
+}
+
+.type-btn.active {
+  border-color: var(--primary);
+  background: rgba(59, 130, 246, 0.12);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+</style>

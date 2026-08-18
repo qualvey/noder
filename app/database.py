@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import DB_PATH
-from app.models import Node, User
+from app.models import AppSetting, Node, User
 
 sqlite_url = f"sqlite:///{DB_PATH}"
 engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
@@ -51,8 +51,13 @@ def get_session():
 
 
 def seed_default_data():
-    """空库时预置演示节点与测试用户。"""
+    """空库时预置演示节点与测试用户；共享下载 token 始终确保存在。"""
     with Session(engine) as session:
+        # 共享下载 token（普通文件/文本文件鉴权；缺失时生成，管理员可重置）
+        if not session.get(AppSetting, "shared_download_token"):
+            session.add(AppSetting(key="shared_download_token", value=secrets.token_hex(16)))
+            session.commit()
+
         if session.exec(select(Node)).first():
             return
 

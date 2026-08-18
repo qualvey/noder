@@ -133,20 +133,7 @@ provide('metrics', updateMetrics)
         </div>
         <div class="metric-icon icon-user">👤</div>
       </div>
-      <div class="metric-card">
-        <div class="metric-info">
-          <h4>支持核心协议</h4>
-          <div class="value">TUIC / VLESS / AnyTLS</div>
-        </div>
-        <div class="metric-icon icon-protocol">🔒</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-info">
-          <h4>服务 API 状态</h4>
-          <div class="value" style="color: var(--accent-emerald)">运行中</div>
-        </div>
-        <div class="metric-icon icon-status">✅</div>
-      </div>
+
     </div>
 
     <div class="tab-navigation">

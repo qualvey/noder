@@ -137,6 +137,13 @@ class DistFile(DistFileBase, table=True):
     stored_name: str = Field(index=True)       # 磁盘存储文件名 (uuid_原名)
 
 
+class AppSetting(SQLModel, table=True):
+    """键值设置表（共享下载 token 等）。"""
+    __table_args__ = {"extend_existing": True}
+    key: str = Field(primary_key=True)
+    value: str = Field(default="")
+
+
 class DistFileUpdate(SQLModel):
     name: Optional[str] = None
     template_name: Optional[str] = None

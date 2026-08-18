@@ -8,6 +8,7 @@ export interface ContextMenuItem {
   label: string
   icon?: string
   danger?: boolean
+  divider?: boolean
   onClick: () => void
 }
 
@@ -81,17 +82,19 @@ onUnmounted(() => {
     @contextmenu.prevent
   >
     <div v-if="title" class="context-menu-title">{{ title }}</div>
-    <button
-      v-for="item in items"
-      :key="item.label"
-      type="button"
-      class="context-menu-item"
-      :class="{ danger: item.danger }"
-      @click="item.onClick()"
-    >
-      <span v-if="item.icon" class="context-menu-icon">{{ item.icon }}</span>
-      {{ item.label }}
-    </button>
+    <template v-for="item in items" :key="item.label">
+      <div v-if="item.divider" class="context-menu-divider"></div>
+      <button
+        v-else
+        type="button"
+        class="context-menu-item"
+        :class="{ danger: item.danger }"
+        @click="item.onClick()"
+      >
+        <span v-if="item.icon" class="context-menu-icon">{{ item.icon }}</span>
+        {{ item.label }}
+      </button>
+    </template>
   </div>
 </template>
 
@@ -117,6 +120,12 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: var(--border-glass);
+  margin: 4px 6px;
 }
 
 .context-menu-item {

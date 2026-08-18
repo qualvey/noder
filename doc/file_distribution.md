@@ -19,14 +19,14 @@
                     └── ZIP ──> 校验 zip 完整性，确定模板文件
                                 (显式指定 或 自动取第一个 .yaml/.yml)
 
-用户下载 ──> GET /dl/{file_id}?token={USER_TOKEN}
+用户下载 ──> GET /dl/{file_id}?token={TOKEN}
                 │
-                ├── APK：原文件直出 (Content-Disposition: attachment)
+                ├── APK/文本：共享下载 Token 鉴权，原样直出
                 │
-                └── ZIP：内存中解包 -> 渲染模板文件 -> 重新打包 -> 返回
+                └── ZIP：用户 Token 鉴权，内存中解包 -> 渲染模板 -> 重新打包
 ```
 
-- 鉴权复用用户 `token`（与 `/sub` 同一套），无效/停用 token → 401。
+- 鉴权分流：**ZIP 用用户 token**（个性化渲染）；**普通文件(apk)/文本(text) 用共享下载 token**（文件分发页可查看/重置，重置后旧值立即失效）。无效 token → 401。
 - 文件启用状态 `is_active=False` 时 → 404（不暴露存在性）。
 - 模板渲染在内存完成（`render_zip_for_user`），磁盘上的原始 ZIP 永不被修改。
 
@@ -79,7 +79,9 @@
 
 | 方法 | 路径 | 说明 |
 | :--- | :--- | :--- |
-| GET | `/dl/{file_id}?token=***` | APK：原文件直出；ZIP：渲染模板后返回 |
+| GET | `/dl/{file_id}?token=TOKEN` | ZIP：用户 Token，渲染模板后返回；APK/文本：共享 Token，原样直出 |
+| GET | `/api/settings/shared-token` | 查看共享下载 Token（管理员） |
+| POST | `/api/settings/shared-token/reset` | 重置共享下载 Token，旧值立即失效（管理员） |
 
 ## 5. 模板渲染引擎
 

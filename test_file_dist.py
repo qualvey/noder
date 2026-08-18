@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 文件分发功能集成测试：
-1. 上传 APK (静态分发) -> 下载校验原样返回
+1. 上传 APK (静态分发) -> 下载校验原样返回 (共享 token 鉴权)
 2. 上传 ZIP (含 yaml 模板 + 公共文件) -> 下载校验模板按用户渲染、公共文件原样
 3. 无效 token / 停用文件 的拒绝逻辑
+4. 共享 token 重置：旧 token 失效、新 token 可用
 运行: uv run python test_file_dist.py
 """
 import io
@@ -80,6 +81,13 @@ def main():
     user = r.json()
     token = user["token"]
 
+    # 共享下载 token (普通文件/文本文件鉴权，与用户 token 独立)
+    r = client.get("/api/settings/shared-token", headers=ADMIN)
+    assert r.status_code == 200, r.text
+    shared = r.json()["token"]
+    assert len(shared) >= 16
+    print(f"OK: shared download token: {shared[:8]}...")
+
     # 第二个用户：其 token 将被硬编码进模板，验证自动替换
     r = client.post("/api/users", headers=ADMIN, json={
         "name": "测试用户乙", "uuid": "99999999-8888-7777-6666-555555555555",
@@ -99,10 +107,23 @@ def main():
     check("类型识别为 apk", apk_file["file_type"] == "apk")
     check("大小记录正确", apk_file["size"] == len(apk_bytes))
 
-    r = client.get(f"/dl/{apk_file['id']}", params={"token": token})
+    r = client.get(f"/dl/{apk_file['id']}", params={"token": shared})
     check("APK 下载 200", r.status_code == 200)
     check("APK 内容原样", r.content == apk_bytes)
     check("APK Content-Disposition 附件", "attachment" in r.headers.get("content-disposition", ""))
+
+    print("== 1.5 共享 token 重置 ==")
+    r = client.post("/api/settings/shared-token/reset", headers=ADMIN)
+    assert r.status_code == 200, r.text
+    new_shared = r.json()["token"]
+    assert new_shared != shared
+    # 旧 token 立即失效
+    r = client.get(f"/dl/{apk_file['id']}", params={"token": shared})
+    check("重置后旧 token 拒绝 401", r.status_code == 401, r.text)
+    # 新 token 可用
+    r = client.get(f"/dl/{apk_file['id']}", params={"token": new_shared})
+    check("重置后新 token 可下载 200", r.status_code == 200, r.text)
+    shared = new_shared
 
     print("== 2. ZIP 模板个性化渲染 ==")
     template = """# 用户专属配置
@@ -193,7 +214,7 @@ sing_box_bin: "./sing-box.exe"
     check("source_url 已记录", remote_file["source_url"] == remote_url)
     check("cached_at 已写入", remote_file["cached_at"] is not None)
 
-    r = client.get(f"/dl/{remote_file['id']}", params={"token": token})
+    r = client.get(f"/dl/{remote_file['id']}", params={"token": shared})
     check("远程文件下载 200", r.status_code == 200)
     check("远程文件内容正确", r.content == remote_apk)
 
@@ -202,7 +223,7 @@ sing_box_bin: "./sing-box.exe"
         f.write(b"REMOTE-APK-V3-BYTES" * 50)
     r = client.post(f"/api/files/{remote_file['id']}/refresh", headers=ADMIN)
     check("强制刷新 200", r.status_code == 200, r.text)
-    r = client.get(f"/dl/{remote_file['id']}", params={"token": token})
+    r = client.get(f"/dl/{remote_file['id']}", params={"token": shared})
     check("刷新后内容为最新", r.content == b"REMOTE-APK-V3-BYTES" * 50)
 
     # 无效 scheme 拒绝
@@ -221,7 +242,7 @@ sing_box_bin: "./sing-box.exe"
     check("文件名保留指定后缀", text_file["original_name"] == "launcher.conf", text_file["original_name"])
     check("文本模式无 source_url", text_file["source_url"] is None)
 
-    r = client.get(f"/dl/{text_file['id']}", params={"token": token})
+    r = client.get(f"/dl/{text_file['id']}", params={"token": shared})
     check("文本下载 200", r.status_code == 200)
     body = r.content.decode("utf-8")
     check("占位符原样保留不渲染", 'token: "{{token}}"', body)
@@ -236,7 +257,7 @@ sing_box_bin: "./sing-box.exe"
     })
     assert r.status_code == 200, r.text
     text_file2 = r.json()
-    r = client.get(f"/dl/{text_file2['id']}", params={"token": token})
+    r = client.get(f"/dl/{text_file2['id']}", params={"token": shared})
     body2 = r.content.decode("utf-8")
     check("文本模式硬编码 token 原样保留", f"token: \"{token_b}\"" in body2, body2)
     check("未替换为下载者 token", f"token: \"{token}\"" not in body2)
@@ -249,7 +270,7 @@ sing_box_bin: "./sing-box.exe"
 
     r = client.put(f"/api/files/{apk_file['id']}", headers=ADMIN, json={"is_active": False})
     check("停用文件成功", r.status_code == 200)
-    r = client.get(f"/dl/{apk_file['id']}", params={"token": token})
+    r = client.get(f"/dl/{apk_file['id']}", params={"token": shared})
     check("停用后下载 404", r.status_code == 404)
 
     r = client.get("/api/files", headers=ADMIN)

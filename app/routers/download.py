@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""用户侧下载 API：APK 直出 / ZIP 按用户渲染模板 / text 原样分发。"""
+"""用户侧下载 API：ZIP 按用户渲染模板；普通文件/文本走共享 token 原样分发。"""
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, Response
 from sqlmodel import Session, select
@@ -7,21 +9,29 @@ from sqlmodel import Session, select
 from app.config import FILES_DIR
 from app.database import get_session
 from app.models import DistFile, User
+from app.routers.settings import get_or_create_shared_token
 from app.services.dist import is_remote_cache_expired, refresh_remote_file
 from app.services.template_render import render_zip_for_user
 
 router = APIRouter(tags=["download"])
 
 
-@router.get("/dl/{file_id}", summary="下载分发文件 (APK 直出 / ZIP 按用户渲染模板 / text 原样)")
-def download_dist_file(file_id: int, token: str = Query(..., description="用户鉴权 Token"), session: Session = Depends(get_session)):
-    user = session.exec(select(User).where(User.token == token)).first()
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or inactive user token")
-
+@router.get("/dl/{file_id}", summary="下载分发文件 (ZIP 按用户渲染 / 普通文件与文本走共享 token)")
+def download_dist_file(file_id: int, token: str = Query(..., description="鉴权 Token：ZIP 用用户 Token，普通文件/文本用共享 Token"), session: Session = Depends(get_session)):
     dist = session.get(DistFile, file_id)
     if not dist or not dist.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or disabled")
+
+    # 鉴权分流：ZIP 个性化渲染走用户 token；普通文件/文本走共享 token
+    user = None
+    if dist.file_type == "zip":
+        user = session.exec(select(User).where(User.token == token)).first()
+        if not user or not user.is_active:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or inactive user token")
+    else:
+        shared = get_or_create_shared_token(session)
+        if not token or not secrets.compare_digest(token, shared):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid shared download token")
 
     stored_path = FILES_DIR / dist.stored_name
     if not stored_path.exists():
