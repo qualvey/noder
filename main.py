@@ -1,17 +1,21 @@
 from contextlib import asynccontextmanager
+from datetime import datetime
+import io
 import json
 import os
 from pathlib import Path
 import secrets
 from typing import List, Optional
 import uuid as uuid_lib
+import zipfile
 
-from fastapi import FastAPI, Depends, HTTPException, Header, Query, status
+from fastapi import FastAPI, Depends, HTTPException, Header, Query, status, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Field, Relationship, Session, SQLModel, create_engine, select
 import uvicorn
+import yaml
 
 # ------------------------------------------------------------------
 # 1. 数据库与模板文件路径配置
@@ -31,6 +35,17 @@ ALLOWED_PROTOCOLS = {"tuic", "vless", "anytls"}
 # 允许用户通过 config_override 覆盖的顶层配置键
 # 目前限制 route / dns，后期扩展只需往此集合添加键名
 ALLOWED_OVERRIDE_KEYS = {"route", "dns"}
+
+# 分发文件存储目录与限制
+FILES_DIR = BASE_DIR / "data" / "files"
+ALLOWED_FILE_TYPES = {"apk", "zip"}
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+
+# 模板渲染支持的占位符说明 (见 doc/file_distribution.md)
+TEMPLATE_VAR_DOC = (
+    "{{uuid}} {{password}} {{token}} {{name}} {{user_name}} "
+    "{{node_list_yaml}} {{node_list_json}} {{outbounds_yaml}} {{outbounds_json}}"
+)
 
 # ------------------------------------------------------------------
 # 2. SQLModel 数据库模型与 Pydantic Schema
@@ -125,6 +140,27 @@ class UserUpdate(SQLModel):
     remark: Optional[str] = None
     config_override: Optional[str] = None
     node_ids: Optional[List[int]] = None
+
+class DistFileBase(SQLModel):
+    name: str                                  # 显示名称
+    file_type: str = "apk"                     # apk | zip
+    template_name: Optional[str] = None         # ZIP 内模板文件相对路径 (仅 zip 使用)
+    original_name: str = ""                    # 原始上传文件名 (下载时还原)
+    size: int = 0                              # 字节数
+    is_active: bool = True                     # 是否允许下载
+    remark: Optional[str] = None               # 管理员备注
+    created_at: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+class DistFile(DistFileBase, table=True):
+    __table_args__ = {"extend_existing": True}
+    id: Optional[int] = Field(default=None, primary_key=True)
+    stored_name: str = Field(index=True)       # 磁盘存储文件名 (uuid_原名)
+
+class DistFileUpdate(SQLModel):
+    name: Optional[str] = None
+    template_name: Optional[str] = None
+    is_active: Optional[bool] = None
+    remark: Optional[str] = None
 
 # 辅助校验函数
 def validate_node_protocol_and_security(protocol: str, security: Optional[str], public_key: Optional[str] = None, short_id: Optional[str] = None):
@@ -286,7 +322,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Sing-Box Subscription Middleman",
     description="支持多协议节点与动态 Sing-Box 多节点订阅导出的中间件管理服务",
-    version="0.5.0",
+    version="0.6.0",
     lifespan=lifespan
 )
 
@@ -441,6 +477,61 @@ def generate_singbox_config(nodes: List[Node], user: User) -> dict:
                 config[key] = override[key]
 
     return config
+
+# ------------------------------------------------------------------
+# 5.1 文件分发：模板渲染引擎 (APK 静态分发 / ZIP 模板个性化渲染)
+# ------------------------------------------------------------------
+def build_template_context(user: User) -> dict:
+    """构建模板占位符 -> 渲染值映射。未知占位符原样保留。"""
+    nodes = [n for n in (user.nodes or []) if n.is_active]
+    node_meta = [
+        {
+            "node_name": n.node_name,
+            "protocol": n.protocol,
+            "server": n.server_address,
+            "server_port": n.server_port,
+        }
+        for n in nodes
+    ]
+    outbounds = [build_singbox_outbound(n, user) for n in nodes]
+
+    def _yaml(obj) -> str:
+        return yaml.safe_dump(obj, allow_unicode=True, sort_keys=False, default_flow_style=False).rstrip()
+
+    return {
+        "uuid": user.uuid or "",
+        "password": user.password or "",
+        "token": user.token,
+        "name": user.name,
+        "user_name": user.name,
+        "node_list_yaml": _yaml(node_meta),
+        "node_list_json": json.dumps(node_meta, ensure_ascii=False, indent=2),
+        "outbounds_yaml": _yaml(outbounds),
+        "outbounds_json": json.dumps(outbounds, ensure_ascii=False, indent=2),
+    }
+
+def render_template_text(text: str, user: User) -> str:
+    """将模板文本中的 {{占位符}} 替换为用户专属内容。"""
+    ctx = build_template_context(user)
+    for key, value in ctx.items():
+        text = text.replace("{{" + key + "}}", str(value))
+    return text
+
+def render_zip_for_user(zip_path: Path, template_name: Optional[str], user: User) -> bytes:
+    """读取 ZIP，渲染模板文件，其余文件原样，重新打包返回 bytes。"""
+    target = Path(template_name).name if template_name else None
+    output = io.BytesIO()
+    with zipfile.ZipFile(zip_path, "r") as zin, zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if target and Path(item.filename).name == target:
+                try:
+                    data = render_template_text(data.decode("utf-8"), user).encode("utf-8")
+                except UnicodeDecodeError:
+                    pass  # 非文本模板文件，保持原样
+            zout.writestr(item, data)
+    output.seek(0)
+    return output.getvalue()
 
 # ------------------------------------------------------------------
 # 6. 用户侧核心 API (Token 验证与多节点导出)
@@ -696,6 +787,132 @@ def delete_user(user_id: int, session: Session = Depends(get_session)):
     session.delete(user)
     session.commit()
     return {"message": f"User {user_id} deleted successfully"}
+
+# ------------------------------------------------------------------
+# 8.1 管理员 CRUD API - 分发文件管理 (/api/files)
+# ------------------------------------------------------------------
+@app.post("/api/files", response_model=DistFile, dependencies=[Depends(verify_admin_token)], summary="上传分发文件 (APK / ZIP)")
+async def create_dist_file(
+    file: UploadFile = File(...),
+    file_type: str = Form("auto"),
+    template_name: Optional[str] = Form(None),
+    name: Optional[str] = Form(None),
+    remark: Optional[str] = Form(None),
+    session: Session = Depends(get_session),
+):
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上传文件为空")
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"文件过大，最大支持 {MAX_FILE_SIZE // (1024 * 1024)}MB")
+
+    # 类型判定：auto 时按扩展名推断
+    if file_type in ("auto", "", None):
+        ext = Path(file.filename or "").suffix.lower().lstrip(".")
+        file_type = "zip" if ext == "zip" else "apk"
+    if file_type not in ALLOWED_FILE_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"不支持的文件类型 '{file_type}'，仅支持 apk / zip")
+
+    original_name = Path(file.filename or f"file.{file_type}").name
+
+    # ZIP 校验 + 模板文件确定
+    if file_type == "zip":
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                names = zf.namelist()
+                bad = zf.testzip()
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的 ZIP 文件")
+        if bad:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"ZIP 文件损坏: {bad}")
+        if not template_name:
+            yaml_names = [n for n in names if n.lower().endswith((".yaml", ".yml"))]
+            if not yaml_names:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ZIP 内未找到 .yaml/.yml 模板，请指定模板文件名")
+            template_name = yaml_names[0]
+        elif not any(Path(n).name == Path(template_name).name for n in names):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"ZIP 中不存在模板文件: {template_name}")
+
+    # 落盘存储
+    FILES_DIR.mkdir(parents=True, exist_ok=True)
+    stored_name = f"{uuid_lib.uuid4().hex}_{original_name}"
+    (FILES_DIR / stored_name).write_bytes(content)
+
+    dist = DistFile(
+        name=name or original_name,
+        file_type=file_type,
+        template_name=template_name,
+        original_name=original_name,
+        stored_name=stored_name,
+        size=len(content),
+        is_active=True,
+        remark=remark or None,
+    )
+    session.add(dist)
+    session.commit()
+    session.refresh(dist)
+    return dist
+
+@app.get("/api/files", response_model=List[DistFile], dependencies=[Depends(verify_admin_token)], summary="获取分发文件列表")
+def list_dist_files(session: Session = Depends(get_session)):
+    return session.exec(select(DistFile).order_by(DistFile.id.desc())).all()
+
+@app.put("/api/files/{file_id}", response_model=DistFile, dependencies=[Depends(verify_admin_token)], summary="更新分发文件元数据")
+def update_dist_file(file_id: int, file_data: DistFileUpdate, session: Session = Depends(get_session)):
+    dist = session.get(DistFile, file_id)
+    if not dist:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    update_dict = file_data.model_dump(exclude_unset=True)
+    for key, value in update_dict.items():
+        setattr(dist, key, value)
+    session.add(dist)
+    session.commit()
+    session.refresh(dist)
+    return dist
+
+@app.delete("/api/files/{file_id}", dependencies=[Depends(verify_admin_token)], summary="删除分发文件")
+def delete_dist_file(file_id: int, session: Session = Depends(get_session)):
+    dist = session.get(DistFile, file_id)
+    if not dist:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    stored_path = FILES_DIR / dist.stored_name
+    if stored_path.exists():
+        stored_path.unlink()
+    session.delete(dist)
+    session.commit()
+    return {"message": f"File {file_id} deleted successfully"}
+
+# ------------------------------------------------------------------
+# 8.2 用户侧下载 API (Token 鉴权)
+# ------------------------------------------------------------------
+@app.get("/dl/{file_id}", summary="下载分发文件 (APK 直出 / ZIP 按用户渲染模板)")
+def download_dist_file(file_id: int, token: str = Query(..., description="用户鉴权 Token"), session: Session = Depends(get_session)):
+    user = session.exec(select(User).where(User.token == token)).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or inactive user token")
+
+    dist = session.get(DistFile, file_id)
+    if not dist or not dist.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or disabled")
+
+    stored_path = FILES_DIR / dist.stored_name
+    if not stored_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File data missing on disk")
+
+    if dist.file_type == "zip":
+        data = render_zip_for_user(stored_path, dist.template_name, user)
+        return Response(
+            content=data,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{dist.original_name}"'},
+        )
+
+    # APK 静态分发
+    return FileResponse(
+        stored_path,
+        media_type="application/vnd.android.package-archive",
+        filename=dist.original_name,
+    )
 
 # ------------------------------------------------------------------
 # 9. 直接运行服务入口

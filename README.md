@@ -115,6 +115,11 @@ python main.py
 ### 3. 用户 Token 验证与数据查询 API (用户侧/中间件侧)
 - **请求方法**：`GET /api/user/verify?token={USER_TOKEN}`
 - **说明**：验证 Token 是否有效，并返回绑定节点的基础信息与组装后的 Sing-Box 配置 JSON。
+### 4. 文件分发 API (用户侧 / 管理侧)
+- **用户下载 (Token 鉴权)**：GET /dl/{file_id}?token={USER_TOKEN}
+  - APK：全员公用，原文件直出下载。
+  - ZIP：内含 1 个 yaml 模板（支持 \{{uuid}}\ \{{password}}\ \{{token}}\ \{{name}}\ \{{node_list_yaml}}\ \{{node_list_json}}\ \{{outbounds_yaml}}\ \{{outbounds_json}}\ 占位符），下载时按用户凭证实时渲染，其余文件原样分发。
+- **管理端 (Header: \X-Admin-Token\)**：\POST/GET/PUT/DELETE /api/files\ 上传、列表、更新元数据、删除分发文件。
 
 ### 3. 管理员 API (需要 Header: `X-Admin-Token`)
 - **节点管理 (`/api/nodes`)**：

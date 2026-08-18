@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let adminToken = localStorage.getItem('admin_token') || 'admin-secret';
   let nodesCache = [];
   let usersCache = [];
+  let filesCache = [];
 
   // --- DOM 元素定义 ---
   const adminTokenInput = document.getElementById('adminTokenInput');
@@ -18,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
   
   const nodesContainer = document.getElementById('nodesContainer');
   const usersTableBody = document.getElementById('usersTableBody');
+  const filesTableBody = document.getElementById('filesTableBody');
   const userNodesCheckboxes = document.getElementById('userNodesCheckboxes');
   
   const toastContainer = document.getElementById('toastContainer');
@@ -43,7 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function apiFetch(url, options = {}) {
     options.headers = options.headers || {};
     options.headers['X-Admin-Token'] = adminToken;
-    if (options.body && typeof options.body === 'object') {
+    if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
       options.headers['Content-Type'] = 'application/json';
       options.body = JSON.stringify(options.body);
     }
@@ -176,7 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 点击空白处隐去 Popover
   document.addEventListener('click', (e) => {
     if (deleteConfirmPopover && deleteConfirmPopover.classList.contains('active')) {
-      if (!deleteConfirmPopover.contains(e.target) && !e.target.closest('.delete-node-btn') && !e.target.closest('.delete-user-btn') && !e.target.closest('#bulkDeleteNodesBtn') && !e.target.closest('#bulkDeleteUsersBtn')) {
+      if (!deleteConfirmPopover.contains(e.target) && !e.target.closest('.delete-node-btn') && !e.target.closest('.delete-user-btn') && !e.target.closest('.delete-file-btn') && !e.target.closest('#bulkDeleteNodesBtn') && !e.target.closest('#bulkDeleteUsersBtn')) {
         hideDeletePopover();
       }
     }
@@ -846,6 +848,112 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {}
   }
 
+  // --- 文件分发：加载与渲染 ---
+  function escapeHtml(str) {
+    return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function formatFileSize(bytes) {
+    if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return bytes + ' B';
+  }
+
+  async function fetchFiles() {
+    try {
+      filesCache = await apiFetch('/api/files');
+      renderFiles(filesCache);
+    } catch (err) {}
+  }
+
+  function renderFiles(files) {
+    if (!files || files.length === 0) {
+      filesTableBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">暂无分发文件，点击右上角上传</td></tr>`;
+      return;
+    }
+    const userOptions = usersCache.map(u => `<option value="${u.token}">${escapeHtml(u.name)} (${u.token.slice(0, 8)}…)</option>`).join('');
+    filesTableBody.innerHTML = files.map(f => `
+      <tr>
+        <td>${f.id}</td>
+        <td>${escapeHtml(f.name)}${f.remark ? `<div style="font-size:0.72rem;color:var(--text-muted);">${escapeHtml(f.remark)}</div>` : ''}</td>
+        <td><span class="badge badge-${f.file_type === 'zip' ? 'vless' : 'tuic'}">${f.file_type.toUpperCase()}</span></td>
+        <td>${formatFileSize(f.size)}</td>
+        <td>${f.file_type === 'zip' ? (f.template_name || '-') : '-'}</td>
+        <td>${f.is_active ? '<span style="color:var(--accent-emerald);">🟢 启用</span>' : '<span style="color:var(--accent-rose);">🔴 停用</span>'}</td>
+        <td>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <select class="file-user-select" data-id="${f.id}" style="max-width:150px; padding:4px 6px; border-radius:6px; background:var(--bg-card); color:var(--text); border:1px solid var(--border-glass); font-size:0.75rem;">
+              ${userOptions}
+            </select>
+            <button class="btn btn-secondary btn-sm copy-file-link-btn" data-id="${f.id}">复制链接</button>
+          </div>
+        </td>
+        <td>
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-secondary btn-sm toggle-file-btn" data-id="${f.id}">${f.is_active ? '停用' : '启用'}</button>
+            <button class="btn btn-danger btn-sm delete-file-btn" data-id="${f.id}">删除</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  // 文件列表行内操作 (事件委托)
+  if (filesTableBody) {
+    filesTableBody.addEventListener('click', (e) => {
+      const copyBtn = e.target.closest('.copy-file-link-btn');
+      const toggleBtn = e.target.closest('.toggle-file-btn');
+      const deleteBtn = e.target.closest('.delete-file-btn');
+
+      if (copyBtn) {
+        const id = copyBtn.dataset.id;
+        const sel = filesTableBody.querySelector(`.file-user-select[data-id="${id}"]`);
+        const token = sel ? sel.value : '';
+        const url = `${location.origin}/dl/${id}?token=${token}`;
+        navigator.clipboard.writeText(url);
+        showToast('下载链接已复制到剪贴板');
+      } else if (toggleBtn) {
+        const file = filesCache.find(f => f.id == toggleBtn.dataset.id);
+        if (!file) return;
+        apiFetch(`/api/files/${file.id}`, { method: 'PUT', body: { is_active: !file.is_active } })
+          .then(() => { showToast(file.is_active ? '文件已停用' : '文件已启用'); fetchFiles(); })
+          .catch(() => {});
+      } else if (deleteBtn) {
+        showDeletePopover(deleteBtn, '⚠️ 确定删除该分发文件？(磁盘文件一并删除)', async () => {
+          try {
+            await apiFetch(`/api/files/${deleteBtn.dataset.id}`, { method: 'DELETE' });
+            showToast('分发文件已删除');
+            fetchFiles();
+          } catch (err) {}
+        });
+      }
+    });
+  }
+
+  // 上传分发文件
+  document.getElementById('openAddFileModalBtn').addEventListener('click', () => {
+    document.getElementById('fileForm').reset();
+    openModal('fileModal');
+  });
+
+  document.getElementById('fileForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fileInput = document.getElementById('fileInput');
+    if (!fileInput.files.length) return;
+    const fd = new FormData();
+    fd.append('file', fileInput.files[0]);
+    fd.append('file_type', document.getElementById('fileType').value);
+    fd.append('template_name', document.getElementById('fileTemplateName').value.trim());
+    fd.append('name', document.getElementById('fileName').value.trim());
+    fd.append('remark', document.getElementById('fileRemark').value.trim());
+    try {
+      await apiFetch('/api/files', { method: 'POST', body: fd });
+      showToast('分发文件上传成功');
+      closeModal('fileModal');
+      fetchFiles();
+    } catch (err) {}
+  });
+
   // --- 预览 Sing-Box 订阅配置 ---
   async function previewSubscriptionJson(token) {
     const jsonViewer = document.getElementById('configJsonViewer');
@@ -872,6 +980,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function loadDashboardData() {
     await fetchNodes();
     await fetchUsers();
+    await fetchFiles();
   }
 
   loadDashboardData();

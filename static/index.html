@@ -68,6 +68,7 @@
     <div class="tab-navigation">
       <button class="tab-btn active" data-tab="nodes">节点管理 (Nodes)</button>
       <button class="tab-btn" data-tab="users">用户管理 (Users)</button>
+      <button class="tab-btn" data-tab="files">文件分发 (Files)</button>
       <button class="tab-btn" data-tab="help">使用指引与 API</button>
     </div>
 
@@ -125,6 +126,40 @@
             <!-- 动态由 JavaScript 渲染 -->
           </tbody>
         </table>
+      </div>
+    </section>
+
+    <!-- 4. 文件分发 Tab Content -->
+    <section id="tab-files" class="tab-content" style="display: none;">
+      <div class="section-header">
+        <div class="section-title">文件分发 (APK 全员共用 / ZIP 模板按用户个性化渲染)</div>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <button class="btn btn-primary" id="openAddFileModalBtn">
+            <span>+</span> 上传分发文件
+          </button>
+        </div>
+      </div>
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>名称</th>
+              <th>类型</th>
+              <th>大小</th>
+              <th>ZIP 模板文件</th>
+              <th>状态</th>
+              <th>下载链接 (带用户 Token)</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="filesTableBody">
+            <!-- 动态由 JavaScript 渲染 -->
+          </tbody>
+        </table>
+      </div>
+      <div style="margin-top: 14px; background: var(--bg-card); padding: 14px; border-radius: var(--radius-lg); border: 1px solid var(--border-glass); font-size: 0.82rem; color: var(--text-muted);">
+        <b>📄 ZIP 模板占位符：</b><code>{{uuid}}</code> <code>{{password}}</code> <code>{{token}}</code> <code>{{name}}</code> <code>{{node_list_yaml}}</code> <code>{{node_list_json}}</code> <code>{{outbounds_yaml}}</code> <code>{{outbounds_json}}</code> — 下载时按用户凭证实时渲染；其余文件原样分发。未指定模板文件名时自动取 ZIP 内第一个 .yaml/.yml 文件。
       </div>
     </section>
 
@@ -323,6 +358,48 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary closeModalBtn">取消</button>
           <button type="submit" class="btn btn-primary">保存用户</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 分发文件上传 Modal -->
+  <div class="modal-overlay" id="fileModal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title" id="fileModalTitle">上传分发文件</div>
+        <button class="modal-close closeModalBtn">&times;</button>
+      </div>
+      <form id="fileForm">
+        <input type="hidden" id="fileId">
+        <div class="form-group">
+          <label>选择文件 (APK 或 ZIP)</label>
+          <input type="file" id="fileInput" class="form-control" required>
+          <div style="font-size:0.72rem; color:var(--text-muted); margin-top:4px;">APK：全员公用直接分发；ZIP：内含一个 yaml 模板，下载时按用户凭证渲染后再打包。</div>
+        </div>
+        <div class="form-group">
+          <label for="fileType">文件类型</label>
+          <select id="fileType" class="form-control">
+            <option value="auto">自动识别 (按扩展名)</option>
+            <option value="apk">APK (静态分发)</option>
+            <option value="zip">ZIP (模板渲染)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="fileTemplateName">ZIP 内模板文件名 (留空自动识别第一个 .yaml/.yml)</label>
+          <input type="text" id="fileTemplateName" class="form-control" placeholder="如 config.yaml">
+        </div>
+        <div class="form-group">
+          <label for="fileName">显示名称 (留空用上传文件名)</label>
+          <input type="text" id="fileName" class="form-control" placeholder="如 客户端安装包">
+        </div>
+        <div class="form-group">
+          <label for="fileRemark">备注</label>
+          <input type="text" id="fileRemark" class="form-control" placeholder="如 仅供付费用户下载">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary closeModalBtn">取消</button>
+          <button type="submit" class="btn btn-primary">上传</button>
         </div>
       </form>
     </div>
