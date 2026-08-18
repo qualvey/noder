@@ -1,3 +1,43 @@
+/* 固定滚动条槽位：Tab/内容切换时滚动条出现/消失不再引起宽度跳变 */
+html {
+  scrollbar-gutter: stable;
+}
+
+/* 不支持 scrollbar-gutter 的旧浏览器：强制常驻滚动条，宁可不消失也不跳变 */
+@supports not (scrollbar-gutter: stable) {
+  html {
+    overflow-y: scroll;
+  }
+}
+
+/* 滚动条主题（深色，窄条） */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
 :root {
   --bg-dark: #0f172a;
   --bg-card: rgba(30, 41, 59, 0.7);
