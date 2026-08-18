@@ -69,6 +69,15 @@ def main():
     user = r.json()
     token = user["token"]
 
+    # 第二个用户：其 token 将被硬编码进模板，验证自动替换
+    r = client.post("/api/users", headers=ADMIN, json={
+        "name": "测试用户乙", "uuid": "99999999-8888-7777-6666-555555555555",
+        "password": "test-pass-2", "node_ids": []
+    })
+    assert r.status_code == 200, r.text
+    user_b = r.json()
+    token_b = user_b["token"]
+
     print("== 1. APK 静态分发 ==")
     apk_bytes = b"META-INF/MANIFEST.MF fake apk content" * 100
     r = client.post("/api/files", headers=ADMIN, files={
@@ -119,6 +128,29 @@ outbounds:
     check("公共文件原样", logo == b"\x89PNG-fake-binary-content")
     check("文本公共文件原样", readme == "这是公共说明文件，所有用户一致。")
 
+    print("== 2.1 硬编码 token 自动替换 ==")
+    hardcoded_template = f"""# launcher config
+upstream_url: "https://hk.ryugo.org/sub?token={token_b}"
+token: "{token_b}"
+config_file: "config.json"
+sing_box_bin: "./sing-box.exe"
+"""
+    zip2 = make_test_zip(hardcoded_template)
+    r = client.post("/api/files", headers=ADMIN, files={
+        "file": ("launcher.zip", io.BytesIO(zip2), "application/zip")
+    }, data={"file_type": "zip"})
+    check("上传含硬编码 token 的 ZIP 成功", r.status_code == 200, r.text)
+    zip2_file = r.json()
+
+    r = client.get(f"/dl/{zip2_file['id']}", params={"token": token})
+    check("硬编码模板下载 200", r.status_code == 200, r.text[:200])
+    with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+        rendered2 = zf.read("config/template.yaml").decode("utf-8")
+    check("token 键值替换为用户甲 token", f'token: "{token}"' in rendered2, rendered2)
+    check("URL 内 token 同步替换", f"sub?token={token}" in rendered2, rendered2)
+    check("用户乙 token 不再出现", token_b not in rendered2)
+    check("公共字段未受影响", 'sing_box_bin: "./sing-box.exe"' in rendered2)
+
     print("== 3. 权限与状态控制 ==")
     r = client.get(f"/dl/{apk_file['id']}", params={"token": "wrong-token"})
     check("无效 token 拒绝 401", r.status_code == 401)
@@ -129,7 +161,7 @@ outbounds:
     check("停用后下载 404", r.status_code == 404)
 
     r = client.get("/api/files", headers=ADMIN)
-    check("文件列表 2 条", len(r.json()) == 2)
+    check("文件列表 3 条", len(r.json()) == 3)
     check("管理 API 无 token 拒绝", client.get("/api/files").status_code == 401)
 
     r = client.delete(f"/api/files/{apk_file['id']}", headers=ADMIN)

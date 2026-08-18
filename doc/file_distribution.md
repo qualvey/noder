@@ -85,6 +85,9 @@
 | `{{outbounds_json}}` | 同上 JSON 数组 |
 
 - 未知占位符**原样保留**，不误伤模板中其他 `{{ }}` 内容。
+- **硬编码凭证智能替换**（无需改模板）：
+  1. 键名感知：模板中 `token:`/`uuid:`/`password:` 键后的 UUID 格式硬编码值，自动替换为该用户的对应凭证（兼容 yaml `token: "..."` 与 json `"token": "..."` 写法）；
+  2. 兜底：任何等于**已知用户 token** 的 UUID 值（如订阅 URL 里的 `?token=...`），替换为当前下载用户的 token。
 - 模板文件按 UTF-8 解码渲染；非 UTF-8 文本（如二进制）跳过渲染原样打包。
 - 渲染在 `build_template_context(user)` 中一次性构建上下文，节点仅取 `is_active` 的绑定节点。
 
@@ -125,6 +128,7 @@ nodes:
 
 ## 8. 版本
 
-- pyproject: 0.3.0 → 0.4.0
-- FastAPI app version: 0.5.0 → 0.6.0
+- pyproject: 0.4.0 → 0.5.0
+- FastAPI app version: 0.6.0 → 0.7.0
+- 新能力：硬编码 token/uuid 自动替换（键名感知 + 已知 token 兜底）
 - 新依赖：`python-multipart`（上传）、`pyyaml`（YAML 渲染）；dev 依赖：`httpx2`（TestClient）

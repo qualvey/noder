@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 from typing import List, Optional
 import uuid as uuid_lib
@@ -322,7 +323,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Sing-Box Subscription Middleman",
     description="支持多协议节点与动态 Sing-Box 多节点订阅导出的中间件管理服务",
-    version="0.6.0",
+    version="0.7.0",
     lifespan=lifespan
 )
 
@@ -510,14 +511,44 @@ def build_template_context(user: User) -> dict:
         "outbounds_json": json.dumps(outbounds, ensure_ascii=False, indent=2),
     }
 
-def render_template_text(text: str, user: User) -> str:
-    """将模板文本中的 {{占位符}} 替换为用户专属内容。"""
+def render_template_text(text: str, user: User, known_tokens: Optional[set] = None) -> str:
+    """将模板文本中的 {{占位符}} 替换为用户专属内容，并智能替换硬编码凭证。
+
+    替换优先级：
+    1. 显式 {{占位符}} (uuid/password/token/name/node_list/outbounds)
+    2. 键名感知：token:/uuid:/password: 键后的 UUID 值按键替换 (兼容 yaml/json 写法)
+    3. 兜底：任何等于已知用户 token 的 UUID 值替换为当前用户 token
+    """
     ctx = build_template_context(user)
     for key, value in ctx.items():
         text = text.replace("{{" + key + "}}", str(value))
+
+    # 2. 键名感知替换：token:/uuid: 等键后的硬编码 UUID 值
+    def _keyed_repl(m):
+        key_part, q_l, value, q_r = m.group(1), m.group(2), m.group(3), m.group(4)
+        key_name = key_part.strip().strip('\"\'').rstrip(":").strip().lower()
+        if key_name.endswith("token"):
+            return f"{key_part}{q_l}{user.token}{q_r}"
+        if key_name.endswith("uuid"):
+            return f"{key_part}{q_l}{user.uuid or ''}{q_r}"
+        if key_name.endswith("password"):
+            return f"{key_part}{q_l}{user.password or ''}{q_r}"
+        return m.group(0)
+
+    keyed_pattern = re.compile(
+        r'([\"\']?[\w.\-]*?(?:token|uuid|password)[\"\']?\s*[:=]\s*)([\"\']?)([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})([\"\']?)',
+        re.IGNORECASE,
+    )
+    text = keyed_pattern.sub(_keyed_repl, text)
+
+    # 3. 兜底：硬编码值若等于任一已知用户 token，替换为当前用户 token
+    if known_tokens:
+        for t in known_tokens:
+            if t in text:
+                text = text.replace(t, user.token)
     return text
 
-def render_zip_for_user(zip_path: Path, template_name: Optional[str], user: User) -> bytes:
+def render_zip_for_user(zip_path: Path, template_name: Optional[str], user: User, known_tokens: Optional[set] = None) -> bytes:
     """读取 ZIP，渲染模板文件，其余文件原样，重新打包返回 bytes。"""
     target = Path(template_name).name if template_name else None
     output = io.BytesIO()
@@ -526,7 +557,7 @@ def render_zip_for_user(zip_path: Path, template_name: Optional[str], user: User
             data = zin.read(item.filename)
             if target and Path(item.filename).name == target:
                 try:
-                    data = render_template_text(data.decode("utf-8"), user).encode("utf-8")
+                    data = render_template_text(data.decode("utf-8"), user, known_tokens).encode("utf-8")
                 except UnicodeDecodeError:
                     pass  # 非文本模板文件，保持原样
             zout.writestr(item, data)
@@ -900,7 +931,8 @@ def download_dist_file(file_id: int, token: str = Query(..., description="用户
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File data missing on disk")
 
     if dist.file_type == "zip":
-        data = render_zip_for_user(stored_path, dist.template_name, user)
+        known_tokens = {u.token for u in session.exec(select(User)).all()}
+        data = render_zip_for_user(stored_path, dist.template_name, user, known_tokens)
         return Response(
             content=data,
             media_type="application/zip",
