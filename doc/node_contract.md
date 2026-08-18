@@ -94,7 +94,7 @@ anytls 节点导出到 mihomo 时被守卫明确拒绝（保留未来扩展，mi
 
 ## 6. 版本
 
-- pyproject: 0.8.0（待 bump 至 0.9.0 随前端一起发版）
+- pyproject: 0.9.0（已发版 v0.9.0）
 - Node 表新增 `tag`（outbound 标识，契约必填）与 `congestion_control`（tuic 可选）；
   老库自动 ALTER 迁移 + `tag=node_name` 回填；导出阶段合并用户凭证全量校验
 - `validate_node_contract(values, protocol, node_level=False)`：protocol 为**必传参数**（不依赖 values 兜底）
