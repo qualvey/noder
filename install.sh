@@ -122,6 +122,7 @@ UPDATE_ONLY="N"
 if [[ -f "$SERVICE_FILE" ]]; then
     if [ -t 0 ] || [ -c /dev/tty ]; then
         read -p "检测到已有 ${SERVICE_NAME} 服务。只更新代码并保留现有配置？[Y/n] " UPDATE_ONLY < /dev/tty || true
+        UPDATE_ONLY=${UPDATE_ONLY:-Y}
     else
         UPDATE_ONLY="Y"
     fi
