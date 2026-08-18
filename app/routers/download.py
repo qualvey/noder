@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """用户侧下载 API：ZIP 按用户渲染模板；普通文件/文本走共享 token 原样分发。"""
 import secrets
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, Response
@@ -14,6 +15,20 @@ from app.services.dist import is_remote_cache_expired, refresh_remote_file
 from app.services.template_render import render_zip_for_user
 
 router = APIRouter(tags=["download"])
+
+
+def _attachment_disposition(filename: str) -> str:
+    """RFC 6266 规范的 Content-Disposition：ASCII 用 filename，非 ASCII 走 filename* 编码（中文名不乱码）。"""
+    ascii_name = filename.encode("ascii", "ignore").decode().strip()
+    if not ascii_name:
+        ascii_name = "download"
+    elif ascii_name.startswith("."):
+        # 中文名剥离后只剩扩展名（如 .txt）时补个可读前缀
+        ascii_name = "download" + ascii_name
+    cd = f'attachment; filename="{ascii_name}"'
+    if filename != ascii_name:
+        cd += f"; filename*=UTF-8''{quote(filename)}"
+    return cd
 
 
 @router.get("/dl/{file_id}", summary="下载分发文件 (ZIP 按用户渲染 / 普通文件与文本走共享 token)")
@@ -50,7 +65,7 @@ def download_dist_file(file_id: int, token: str = Query(..., description="鉴权
         return Response(
             content=stored_path.read_bytes(),
             media_type="text/plain; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{dist.original_name}"'},
+            headers={"Content-Disposition": _attachment_disposition(dist.original_name)},
         )
 
     if dist.file_type == "zip":
@@ -59,7 +74,7 @@ def download_dist_file(file_id: int, token: str = Query(..., description="鉴权
         return Response(
             content=data,
             media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{dist.original_name}"'},
+            headers={"Content-Disposition": _attachment_disposition(dist.original_name)},
         )
 
     # APK 静态分发

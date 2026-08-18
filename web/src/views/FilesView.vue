@@ -2,9 +2,9 @@
 // 文件分发：先选类型（普通文件 / zip / 文本），按类型展示对应输入
 // 普通文件与文本用共享 token 下载（可重置）；zip 按用户个性化渲染，在用户列表右键下载
 import { inject, onMounted, ref } from 'vue'
-import { api, apiBase } from '../api'
+import { api } from '../api'
 import type { DistFile } from '../types'
-import { formatFileSize } from '../utils'
+import { apiLinkPrefix, formatFileSize } from '../utils'
 
 const toast = inject('toast') as (msg: string, type?: 'info' | 'error') => void
 const popover = inject('popover') as { show: (el: Element, title: string, cb: () => void) => void }
@@ -100,7 +100,7 @@ async function submitUpload() {
 // 普通文件/文本：复制共享 token 链接
 function copySharedLink(f: DistFile) {
   if (!sharedToken.value) return
-  const url = `${location.origin}${apiBase()}/dl/${f.id}?token=${encodeURIComponent(sharedToken.value)}`
+  const url = `${location.origin}${apiLinkPrefix()}/dl/${f.id}?token=${encodeURIComponent(sharedToken.value)}`
   navigator.clipboard.writeText(url).then(() => toast('共享下载链接已复制'), () => toast('复制失败', 'error'))
 }
 
