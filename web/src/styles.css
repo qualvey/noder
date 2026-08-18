@@ -525,6 +525,16 @@ body {
   }
 }
 
+/* 宽屏：弹窗加宽 + 3 列（短字段三列排布，长字段跨列） */
+@media (min-width: 960px) {
+  .modal {
+    width: min(94vw, 1000px);
+  }
+  .modal-form {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
 /* REALITY 面板内部同样多列（公钥占整行，其余并排） */
 .reality-panel {
   display: grid;
@@ -543,6 +553,12 @@ body {
   }
   .reality-panel .form-group:first-child {
     grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 960px) {
+  .reality-panel {
+    grid-template-columns: 1fr 1fr 1fr;
   }
 }
 

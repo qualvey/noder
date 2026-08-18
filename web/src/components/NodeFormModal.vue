@@ -229,7 +229,7 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
           <label>端口</label>
           <input v-model.number="form.server_port" type="number" class="form-control" placeholder="8443" required />
         </div>
-        <div class="form-group form-span">
+        <div class="form-group">
           <label>服务器地址 (IP / 域名)</label>
           <input v-model="form.server_address" class="form-control" placeholder="1.2.3.4 或 hk.example.com" required />
         </div>
