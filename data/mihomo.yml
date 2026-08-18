@@ -1,0 +1,240 @@
+
+mixed-port: 10801 # HTTP(S) 和 SOCKS 代理混合端口
+
+allow-lan: true # 允许局域网连接
+bind-address: "127.0.0.1" # 绑定 IP 地址，仅作用于 allow-lan 为 true，'*'表示所有地址
+find-process-mode: strict
+mode: rule
+
+geox-url:
+  geoip: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat"
+  geosite: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"
+  mmdb: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.metadb"
+
+geo-auto-update: true # 是否自动更新 geodata
+geo-update-interval: 24 # 更新间隔，单位：小时
+
+log-level: info # 日志等级 silent/error/warning/info/debug
+
+ipv6: false # 开启 IPv6 总开关，关闭阻断所有 IPv6 链接和屏蔽 DNS 请求 AAAA 记录
+
+tcp-concurrent: true # TCP 并发连接所有 IP, 将使用最快握手的 TCP
+
+profile: # 存储 select 选择记录
+  store-selected: true
+  # 持久化 fake-ip
+  store-fake-ip: true
+
+tun:
+  enable: true
+  stack: system # gvisor/mixed
+  dns-hijack:
+    - 0.0.0.0:53 # 需要劫持的 DNS
+  auto-detect-interface: true # 自动识别出口网卡
+  auto-route: true # 配置路由表
+  mtu: 9000 # 最大传输单元
+  strict-route: true # 将所有连接路由到 tun 来防止泄漏，但你的设备将无法其他设备被访问
+
+  route-address: # 启用 auto-route 时使用自定义路由而不是默认路由
+    - 0.0.0.0/1
+    - 128.0.0.0/1
+    - "::/1"
+    - "8000::/1"
+
+sniffer:
+  enable: true
+  force-dns-mapping: true
+  ## 对所有未获取到域名的流量进行强制嗅探
+  parse-pure-ip: true
+  
+dns:
+  cache-algorithm: arc
+  enable: true # 关闭将使用系统 DNS
+  prefer-h3: true # 是否开启 DoH 支持 HTTP/3，将并发尝试
+  listen: 0.0.0.0:53 # 开启 DNS 服务器监听
+  # 用于解析 nameserver，fallback 以及其他 DNS 服务器配置的，DNS 服务域名
+  # 只能使用纯 IP 地址，可使用加密 DNS
+  default-nameserver:
+    - 223.5.5.5
+    - system # append DNS server from system configuration. If not found, it would print an error log and skip.
+  enhanced-mode: redir-host  # or  fake-ip
+
+  use-hosts: true # 查询 hosts
+
+  # 配置后面的nameserver、fallback和nameserver-policy向dns服务器的连接过程是否遵守遵守rules规则
+  # 如果为false（默认值）则这三部分的dns服务器在未特别指定的情况下会直连
+  # 如果为true，将会按照rules的规则匹配链接方式（走代理或直连），如果有特别指定则任然以指定值为准
+  # 仅当proxy-server-nameserver非空时可以开启此选项, 强烈不建议和prefer-h3一起使用
+  # 此外，这三者配置中的dns服务器如果出现域名会采用default-nameserver配置项解析，也请确保正确配置default-nameserver
+  respect-rules: false
+
+  nameserver:
+    - https://doh.pub/dns-query # DNS over HTTPS
+    - https://dns.alidns.com/dns-query#h3=true # 强制 HTTP/3，与 perfer-h3 无关，强制开启 DoH 的 HTTP/3 支持，若不支持将无法使用
+    - https://mozilla.cloudflare-dns.com/dns-query#DNS&h3=true # 指定策略组和使用 HTTP/3
+
+
+  # 专用于节点域名解析的 DNS 服务器，非必要配置项，如果不填则遵循nameserver-policy、nameserver和fallback的配置
+  proxy-server-nameserver:
+    - https://doh.pub/dns-query
+    - tls://223.5.5.5:853
+
+  nameserver-policy:
+    "geosite:cn,private":
+      - https://doh.pub/dns-query
+      - https://dns.alidns.com/dns-query
+    "geosite:category-ads-all": rcode://success
+
+proxies: 
+
+  - name: "vless-reality-vision"
+    type: vless
+    server: server
+    port: 443
+    uuid: uuid
+    network: tcp
+    tls: true
+    udp: true
+    flow: xtls-rprx-vision
+    servername: www.microsoft.com # REALITY servername
+    reality-opts:
+      public-key: xxx
+      short-id: xxx # optional
+    client-fingerprint: chrome # cannot be empty
+
+  - name: tuic
+    server: server
+    port: 10443
+    type: tuic
+    uuid: 00000000-0000-0000-0000-000000000001
+    password: PASSWORD_1
+    # ip: 127.0.0.1 # for overwriting the DNS lookup result of the server address set in option 'server'
+    # heartbeat-interval: 10000
+    alpn: [h3]
+    disable-sni: fasle
+    request-timeout: 8000
+    udp-relay-mode: native # Available: "native", "quic". Default: "native"
+    congestion-controller: bbr 
+    skip-cert-verify: false
+    sni: example.com
+    # ech-opts:
+    #   enable: true # 必须手动开启
+    #   # 如果config为空则通过dns解析，不为空则通过该值指定，格式为经过base64编码的ech参数（dig +short TYPE65 tls-ech.dev）
+    #   config: AEn+DQBFKwAgACABWIHUGj4u+PIggYXcR5JF0gYk3dCRioBW8uJq9H4mKAAIAAEAAQABAANAEnB1YmxpYy50bHMtZWNoLmRldgAA
+    #   # query-server-name: xxx.com # 可选项，不为空时用于指定通过dns解析时的域名
+    #
+    # meta 和 sing-box 私有扩展，将 ss-uot 用于 udp 中继，开启此选项后 udp-relay-mode 将失效
+    # 警告，与原版 tuic 不兼容！！！
+    # udp-over-stream: false
+    # udp-over-stream-version: 1
+
+# dns 出站会将请求劫持到内部 dns 模块，所有请求均在内部处理
+  - name: "dns-out"
+    type: dns
+
+proxy-groups:
+  # url-test 将按照 url 测试结果使用延迟最低节点
+  - name: "auto"
+    type: url-test
+    proxies:
+
+    tolerance: 150
+    lazy: true
+    url: "https://cp.cloudflare.com/generate_204"
+    interval: 300
+
+  # select 用户自行选择节点
+  - name: Proxy
+    type: select
+    # disable-udp: true
+    proxies:
+      - ss1
+      - ss2
+      - vmess1
+      - auto
+    # default-selected: ss1 # 默认选择的节点（该项为空或者设置的节点名不存在时，默认选择组中第一个节点）
+
+rule-providers:
+  rule1:
+    behavior: classical # domain ipcidr
+    interval: 259200
+    path: /path/to/save/file.yaml # 默认只允许存储在 mihomo 的 Home Dir，如果想存储到其他位置，请通过设置 SAFE_PATHS 环境变量指定额外的安全路径。该环境变量的语法同本操作系统的PATH环境变量解析规则（即Windows下以分号分割，其他系统下以冒号分割）
+    type: http # http 的 path 可空置，默认储存路径为 homedir 的 rules 文件夹，文件名为 url 的 md5
+    url: "url"
+    proxy: DIRECT
+    # size-limit: 10240 # 限制下载文件最大为10kb，默认为0即不限制文件大小
+  rule2:
+    behavior: classical
+    interval: 259200
+    path: /path/to/save/file.yaml
+    type: file
+  rule3:
+    # mrs类型ruleset，目前仅支持domain和ipcidr(即不支持classical），
+    #
+    # 对于behavior=domain:
+    #  - format=yaml 可以通过“mihomo convert-ruleset domain yaml XXX.yaml XXX.mrs”转换到mrs格式
+    #  - format=text 可以通过“mihomo convert-ruleset domain text XXX.text XXX.mrs”转换到mrs格式
+    #  - XXX.mrs 可以通过"mihomo convert-ruleset domain mrs XXX.mrs XXX.text"转换回text格式（暂不支持转换回yaml格式）
+    #
+    # 对于behavior=ipcidr:
+    #  - format=yaml 可以通过“mihomo convert-ruleset ipcidr yaml XXX.yaml XXX.mrs”转换到mrs格式
+    #  - format=text 可以通过“mihomo convert-ruleset ipcidr text XXX.text XXX.mrs”转换到mrs格式
+    #  - XXX.mrs 可以通过"mihomo convert-ruleset ipcidr mrs XXX.mrs XXX.text"转换回text格式（暂不支持转换回yaml格式）
+    #
+    type: http
+    url: "url"
+    format: mrs
+    behavior: domain
+    path: /path/to/save/file.mrs
+    # path-in-bundle: "geo/geosite/cn.mrs" # 当设置该选项时，如果本地文件不存在，会优先从 Home Dir的 BundleMRS.7z 中解压该文件，此项的值用于指定在 BundleMRS.7z 中的路径
+  rule4:
+    type: inline
+    behavior: domain # classical / ipcidr
+    payload:
+      - '.blogger.com'
+      - '*.*.microsoft.com'
+      - 'books.itunes.apple.com'
+
+rules:
+  - RULE-SET,rule1,REJECT
+  - IP-ASN,1,PROXY
+  - DOMAIN-REGEX,^abc,DIRECT
+  - DOMAIN-SUFFIX,baidu.com,DIRECT
+  - DOMAIN-KEYWORD,google,ss1
+  - DOMAIN-WILDCARD,test.*.mihomo.com,ss1
+  - IP-CIDR,1.1.1.1/32,ss1
+  - IP-CIDR6,2409::/64,DIRECT
+  # 当满足条件是 TCP 或 UDP 流量时，使用名为 sub-rule-name1 的规则集
+  - SUB-RULE,(OR,((NETWORK,TCP),(NETWORK,UDP))),sub-rule-name1
+  - SUB-RULE,(AND,((NETWORK,UDP))),sub-rule-name2
+# 定义多个子规则集，规则将以分叉匹配，使用 SUB-RULE 使用
+#                                               google.com(not match)--> baidu.com(match)
+#                                                /                                ｜
+#                                               /                                 ｜
+#  https://baidu.com  --> rule1 --> rule2 --> sub-rule-name1(match tcp)          使用 DIRECT
+#
+#
+#                                              google.com(not match)--> baidu.com(not match)
+#                                                /                            ｜
+#                                               /                             ｜
+#  dns 1.1.1.1  --> rule1 --> rule2 --> sub-rule-name1(match udp)         sub-rule-name2(match udp)
+#                                                                             ｜
+#                                                                             ｜
+#                                                                 使用 REJECT <-- 1.1.1.1/32(match)
+#
+
+sub-rules:
+  sub-rule-name1:
+    - DOMAIN,google.com,ss1
+    - DOMAIN,baidu.com,DIRECT
+  sub-rule-name2:
+    - IP-CIDR,1.1.1.1/32,REJECT
+    - IP-CIDR,8.8.8.8/32,ss1
+    - DOMAIN,dns.alidns.com,REJECT
+
+listeners:
+  - name: mixed-in-1
+    type: mixed #  HTTP(S) 和 SOCKS 代理混合
+    port: 10810 # 支持使用ports格式，例如200,302 or 200,204,401-429,501-503
+    listen: 0.0.0.0
+ 
