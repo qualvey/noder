@@ -151,7 +151,57 @@ sing_box_bin: "./sing-box.exe"
     check("用户乙 token 不再出现", token_b not in rendered2)
     check("公共字段未受影响", 'sing_box_bin: "./sing-box.exe"' in rendered2)
 
-    print("== 3. 权限与状态控制 ==")
+    print("== 3. 远程链接拉取与缓存 ==")
+    # 用本地起的 HTTP 服务模拟远程源
+    from http.server import HTTPServer, SimpleHTTPRequestHandler
+    import threading
+    import tempfile as _tf
+
+    remote_dir = _tf.mkdtemp()
+    remote_apk = b"REMOTE-APK-V2-BYTES" * 50
+    with open(os.path.join(remote_dir, "app-remote.apk"), "wb") as f:
+        f.write(remote_apk)
+
+    class _H(SimpleHTTPRequestHandler):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, directory=remote_dir, **kw)
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), _H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    remote_url = f"http://127.0.0.1:{srv.server_port}/app-remote.apk"
+
+    r = client.post("/api/files", headers=ADMIN, data={
+        "file_type": "auto", "name": "远程APK", "source_url": remote_url
+    })
+    check("远程链接创建成功", r.status_code == 200, r.text)
+    remote_file = r.json()
+    check("类型按扩展名识别 apk", remote_file["file_type"] == "apk")
+    check("source_url 已记录", remote_file["source_url"] == remote_url)
+    check("cached_at 已写入", remote_file["cached_at"] is not None)
+
+    r = client.get(f"/dl/{remote_file['id']}", params={"token": token})
+    check("远程文件下载 200", r.status_code == 200)
+    check("远程文件内容正确", r.content == remote_apk)
+
+    # 更新远程源内容，强制刷新后应拿到新内容
+    with open(os.path.join(remote_dir, "app-remote.apk"), "wb") as f:
+        f.write(b"REMOTE-APK-V3-BYTES" * 50)
+    r = client.post(f"/api/files/{remote_file['id']}/refresh", headers=ADMIN)
+    check("强制刷新 200", r.status_code == 200, r.text)
+    r = client.get(f"/dl/{remote_file['id']}", params={"token": token})
+    check("刷新后内容为最新", r.content == b"REMOTE-APK-V3-BYTES" * 50)
+
+    # 无效 scheme 拒绝
+    r = client.post("/api/files", headers=ADMIN, data={"source_url": "file:///etc/passwd"})
+    check("非 http(s) 链接拒绝 400", r.status_code == 400)
+
+    srv.shutdown()
+
+    print("== 4. 权限与状态控制 ==")
+
     r = client.get(f"/dl/{apk_file['id']}", params={"token": "wrong-token"})
     check("无效 token 拒绝 401", r.status_code == 401)
 
@@ -161,7 +211,7 @@ sing_box_bin: "./sing-box.exe"
     check("停用后下载 404", r.status_code == 404)
 
     r = client.get("/api/files", headers=ADMIN)
-    check("文件列表 3 条", len(r.json()) == 3)
+    check("文件列表 4 条", len(r.json()) == 4)
     check("管理 API 无 token 拒绝", client.get("/api/files").status_code == 401)
 
     r = client.delete(f"/api/files/{apk_file['id']}", headers=ADMIN)

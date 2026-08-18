@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 import secrets
 from typing import List, Optional
+import urllib.parse
+import urllib.request
 import uuid as uuid_lib
 import zipfile
 
@@ -41,6 +43,7 @@ ALLOWED_OVERRIDE_KEYS = {"route", "dns"}
 FILES_DIR = BASE_DIR / "data" / "files"
 ALLOWED_FILE_TYPES = {"apk", "zip"}
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+REMOTE_CACHE_TTL = 86400  # 远程拉取缓存有效期: 1 天 (秒)
 
 # 模板渲染支持的占位符说明 (见 doc/file_distribution.md)
 TEMPLATE_VAR_DOC = (
@@ -150,6 +153,8 @@ class DistFileBase(SQLModel):
     size: int = 0                              # 字节数
     is_active: bool = True                     # 是否允许下载
     remark: Optional[str] = None               # 管理员备注
+    source_url: Optional[str] = None           # 远程源链接 (远程拉取模式)
+    cached_at: Optional[str] = None            # 最近一次成功拉取时间 (ISO 格式)
     created_at: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 class DistFile(DistFileBase, table=True):
@@ -242,6 +247,12 @@ def create_db_and_tables():
             conn.commit()
         except Exception:
             pass
+        for col in ["source_url", "cached_at"]:
+            try:
+                conn.execute(text(f"ALTER TABLE distfile ADD COLUMN {col} VARCHAR"))
+                conn.commit()
+            except Exception:
+                pass
 
 def get_session():
     with Session(engine) as session:
@@ -323,7 +334,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Sing-Box Subscription Middleman",
     description="支持多协议节点与动态 Sing-Box 多节点订阅导出的中间件管理服务",
-    version="0.7.0",
+    version="0.8.0",
     lifespan=lifespan
 )
 
@@ -482,6 +493,57 @@ def generate_singbox_config(nodes: List[Node], user: User) -> dict:
 # ------------------------------------------------------------------
 # 5.1 文件分发：模板渲染引擎 (APK 静态分发 / ZIP 模板个性化渲染)
 # ------------------------------------------------------------------
+def validate_remote_url(url: str) -> str:
+    """校验远程链接仅允许 http/https，防止 SSRF。"""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="远程链接仅支持 http/https 协议",
+        )
+    return url
+
+def fetch_remote_file(url: str, timeout: int = 60) -> bytes:
+    """从远程 URL 拉取文件内容，超限/失败抛 HTTPException。"""
+    validate_remote_url(url)
+    req = urllib.request.Request(url, headers={"User-Agent": "noder-sub-server"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            content = resp.read()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"远程拉取失败: {e}",
+        )
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"远程文件过大，最大支持 {MAX_FILE_SIZE // (1024 * 1024)}MB",
+        )
+    return content
+
+def is_remote_cache_expired(dist: DistFile) -> bool:
+    """远程文件缓存是否过期 (默认 1 天)。"""
+    if not dist.cached_at:
+        return True
+    try:
+        cached = datetime.fromisoformat(dist.cached_at)
+    except ValueError:
+        return True
+    return (datetime.now() - cached).total_seconds() >= REMOTE_CACHE_TTL
+
+def refresh_remote_file(dist: DistFile, session: Session, force: bool = True) -> DistFile:
+    """拉取远程文件并更新缓存；失败时保留旧缓存继续服务。"""
+    content = fetch_remote_file(dist.source_url)
+    stored_path = FILES_DIR / dist.stored_name
+    stored_path.write_bytes(content)
+    dist.size = len(content)
+    dist.cached_at = datetime.now().isoformat(timespec="seconds")
+    session.add(dist)
+    session.commit()
+    session.refresh(dist)
+    return dist
+
 def build_template_context(user: User) -> dict:
     """构建模板占位符 -> 渲染值映射。未知占位符原样保留。"""
     nodes = [n for n in (user.nodes or []) if n.is_active]
@@ -822,29 +884,37 @@ def delete_user(user_id: int, session: Session = Depends(get_session)):
 # ------------------------------------------------------------------
 # 8.1 管理员 CRUD API - 分发文件管理 (/api/files)
 # ------------------------------------------------------------------
-@app.post("/api/files", response_model=DistFile, dependencies=[Depends(verify_admin_token)], summary="上传分发文件 (APK / ZIP)")
+@app.post("/api/files", response_model=DistFile, dependencies=[Depends(verify_admin_token)], summary="上传分发文件 (APK / ZIP，支持本地文件或远程链接)")
 async def create_dist_file(
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
     file_type: str = Form("auto"),
     template_name: Optional[str] = Form(None),
     name: Optional[str] = Form(None),
     remark: Optional[str] = Form(None),
+    source_url: Optional[str] = Form(None),
     session: Session = Depends(get_session),
 ):
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上传文件为空")
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"文件过大，最大支持 {MAX_FILE_SIZE // (1024 * 1024)}MB")
+    # 数据来源：本地文件 或 远程链接 (二选一)
+    if file is not None and file.filename:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上传文件为空")
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"文件过大，最大支持 {MAX_FILE_SIZE // (1024 * 1024)}MB")
+        original_name = Path(file.filename).name
+    elif source_url and source_url.strip():
+        source_url = validate_remote_url(source_url.strip())
+        content = fetch_remote_file(source_url)
+        original_name = Path(urllib.parse.urlparse(source_url).path).name or "remote.bin"
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请上传文件或填写远程链接 (二选一)")
 
     # 类型判定：auto 时按扩展名推断
     if file_type in ("auto", "", None):
-        ext = Path(file.filename or "").suffix.lower().lstrip(".")
+        ext = Path(original_name).suffix.lower().lstrip(".")
         file_type = "zip" if ext == "zip" else "apk"
     if file_type not in ALLOWED_FILE_TYPES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"不支持的文件类型 '{file_type}'，仅支持 apk / zip")
-
-    original_name = Path(file.filename or f"file.{file_type}").name
 
     # ZIP 校验 + 模板文件确定
     if file_type == "zip":
@@ -878,11 +948,22 @@ async def create_dist_file(
         size=len(content),
         is_active=True,
         remark=remark or None,
+        source_url=source_url,
+        cached_at=datetime.now().isoformat(timespec="seconds") if source_url else None,
     )
     session.add(dist)
     session.commit()
     session.refresh(dist)
     return dist
+
+@app.post("/api/files/{file_id}/refresh", response_model=DistFile, dependencies=[Depends(verify_admin_token)], summary="强制刷新远程文件缓存")
+def refresh_dist_file(file_id: int, session: Session = Depends(get_session)):
+    dist = session.get(DistFile, file_id)
+    if not dist:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    if not dist.source_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该文件不是远程链接模式，无需刷新")
+    return refresh_remote_file(dist, session)
 
 @app.get("/api/files", response_model=List[DistFile], dependencies=[Depends(verify_admin_token)], summary="获取分发文件列表")
 def list_dist_files(session: Session = Depends(get_session)):
@@ -929,6 +1010,14 @@ def download_dist_file(file_id: int, token: str = Query(..., description="用户
     stored_path = FILES_DIR / dist.stored_name
     if not stored_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File data missing on disk")
+
+    # 远程模式：缓存过期则自动刷新，失败时保留旧缓存继续服务
+    if dist.source_url and is_remote_cache_expired(dist):
+        try:
+            refresh_remote_file(dist, session)
+            stored_path = FILES_DIR / dist.stored_name
+        except HTTPException as e:
+            print(f"[file-dist] remote refresh failed, serving stale cache: {e.detail}")
 
     if dist.file_type == "zip":
         known_tokens = {u.token for u in session.exec(select(User)).all()}

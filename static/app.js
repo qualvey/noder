@@ -868,7 +868,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderFiles(files) {
     if (!files || files.length === 0) {
-      filesTableBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">暂无分发文件，点击右上角上传</td></tr>`;
+      filesTableBody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px;">暂无分发文件，点击右上角上传</td></tr>`;
       return;
     }
     const userOptions = usersCache.map(u => `<option value="${u.token}">${escapeHtml(u.name)} (${u.token.slice(0, 8)}…)</option>`).join('');
@@ -878,6 +878,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <td>${escapeHtml(f.name)}${f.remark ? `<div style="font-size:0.72rem;color:var(--text-muted);">${escapeHtml(f.remark)}</div>` : ''}</td>
         <td><span class="badge badge-${f.file_type === 'zip' ? 'vless' : 'tuic'}">${f.file_type.toUpperCase()}</span></td>
         <td>${formatFileSize(f.size)}</td>
+        <td>${f.source_url ? `<span title="${escapeHtml(f.source_url)}" style="cursor:help;">🔗 远程</span>` : '<span style="color:var(--text-muted);">📁 本地</span>'}</td>
         <td>${f.file_type === 'zip' ? (f.template_name || '-') : '-'}</td>
         <td>${f.is_active ? '<span style="color:var(--accent-emerald);">🟢 启用</span>' : '<span style="color:var(--accent-rose);">🔴 停用</span>'}</td>
         <td>
@@ -890,6 +891,7 @@ document.addEventListener('DOMContentLoaded', () => {
         </td>
         <td>
           <div style="display:flex; gap:6px;">
+            ${f.source_url ? `<button class="btn btn-secondary btn-sm refresh-file-btn" data-id="${f.id}">🔄 刷新</button>` : ''}
             <button class="btn btn-secondary btn-sm toggle-file-btn" data-id="${f.id}">${f.is_active ? '停用' : '启用'}</button>
             <button class="btn btn-danger btn-sm delete-file-btn" data-id="${f.id}">删除</button>
           </div>
@@ -904,6 +906,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const copyBtn = e.target.closest('.copy-file-link-btn');
       const toggleBtn = e.target.closest('.toggle-file-btn');
       const deleteBtn = e.target.closest('.delete-file-btn');
+      const refreshBtn = e.target.closest('.refresh-file-btn');
 
       if (copyBtn) {
         const id = copyBtn.dataset.id;
@@ -912,6 +915,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const url = `${location.origin}/dl/${id}?token=${token}`;
         navigator.clipboard.writeText(url);
         showToast('下载链接已复制到剪贴板');
+      } else if (refreshBtn) {
+        const id = refreshBtn.dataset.id;
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = '刷新中...';
+        apiFetch(`/api/files/${id}/refresh`, { method: 'POST' })
+          .then(() => { showToast('远程文件已刷新'); fetchFiles(); })
+          .catch(() => { refreshBtn.disabled = false; refreshBtn.textContent = '🔄 刷新'; });
       } else if (toggleBtn) {
         const file = filesCache.find(f => f.id == toggleBtn.dataset.id);
         if (!file) return;
@@ -939,16 +949,31 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('fileForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fileInput = document.getElementById('fileInput');
-    if (!fileInput.files.length) return;
+    const sourceUrl = document.getElementById('fileSourceUrl').value.trim();
+
+    const hasFile = fileInput.files.length > 0;
+    if (!hasFile && !sourceUrl) {
+      showToast('请选择文件或填写远程链接', 'error');
+      return;
+    }
+    if (hasFile && sourceUrl) {
+      showToast('本地文件与远程链接只能二选一', 'error');
+      return;
+    }
+
     const fd = new FormData();
-    fd.append('file', fileInput.files[0]);
+    if (hasFile) {
+      fd.append('file', fileInput.files[0]);
+    } else {
+      fd.append('source_url', sourceUrl);
+    }
     fd.append('file_type', document.getElementById('fileType').value);
     fd.append('template_name', document.getElementById('fileTemplateName').value.trim());
     fd.append('name', document.getElementById('fileName').value.trim());
     fd.append('remark', document.getElementById('fileRemark').value.trim());
     try {
       await apiFetch('/api/files', { method: 'POST', body: fd });
-      showToast('分发文件上传成功');
+      showToast(sourceUrl ? '远程文件已添加 (首次拉取完成)' : '分发文件上传成功');
       closeModal('fileModal');
       fetchFiles();
     } catch (err) {}

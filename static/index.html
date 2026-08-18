@@ -147,6 +147,7 @@
               <th>名称</th>
               <th>类型</th>
               <th>大小</th>
+              <th>来源</th>
               <th>ZIP 模板文件</th>
               <th>状态</th>
               <th>下载链接 (带用户 Token)</th>
@@ -373,9 +374,14 @@
       <form id="fileForm">
         <input type="hidden" id="fileId">
         <div class="form-group">
-          <label>选择文件 (APK 或 ZIP)</label>
-          <input type="file" id="fileInput" class="form-control" required>
+          <label>选择文件 (APK 或 ZIP，与下方远程链接二选一)</label>
+          <input type="file" id="fileInput" class="form-control">
           <div style="font-size:0.72rem; color:var(--text-muted); margin-top:4px;">APK：全员公用直接分发；ZIP：内含一个 yaml 模板，下载时按用户凭证渲染后再打包。</div>
+        </div>
+        <div class="form-group">
+          <label for="fileSourceUrl">远程链接 (可选，每天自动刷新缓存)</label>
+          <input type="url" id="fileSourceUrl" class="form-control" placeholder="https://example.com/app.apk">
+          <div style="font-size:0.72rem; color:var(--text-muted); margin-top:4px;">填写后服务端从远程拉取并缓存一天，过期自动重新拉取；可手动「刷新」强制更新。</div>
         </div>
         <div class="form-group">
           <label for="fileType">文件类型</label>

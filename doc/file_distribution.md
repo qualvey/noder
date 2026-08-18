@@ -5,7 +5,7 @@
 原系统每个用户有独立订阅链接（`/sub?token=***` 返回动态拼接的 Sing-Box JSON）。
 新增需求：**文件形态分发** —— 不是在线 JSON，而是真实文件下载：
 
-- **APK**：全部用户共用同一份，直接静态分发。
+- **APK**：全部用户共用同一份，直接静态分发；也可填远程链接自动拉取缓存。
 - **ZIP**：一个文件夹，内含 **1 个 yaml 模板**（内容按用户个性化渲染）+ 其他公共文件（原样分发）。
 
 ## 2. 架构设计
@@ -40,6 +40,8 @@
 | original_name | str | 原始上传文件名（下载时还原） |
 | stored_name | str | 磁盘存储文件名（uuid_原名，索引） |
 | size | int | 字节数 |
+| source_url | str? | 远程源链接（远程拉取模式，仅 http/https） |
+| cached_at | str? | 最近一次成功拉取时间（ISO） |
 | is_active | bool | 是否允许下载 |
 | remark | str? | 管理员备注 |
 | created_at | str | 创建时间 |
@@ -52,7 +54,8 @@
 
 | 方法 | 路径 | 说明 |
 | :--- | :--- | :--- |
-| POST | `/api/files` | multipart 上传：`file`(必填) + `file_type`(auto/apk/zip) + `template_name`(可选) + `name` + `remark`。ZIP 未指定模板名时自动取第一个 `.yaml/.yml` |
+| POST | `/api/files` | multipart 上传：`file`(可选) + `source_url`(可选，二选一) + `file_type`(auto/apk/zip) + `template_name`(可选) + `name` + `remark`。ZIP 未指定模板名时自动取第一个 `.yaml/.yml` |
+| POST | `/api/files/{id}/refresh` | 强制刷新远程文件缓存 |
 | GET | `/api/files` | 文件列表（按 id 倒序） |
 | PUT | `/api/files/{id}` | 更新元数据：`name` / `template_name` / `is_active` / `remark` |
 | DELETE | `/api/files/{id}` | 删除记录 + 磁盘文件 |
@@ -62,6 +65,14 @@
 - `file_type=auto` 时按扩展名推断（`.zip` → zip，其余 → apk）。
 - ZIP 必须可正常打开且无损坏条目（`testzip()`）。
 - 指定 `template_name` 时必须存在于 ZIP 中（按 basename 匹配）。
+- 远程链接仅允许 `http/https`（防 SSRF），首次创建即拉取落盘。
+
+### 远程拉取缓存
+
+- 远程模式文件创建时立即拉取一次并记录 `cached_at`。
+- **缓存有效期 1 天**（`REMOTE_CACHE_TTL = 86400` 秒）：用户下载时若缓存过期，自动重新拉取并更新缓存。
+- 拉取失败时**保留旧缓存继续服务**，不影响用户下载。
+- 管理端可随时 `POST /api/files/{id}/refresh` 强制刷新（前端表格「🔄 刷新」按钮）。
 
 ### 用户侧（token 鉴权）
 
@@ -128,7 +139,7 @@ nodes:
 
 ## 8. 版本
 
-- pyproject: 0.4.0 → 0.5.0
-- FastAPI app version: 0.6.0 → 0.7.0
-- 新能力：硬编码 token/uuid 自动替换（键名感知 + 已知 token 兜底）
+- pyproject: 0.5.0 → 0.6.0
+- FastAPI app version: 0.7.0 → 0.8.0
+- 新能力：远程链接拉取 + 1 天缓存 + 手动刷新
 - 新依赖：`python-multipart`（上传）、`pyyaml`（YAML 渲染）；dev 依赖：`httpx2`（TestClient）
