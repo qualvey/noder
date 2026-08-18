@@ -59,6 +59,21 @@ sudo ./install.sh --backend
 
 ## 🚀 本地开发运行方式
 
+### 前端 (Vue 3 + TypeScript + Vite)
+
+前端源码位于 `web/`，构建产物输出到 `static/`（后端直接挂载服务）。
+
+```bash
+cd web
+pnpm install        # 安装依赖
+pnpm dev            # 开发模式 (http://127.0.0.1:5273，API 代理到后端 8000)
+pnpm build          # 构建 -> ../static/ (vue-tsc 类型检查 + vite build)
+```
+
+兼容根路径与子路径反代部署（vite base `./`，所有资源相对路径）。
+
+### 方式 1：使用 `uv` 运行（推荐）
+
 ### 方式 1：使用 `uv` 运行（推荐）
 
 项目根目录已包含 `pyproject.toml`，可直接使用 [uv](https://github.com/astral-sh/uv) 一键启动：
