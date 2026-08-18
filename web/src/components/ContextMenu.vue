@@ -100,7 +100,7 @@ onUnmounted(() => {
   position: fixed;
   z-index: 3000;
   min-width: 200px;
-  background: #1e293b;
+  background: var(--bg-elevated);
   border: 1px solid var(--border-glass);
   border-radius: var(--radius-md);
   padding: 6px;
