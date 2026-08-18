@@ -75,4 +75,10 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, `订阅拉取失败 (${res.status})`)
     return res.json()
   },
+  // 用户侧 Mihomo 代理列表 (YAML)
+  mihomo: async (token: string): Promise<string> => {
+    const res = await fetch(`${apiBase()}/mihomo?token=${encodeURIComponent(token)}`)
+    if (!res.ok) throw new ApiError(res.status, `订阅拉取失败 (${res.status})`)
+    return res.text()
+  },
 }

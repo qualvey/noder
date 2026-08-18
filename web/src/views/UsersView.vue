@@ -1,9 +1,11 @@
 <script setup lang="ts">
-// 用户管理：表格 / 全选批量删除（新增/编辑表单在 UserFormModal 组件）
+// 用户管理：表格 / 全选批量删除 / 右键复制订阅链接（新增/编辑表单在 UserFormModal 组件）
 import { inject, onMounted, ref } from 'vue'
 import { api } from '../api'
 import type { Node, User } from '../types'
+import { buildMihomoLink, buildSubLink, copyText } from '../utils'
 import UserFormModal from '../components/UserFormModal.vue'
+import ContextMenu, { type ContextMenuItem } from '../components/ContextMenu.vue'
 
 const toast = inject('toast') as (msg: string, type?: 'info' | 'error') => void
 const popover = inject('popover') as { show: (el: Element, title: string, cb: () => void) => void }
@@ -14,6 +16,41 @@ const nodes = ref<Node[]>([])
 const selected = ref<Set<number>>(new Set())
 const showModal = ref(false)
 const editingUser = ref<User | null>(null)
+const ctxMenu = ref<{ x: number; y: number; user: User } | null>(null)
+
+// 右键菜单：复制订阅链接
+function onRowContextMenu(e: MouseEvent, user: User) {
+  e.preventDefault()
+  e.stopPropagation() // 避免被 ContextMenu 的文档级 contextmenu 监听立即关闭
+  ctxMenu.value = { x: e.clientX, y: e.clientY, user }
+}
+
+function closeCtxMenu() {
+  ctxMenu.value = null
+}
+
+function copySubLink() {
+  const user = ctxMenu.value?.user
+  if (!user) return
+  copyText(buildSubLink(user.token)).then((ok) => {
+    toast(ok ? 'Sing-Box 订阅链接已复制' : '复制失败', ok ? 'info' : 'error')
+  })
+  closeCtxMenu()
+}
+
+function copyMihomoLink() {
+  const user = ctxMenu.value?.user
+  if (!user) return
+  copyText(buildMihomoLink(user.token)).then((ok) => {
+    toast(ok ? 'Mihomo 订阅链接已复制' : '复制失败', ok ? 'info' : 'error')
+  })
+  closeCtxMenu()
+}
+
+const ctxMenuItems = (): ContextMenuItem[] => [
+  { label: '复制 Sing-Box 链接', icon: '📋', onClick: copySubLink },
+  { label: '复制 Mihomo (Clash) 链接', icon: '🔄', onClick: copyMihomoLink },
+]
 
 async function fetchData() {
   try {
@@ -105,7 +142,7 @@ onMounted(fetchData)
           <tr v-if="!users.length">
             <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px">暂无订阅用户，点击右上角新增</td>
           </tr>
-          <tr v-for="user in users" :key="user.id">
+          <tr v-for="user in users" :key="user.id" @contextmenu.prevent="onRowContextMenu($event, user)">
             <td style="text-align: center">
               <input type="checkbox" :checked="selected.has(user.id)" @change="toggleSelect(user.id)" />
             </td>
@@ -139,4 +176,13 @@ onMounted(fetchData)
   </section>
 
   <UserFormModal :open="showModal" :editing="editingUser" :nodes="nodes" @close="showModal = false" @saved="fetchData" />
+
+  <ContextMenu
+    v-if="ctxMenu"
+    :x="ctxMenu.x"
+    :y="ctxMenu.y"
+    :title="ctxMenu.user.name"
+    :items="ctxMenuItems()"
+    @close="closeCtxMenu"
+  />
 </template>

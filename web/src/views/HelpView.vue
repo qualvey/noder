@@ -13,7 +13,12 @@ const origin = location.origin + base
     </div>
     <div style="background: var(--bg-card); padding: 24px; border-radius: var(--radius-lg); border: 1px solid var(--border-glass)">
       <h4 style="margin-bottom: 12px; color: var(--primary)">1. 用户订阅导出 API</h4>
-      <div class="code-viewer" style="margin-bottom: 16px">{{ origin }}/sub?token={USER_TOKEN}</div>
+      <div class="code-viewer" style="margin-bottom: 8px">{{ origin }}/sub?token={USER_TOKEN}</div>
+      <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 16px">Sing-Box 全量配置 JSON</div>
+
+      <h4 style="margin-bottom: 12px; color: var(--primary)">1b. Mihomo (Clash) 代理列表 API</h4>
+      <div class="code-viewer" style="margin-bottom: 8px">{{ origin }}/mihomo?token={USER_TOKEN}</div>
+      <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 16px">proxies 列表 YAML（vless+reality+vision / tuic v5），合并进自己的 mihomo 配置</div>
 
       <h4 style="margin-bottom: 12px; color: var(--primary)">2. 用户节点列表查询 API</h4>
       <div class="code-viewer" style="margin-bottom: 16px">{{ origin }}/node?token={USER_TOKEN}</div>
