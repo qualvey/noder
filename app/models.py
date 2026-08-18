@@ -122,7 +122,8 @@ class DistFileBase(SQLModel):
     name: str                                  # 显示名称
     file_type: str = "apk"                     # apk | zip | text
     template_name: Optional[str] = None         # ZIP 内模板文件相对路径 (仅 zip 使用)
-    original_name: str = ""                    # 原始上传文件名 (下载时还原)
+    original_name: str = ""                    # 原始上传文件名 (上传时还原)
+    download_name: Optional[str] = None         # 自定义下载文件名 (含后缀)；留空用 original_name
     size: int = 0                              # 字节数
     is_active: bool = True                     # 是否允许下载
     remark: Optional[str] = None               # 管理员备注
@@ -146,6 +147,7 @@ class AppSetting(SQLModel, table=True):
 
 class DistFileUpdate(SQLModel):
     name: Optional[str] = None
+    download_name: Optional[str] = None
     template_name: Optional[str] = None
     is_active: Optional[bool] = None
     remark: Optional[str] = None

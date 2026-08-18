@@ -31,6 +31,11 @@ def _attachment_disposition(filename: str) -> str:
     return cd
 
 
+def _download_filename(dist: DistFile) -> str:
+    """下载文件名：自定义 download_name 优先（含后缀），留空回落原始名。"""
+    return dist.download_name or dist.original_name
+
+
 @router.get("/dl/{file_id}", summary="下载分发文件 (ZIP 按用户渲染 / 普通文件与文本走共享 token)")
 def download_dist_file(file_id: int, token: str = Query(..., description="鉴权 Token：ZIP 用用户 Token，普通文件/文本用共享 Token"), session: Session = Depends(get_session)):
     dist = session.get(DistFile, file_id)
@@ -65,7 +70,7 @@ def download_dist_file(file_id: int, token: str = Query(..., description="鉴权
         return Response(
             content=stored_path.read_bytes(),
             media_type="text/plain; charset=utf-8",
-            headers={"Content-Disposition": _attachment_disposition(dist.original_name)},
+            headers={"Content-Disposition": _attachment_disposition(_download_filename(dist))},
         )
 
     if dist.file_type == "zip":
@@ -74,12 +79,12 @@ def download_dist_file(file_id: int, token: str = Query(..., description="鉴权
         return Response(
             content=data,
             media_type="application/zip",
-            headers={"Content-Disposition": _attachment_disposition(dist.original_name)},
+            headers={"Content-Disposition": _attachment_disposition(_download_filename(dist))},
         )
 
     # APK 静态分发
     return FileResponse(
         stored_path,
         media_type="application/vnd.android.package-archive",
-        filename=dist.original_name,
+        filename=_download_filename(dist),
     )

@@ -234,7 +234,7 @@ sing_box_bin: "./sing-box.exe"
 
     print("== 4. 文本内容组件 (字符串 -> 下载链接) ==")
     r = client.post("/api/files", headers=ADMIN, data={
-        "name": "launcher.conf", "content_text": "upstream: https://hk.ryugo.org/sub?token={{token}}\ntoken: \"{{token}}\"\nuser: {{name}}\nsing_box_bin: ./sing-box.exe\n"
+        "name": "launcher.conf", "download_name": "custom-launcher.conf", "content_text": "upstream: https://hk.ryugo.org/sub?token={{token}}\ntoken: \"{{token}}\"\nuser: {{name}}\nsing_box_bin: ./sing-box.exe\n"
     })
     check("文本内容创建成功", r.status_code == 200, r.text)
     text_file = r.json()
@@ -250,6 +250,8 @@ sing_box_bin: "./sing-box.exe"
     check("user 占位符原样", "user: {{name}}" in body)
     check("公共内容原样", "sing_box_bin: ./sing-box.exe" in body)
     check("响应 Content-Disposition 附件", "attachment" in r.headers.get("content-disposition", ""))
+    cd = r.headers.get("content-disposition", "")
+    check("自定义下载文件名生效 (含后缀)", "custom-launcher.conf" in cd, cd)
 
     # 硬编码 token 智能替换同样作用于文本模式
     r = client.post("/api/files", headers=ADMIN, data={

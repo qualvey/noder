@@ -19,6 +19,7 @@ const form = ref({
   type: 'apk' as FileType,
   templateName: '',
   name: '',
+  downloadName: '',
   remark: '',
   sourceUrl: '',
   contentText: '',
@@ -41,7 +42,7 @@ async function fetchData() {
 }
 
 function openCreate() {
-  Object.assign(form.value, { type: 'apk', templateName: '', name: '', remark: '', sourceUrl: '', contentText: '' })
+  Object.assign(form.value, { type: 'apk', templateName: '', name: '', downloadName: '', remark: '', sourceUrl: '', contentText: '' })
   if (fileInput.value) fileInput.value.value = ''
   showModal.value = true
 }
@@ -85,6 +86,7 @@ async function submitUpload() {
   fd.append('file_type', form.value.type)
   fd.append('template_name', form.value.templateName.trim())
   fd.append('name', form.value.name.trim())
+  fd.append('download_name', form.value.downloadName.trim())
   fd.append('remark', form.value.remark.trim())
 
   try {
@@ -183,6 +185,7 @@ onMounted(fetchData)
             <th>类型</th>
             <th>大小</th>
             <th>来源</th>
+            <th>下载文件名</th>
             <th>ZIP 模板文件</th>
             <th>状态</th>
             <th>下载方式</th>
@@ -191,7 +194,7 @@ onMounted(fetchData)
         </thead>
         <tbody>
           <tr v-if="!files.length">
-            <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px">暂无分发文件，点击右上角上传</td>
+            <td colspan="10" style="text-align: center; color: var(--text-muted); padding: 30px">暂无分发文件，点击右上角上传</td>
           </tr>
           <tr v-for="f in files" :key="f.id">
             <td>{{ f.id }}</td>
@@ -209,6 +212,9 @@ onMounted(fetchData)
               <span v-if="f.source_url" :title="f.source_url" style="cursor: help">🔗 远程</span>
               <span v-else-if="f.file_type === 'text'" style="color: var(--text-muted)">📝 文本</span>
               <span v-else style="color: var(--text-muted)">📁 本地</span>
+            </td>
+            <td style="font-size: 0.78rem">
+              <code>{{ f.download_name || f.original_name }}</code>
             </td>
             <td>{{ f.file_type === 'zip' ? f.template_name || '-' : '-' }}</td>
             <td>
@@ -303,8 +309,12 @@ onMounted(fetchData)
         </template>
 
         <div class="form-group">
-          <label>显示名称 (留空用文件名)</label>
+          <label>显示名称 (列表展示用)</label>
           <input v-model="form.name" class="form-control" placeholder="如 客户端安装包" />
+        </div>
+        <div class="form-group">
+          <label>下载文件名 (含后缀，可自定义；留空用原始名)</label>
+          <input v-model="form.downloadName" class="form-control" placeholder="如 client-v2.apk / 客户端配置.conf" />
         </div>
         <div class="form-group">
           <label>备注</label>

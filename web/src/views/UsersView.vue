@@ -60,7 +60,7 @@ async function downloadZip(f: DistFile) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = f.original_name || f.name
+    a.download = f.download_name || f.original_name || f.name
     document.body.appendChild(a)
     a.click()
     a.remove()

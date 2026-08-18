@@ -41,6 +41,7 @@ export interface DistFile {
   file_type: FileType
   template_name?: string | null
   original_name: string
+  download_name?: string | null
   size: number
   is_active: boolean
   remark?: string | null

@@ -37,7 +37,7 @@ def create_db_and_tables():
                 conn.commit()
             except Exception:
                 pass
-        for col in ["source_url", "cached_at"]:
+        for col in ["source_url", "cached_at", "download_name"]:
             try:
                 conn.execute(text(f"ALTER TABLE distfile ADD COLUMN {col} VARCHAR"))
                 conn.commit()
