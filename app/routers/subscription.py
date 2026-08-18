@@ -2,10 +2,11 @@
 """用户侧订阅 API：Token 验证与多节点导出。"""
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlmodel import Session, select
 
 from app.database import get_session
+from app.exporters.mihomo import build_mihomo_proxies_yaml
 from app.models import User
 from app.services.singbox import build_singbox_outbound, generate_singbox_config
 
@@ -45,6 +46,19 @@ def get_user_nodes(token: str = Query(..., description="用户鉴权 Token"), se
         }
         for node in active_nodes
     ]
+
+
+@router.get("/mihomo", summary="获取 Mihomo 代理列表 (YAML)")
+def get_mihomo_proxies(token: str = Query(..., description="用户鉴权 Token"), session: Session = Depends(get_session)):
+    """返回 mihomo 风格 proxies 列表 YAML（用户合并进自己的 mihomo 配置）。"""
+    user = _get_active_user(session, token)
+    active_nodes = [n for n in user.nodes if n.is_active]
+    if not active_nodes:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active nodes associated with this user")
+    return Response(
+        content=build_mihomo_proxies_yaml(active_nodes, user),
+        media_type="text/yaml; charset=utf-8",
+    )
 
 
 @router.get("/api/user/verify", summary="用户 Token 验证与节点数据查询")

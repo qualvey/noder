@@ -26,5 +26,6 @@ REMOTE_CACHE_TTL = 86400  # 远程拉取缓存有效期: 1 天 (秒)
 # 模板渲染支持的占位符说明 (见 doc/file_distribution.md)
 TEMPLATE_VAR_DOC = (
     "{{uuid}} {{password}} {{token}} {{name}} {{user_name}} "
-    "{{node_list_yaml}} {{node_list_json}} {{outbounds_yaml}} {{outbounds_json}}"
+    "{{node_list_yaml}} {{node_list_json}} {{outbounds_yaml}} {{outbounds_json}} "
+    "{{mihomo_proxies_yaml}}"
 )

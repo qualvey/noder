@@ -10,6 +10,7 @@ import zipfile
 import yaml
 
 from app.models import User
+from app.exporters.mihomo import build_mihomo_proxies_yaml
 from app.services.singbox import build_singbox_outbound
 
 
@@ -40,6 +41,7 @@ def build_template_context(user: User) -> dict:
         "node_list_json": json.dumps(node_meta, ensure_ascii=False, indent=2),
         "outbounds_yaml": _yaml(outbounds),
         "outbounds_json": json.dumps(outbounds, ensure_ascii=False, indent=2),
+        "mihomo_proxies_yaml": build_mihomo_proxies_yaml(nodes, user),
     }
 
 

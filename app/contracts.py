@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """节点结构契约 (Node Contract)。
 
-定义每个协议节点的字段结构：哪些必须有、哪些可选、字段间依赖/互斥。
+定义每个协议节点的字段结构：哪些必须有、哪些可选、字段间依赖/互斥/取值域。
 节点在创建/更新（核心读取阶段）时按契约严格校验，不合规直接拒绝。
 
 未来接入新代理核心 (mihomo/xray 等) 时：
@@ -31,19 +31,31 @@ class NodeContract:
     deps: Dict[str, Dict[str, List[str]]] = field(default_factory=dict)
     # 固定取值: {字段: 必须等于的值}，例: {"security": "tls"}
     fixed: Dict[str, str] = field(default_factory=dict)
+    # 取值白名单: {字段: [合法值]}，例: {"flow": ["", "xtls-rprx-vision"]}
+    enum: Dict[str, List[str]] = field(default_factory=dict)
     # 互斥: [(字段A, 取值A, 字段B, 取值B)] 表示 A==取值A 时 B 不能等于取值B
     conflicts: List[Tuple[str, str, str, str]] = field(default_factory=list)
+
 
 # ------------------------------------------------------------------
 # 节点自有字段：Node 表单/表可直接提供的字段。
 # uuid/password 属于用户级凭证（每个用户独立，见 models.py 方案 3），
-# 节点 CRUD 校验只看自有字段；导出时由 build_singbox_outbound 合并用户凭证后全量校验。
+# 节点 CRUD 校验只看自有字段；导出时由导出器合并用户凭证后全量校验。
 # ------------------------------------------------------------------
 NODE_OWNED_FIELDS = {
     "tag", "node_name", "server_address", "server_port", "security", "sni",
     "method", "transport_type", "path", "public_key", "short_id",
     "fingerprint", "flow", "remark", "congestion_control",
 }
+
+# 取值域常量（对齐 sing-box 定义，见 docs/configuration/shared/tls.zh.md、
+# docs/configuration/outbound/vless.zh.md）
+UTLS_FINGERPRINTS = [
+    "chrome", "firefox", "edge", "safari", "360", "qq", "ios",
+    "android", "random", "randomized",
+]
+VLESS_FLOWS = ["", "xtls-rprx-vision"]  # sing-vmess: 仅这两个合法
+TUIC_CONGESTION_CONTROLS = ["bbr", "cubic", "new_reno"]
 
 # ------------------------------------------------------------------
 # 协议契约定义
@@ -54,6 +66,7 @@ PROTOCOL_CONTRACTS: Dict[str, NodeContract] = {
         required={"tag","server_address", "server_port", "uuid","password"},
         optional={"congestion_control"},
         fixed={"security": "tls"},  # TUIC 严格要求 tls
+        enum={"congestion_control": TUIC_CONGESTION_CONTROLS},
     ),
     "vless": NodeContract(
         protocol="vless",
@@ -62,9 +75,15 @@ PROTOCOL_CONTRACTS: Dict[str, NodeContract] = {
         fixed={"security": "reality"},  # VLESS 严格要求 reality
         deps={
             "security": {
-                "reality": ["public_key", "short_id"],  # REALITY 必须公钥+short_id
-                "utls":  ["fingerprint"]
+                # REALITY 强制: 公钥 + short_id + SNI(伪装域名) + fingerprint
+                # (sing-box: reality 客户端强制 utls -> fingerprint 必填,
+                #  server_name 为空时 fallback 到 server 地址, REALITY 场景必然连不通)
+                "reality": ["public_key", "short_id", "sni", "fingerprint"],
             },
+        },
+        enum={
+            "flow": VLESS_FLOWS,
+            "fingerprint": UTLS_FINGERPRINTS,
         },
     ),
     "anytls": NodeContract(
@@ -94,17 +113,17 @@ def _is_empty(value) -> bool:
 
 
 def validate_node_contract(
-    values: dict, protocol: Optional[str] = None, node_level: bool = False
+    values: dict, protocol: str, node_level: bool = False
 ) -> None:
     """按契约校验节点字段。
 
     :param values: 节点字段 dict（创建=全部；更新=现有值合并更新值；导出=节点+用户凭证合并视图）
-    :param protocol: 协议名；缺省时从 values['protocol'] 取
+    :param protocol: 协议名，必传（创建/更新/导出调用方都有；不依赖 values['protocol'] 兜底）
     :param node_level: True=节点创建/更新场景，必填字段只查节点自有字段
         （uuid/password 等用户级凭证由导出阶段合并后全量校验）
     校验失败抛 HTTPException 400。
     """
-    contract = get_contract(protocol or values.get("protocol"))
+    contract = get_contract(protocol)
 
     # 1. 必填字段（node_level 时只查节点自有字段；用户级凭证在导出合并视图校验）
     required = contract.required if not node_level else contract.required & NODE_OWNED_FIELDS
@@ -137,7 +156,19 @@ def validate_node_contract(
                     ),
                 )
 
-    # 4. 互斥
+    # 4. 枚举取值
+    for f, allowed in contract.enum.items():
+        val = values.get(f)
+        if val is not None and str(val) not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"[{protocol}] 字段 '{f}' 取值无效: '{val}'，"
+                    f"允许: {', '.join(allowed)}"
+                ),
+            )
+
+    # 5. 互斥
     for a, av, b, bv in contract.conflicts:
         if values.get(a) == av and values.get(b) == bv:
             raise HTTPException(
@@ -165,8 +196,14 @@ CORE_REGISTRY: Dict[str, CoreInfo] = {
         supported_protocols=set(ALLOWED_PROTOCOLS),
         content_type="application/json",
     ),
-    # mihomo / xray 等导出器后续在此注册，例如:
-    # "mihomo": CoreInfo(key="mihomo", name="Mihomo", supported_protocols={"vless", "tuic"}, ...),
+    "mihomo": CoreInfo(
+        key="mihomo",
+        name="Mihomo",
+        # 当前只支持 vless/tuic（anytls 等协议 mihomo 尚未支持，
+        # 导出时由 assert_protocol_supported 明确拒绝；未来支持后加入此集合）
+        supported_protocols={"vless", "tuic"},
+        content_type="text/yaml",
+    ),
 }
 
 

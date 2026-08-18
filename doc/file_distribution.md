@@ -95,6 +95,7 @@
 | `{{node_list_json}}` | 同上 JSON 数组 |
 | `{{outbounds_yaml}}` | 动态拼接的 Sing-Box Outbounds YAML 列表 |
 | `{{outbounds_json}}` | 同上 JSON 数组 |
+| `{{mihomo_proxies_yaml}}` | Mihomo 风格 proxies 列表 YAML（vless+reality+vision / tuic v5；anytls 节点被导出守卫拒绝） |
 
 - 未知占位符**原样保留**，不误伤模板中其他 `{{ }}` 内容。
 - **硬编码凭证智能替换**（无需改模板）：

@@ -19,19 +19,12 @@ def build_singbox_outbound(node: Node, user: User) -> dict:
     # （uuid/password 属用户级凭证，节点 CRUD 阶段不校验，导出时统一把关）
     user_uuid = user.uuid or user.token
     user_password = user.password or user.token
+    # 合并视图自动跟随模型字段（不手工列清单，避免字段漂移）
     merged = {
-        "tag": tag,
-        "server_address": node.server_address,
-        "server_port": node.server_port,
+        **node.model_dump(),
         "uuid": user_uuid,
         "password": user_password,
-        "security": (node.security or "").lower(),
-        "node_name": node.node_name,
-        "flow": node.flow,
-        "public_key": node.public_key,
-        "short_id": node.short_id,
-        "fingerprint": node.fingerprint,
-        "congestion_control": node.congestion_control,
+        "tag": tag,
     }
     validate_node_contract(merged, protocol)
 
