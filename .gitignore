@@ -25,3 +25,7 @@ Thumbs.db
 
 # Old git history backup (contains secrets - never commit)
 .git.bak/
+
+# smoke test logs
+smoke*.log
+smoke*.err
