@@ -334,7 +334,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Sing-Box Subscription Middleman",
     description="支持多协议节点与动态 Sing-Box 多节点订阅导出的中间件管理服务",
-    version="0.9.0",
+    version="0.9.1",
     lifespan=lifespan
 )
 
@@ -1030,13 +1030,9 @@ def download_dist_file(file_id: int, token: str = Query(..., description="用户
             print(f"[file-dist] remote refresh failed, serving stale cache: {e.detail}")
 
     if dist.file_type == "text":
-        # 文本文件：支持模板占位符渲染，按用户个性化输出
-        known_tokens = {u.token for u in session.exec(select(User)).all()}
-        rendered = render_template_text(
-            stored_path.read_text(encoding="utf-8", errors="replace"), user, known_tokens
-        ).encode("utf-8")
+        # 文本文件：死字符，原样分发，不做任何渲染
         return Response(
-            content=rendered,
+            content=stored_path.read_bytes(),
             media_type="text/plain; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="{dist.original_name}"'},
         )

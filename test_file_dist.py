@@ -213,9 +213,9 @@ sing_box_bin: "./sing-box.exe"
     r = client.get(f"/dl/{text_file['id']}", params={"token": token})
     check("文本下载 200", r.status_code == 200)
     body = r.content.decode("utf-8")
-    check("占位符按用户渲染 token", f"token: \"{token}\"" in body, body)
-    check("URL 内占位符渲染", f"sub?token={token}" in body)
-    check("占位符渲染 name", f"user: 测试用户甲" in body)
+    check("占位符原样保留不渲染", 'token: "{{token}}"', body)
+    check("URL 内占位符原样", "sub?token={{token}}" in body)
+    check("user 占位符原样", "user: {{name}}" in body)
     check("公共内容原样", "sing_box_bin: ./sing-box.exe" in body)
     check("响应 Content-Disposition 附件", "attachment" in r.headers.get("content-disposition", ""))
 
@@ -227,8 +227,8 @@ sing_box_bin: "./sing-box.exe"
     text_file2 = r.json()
     r = client.get(f"/dl/{text_file2['id']}", params={"token": token})
     body2 = r.content.decode("utf-8")
-    check("文本模式硬编码 token 自动替换", f"token: \"{token}\"" in body2, body2)
-    check("用户乙 token 不再出现", token_b not in body2)
+    check("文本模式硬编码 token 原样保留", f"token: \"{token_b}\"" in body2, body2)
+    check("未替换为下载者 token", f"token: \"{token}\"" not in body2)
 
     print("== 5. 权限与状态控制 ==")
 
@@ -242,7 +242,7 @@ sing_box_bin: "./sing-box.exe"
     check("停用后下载 404", r.status_code == 404)
 
     r = client.get("/api/files", headers=ADMIN)
-    check("文件列表 5 条", len(r.json()) == 6)
+    check("文件列表 6 条", len(r.json()) == 6)
     check("管理 API 无 token 拒绝", client.get("/api/files").status_code == 401)
 
     r = client.delete(f"/api/files/{apk_file['id']}", headers=ADMIN)

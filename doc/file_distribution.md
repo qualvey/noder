@@ -141,12 +141,12 @@ nodes:
 ### 文本组件 (file_type=text)
 
 - 提交 `content_text` 字段即可：内容存为 UTF-8 文本文件，`original_name` 取 `name`（无后缀自动补 `.txt`）。
-- 下载时**同样经过模板渲染引擎**（占位符 + 硬编码凭证智能替换），每个用户拿到自己渲染后的版本，`text/plain` 附件返回。
-- 适合：个性化配置文件、启动脚本、说明文档等免打包场景。
+- **死字符原样分发**：下载时不做任何渲染/替换，所有用户拿到完全相同的内容，`text/plain` 附件返回。
+- 适合：静态配置文件、安装说明、公告等需要逐字分发场景。
 
 ## 8. 版本
 
-- pyproject: 0.6.0 → 0.7.0
-- FastAPI app version: 0.8.0 → 0.9.0
-- 新能力：文本内容组件 (字符串 → 下载链接，支持模板渲染)
+- pyproject: 0.7.0 → 0.7.1
+- FastAPI app version: 0.9.0 → 0.9.1
+- 修正：text 类型改为死字符原样分发（不渲染占位符/不替换凭证）
 - 新依赖：`python-multipart`（上传）、`pyyaml`（YAML 渲染）；dev 依赖：`httpx2`（TestClient）
