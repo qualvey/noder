@@ -17,6 +17,7 @@ const showJsonImport = ref(false)
 const jsonInput = ref('')
 
 const form = reactive<{
+  tag: string
   node_name: string
   protocol: 'tuic' | 'vless' | 'anytls'
   server_address: string
@@ -29,8 +30,10 @@ const form = reactive<{
   short_id: string
   fingerprint: string
   flow: string
+  congestion_control: string
   remark: string
 }>({
+  tag: '',
   node_name: '',
   protocol: 'vless',
   server_address: '',
@@ -43,6 +46,7 @@ const form = reactive<{
   short_id: '',
   fingerprint: 'chrome',
   flow: 'xtls-rprx-vision',
+  congestion_control: 'bbr',
   remark: '',
 })
 
@@ -70,9 +74,10 @@ function onProtocolChange() {
 function openCreate() {
   editingId.value = null
   Object.assign(form, {
-    node_name: '', protocol: 'vless', server_address: '', server_port: 8443,
+    tag: '', node_name: '', protocol: 'vless', server_address: '', server_port: 8443,
     security: 'reality', sni: '', transport_type: 'direct', path: '',
-    public_key: '', short_id: '', fingerprint: 'chrome', flow: 'xtls-rprx-vision', remark: '',
+    public_key: '', short_id: '', fingerprint: 'chrome', flow: 'xtls-rprx-vision',
+    congestion_control: 'bbr', remark: '',
   })
   showJsonImport.value = false
   jsonInput.value = ''
@@ -82,12 +87,12 @@ function openCreate() {
 function openEdit(n: Node) {
   editingId.value = n.id
   Object.assign(form, {
-    node_name: n.node_name, protocol: n.protocol, server_address: n.server_address,
+    tag: n.tag || '', node_name: n.node_name || '', protocol: n.protocol, server_address: n.server_address,
     server_port: n.server_port, security: n.security || 'tls', sni: n.sni || '',
     transport_type: n.transport_type || 'direct', path: n.path || '',
     public_key: n.public_key || '', short_id: n.short_id || '',
     fingerprint: n.fingerprint || 'chrome', flow: n.flow || 'xtls-rprx-vision',
-    remark: n.remark || '',
+    congestion_control: n.congestion_control || 'bbr', remark: n.remark || '',
   })
   showJsonImport.value = false
   jsonInput.value = ''
@@ -96,7 +101,8 @@ function openEdit(n: Node) {
 
 async function saveNode() {
   const payload: Partial<Node> = {
-    node_name: form.node_name.trim(),
+    tag: form.tag.trim(),
+    node_name: form.node_name.trim() || null,
     protocol: form.protocol,
     server_address: form.server_address.trim(),
     server_port: Number(form.server_port),
@@ -108,6 +114,7 @@ async function saveNode() {
     short_id: form.short_id.trim() || null,
     fingerprint: form.fingerprint.trim() || null,
     flow: form.flow.trim() || null,
+    congestion_control: form.protocol === 'tuic' ? (form.congestion_control || 'bbr') : null,
     remark: form.remark.trim() || null,
     is_active: true,
   }
@@ -145,6 +152,7 @@ function applyJsonImport() {
   const utls = (tls.utls as Record<string, unknown>) || {}
   const transport = (obj.transport as Record<string, unknown>) || {}
 
+  form.tag = String(obj.tag || '')
   form.node_name = String(obj.tag || '')
   const proto = (obj.type as string) || form.protocol
   form.protocol = proto as 'tuic' | 'vless' | 'anytls'
@@ -156,6 +164,7 @@ function applyJsonImport() {
   form.short_id = String(reality.short_id || '')
   form.fingerprint = String((utls.fingerprint as string) || 'chrome')
   form.flow = String(obj.flow || 'xtls-rprx-vision')
+  form.congestion_control = String((obj.congestion_control as string) || 'bbr')
   form.transport_type = String(transport.type || 'direct')
   form.path = String(transport.path || '')
   onProtocolChange()
@@ -234,7 +243,7 @@ onMounted(() => {
         <div class="node-card-header">
           <div style="display: flex; align-items: center; gap: 8px">
             <input type="checkbox" :checked="selected.has(node.id)" @change="toggleSelect(node.id)" style="cursor: pointer" />
-            <div class="node-title">{{ node.node_name }}</div>
+            <div class="node-title">{{ node.tag || node.node_name }}</div>
           </div>
           <span class="badge" :class="`badge-${node.protocol}`">{{ node.protocol.toUpperCase() }}</span>
         </div>
@@ -273,8 +282,12 @@ onMounted(() => {
         </div>
 
         <div class="form-group">
-          <label>节点名称</label>
-          <input v-model="form.node_name" class="form-control" placeholder="例如：VLESS REALITY 专线 01" required />
+          <label>节点标识 Tag <span style="color: var(--accent-rose)">*</span> <span style="font-size: 0.75rem; color: var(--text-muted)">(导出配置文件中的唯一标识，如 my-node-01)</span></label>
+          <input v-model="form.tag" class="form-control" placeholder="例如：hk-hkt-01" required />
+        </div>
+        <div class="form-group">
+          <label>展示名称 (可选，仅后台显示)</label>
+          <input v-model="form.node_name" class="form-control" placeholder="例如：香港 HKT 专线 01" />
         </div>
         <div class="form-group">
           <label>管理员备注 (仅管理员可见)</label>
@@ -309,6 +322,15 @@ onMounted(() => {
             <label>TLS SNI / ServerName</label>
             <input v-model="form.sni" class="form-control" placeholder="aws.amazon.com" />
           </div>
+        </div>
+
+        <div v-if="form.protocol === 'tuic'" class="form-group">
+          <label>拥塞控制 (Congestion Control)</label>
+          <select v-model="form.congestion_control" class="form-control">
+            <option value="bbr">bbr</option>
+            <option value="cubic">cubic</option>
+            <option value="new_reno">new_reno</option>
+          </select>
         </div>
 
         <div v-if="form.security === 'reality'" style="background: rgba(15,23,42,0.4); padding: 12px; border-radius: 8px; border: 1px solid var(--border-glass); margin-bottom: 16px">

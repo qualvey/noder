@@ -1,6 +1,12 @@
-import json, sys, urllib.request, urllib.error
+import json, os, sys, urllib.request, urllib.error
 
-BASE = "http://127.0.0.1:8000"
+# Windows 控制台 UTF-8 输出，避免 cp1252 打印中文报错
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+# 可用环境变量 E2E_BASE 指向临时测试 server (默认 127.0.0.1:8000)
+BASE = os.getenv("E2E_BASE", "http://127.0.0.1:8000")
 ADMIN = {"X-Admin-Token": "admin-secret"}
 
 def req(method, path, body=None, headers=None, expect_fail=False):
@@ -54,7 +60,7 @@ def main():
     assert conf["route"]["rules"][0]["port"] == 853
     assert conf["dns"]["servers"][0]["server"] == "8.8.8.8"
     assert 'inbounds' in conf and 'log' in conf, "template sections preserved"
-    assert any(o.get("tag") == nodes[0]["node_name"] for o in conf["outbounds"]), "node injection preserved"
+    assert any(o.get("tag") == nodes[0]["tag"] for o in conf["outbounds"]), "node injection preserved"
     print("[4] /sub applied route+dns override, preserved template + node injection. Final:", conf["route"]["final"])
 
     # 5. 更新用户：清空 override (传空) 应生效

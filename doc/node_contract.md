@@ -24,22 +24,28 @@ class NodeContract:
 
 ### 当前协议契约
 
-| 协议 | fixed | deps | 说明 |
-| :--- | :--- | :--- | :--- |
-| tuic | security=tls | - | 传输安全固定 TLS |
-| vless | security=reality | security=reality → public_key, short_id 必填 | 固定 REALITY + 公钥/短ID |
-| anytls | - | security=reality → public_key, short_id 必填 | 支持 tls / reality |
+| 协议 | required | optional | fixed | deps |
+| :--- | :--- | :--- | :--- | :--- |
+| tuic | tag, server_address, server_port, uuid, password | congestion_control | security=tls | - |
+| vless | tag, server_address, server_port, uuid | node_name, flow | security=reality | security=reality → public_key, short_id；security=utls → fingerprint |
+| anytls | server_address, server_port | node_name, method, sni, transport_type, path, remark | - | security=reality → public_key, short_id |
 
-### 校验规则（核心读取阶段）
+> **字段归属说明**：`tag`/`node_name`/`server_address`/`server_port`/`security`/`public_key`/`short_id`/`fingerprint`/`flow`/`congestion_control` 等为**节点自有字段**（存 Node 表）；`uuid`/`password` 为**用户级凭证**（存 User 表，每个用户独立，见 models.py 方案 3）。
 
-`validate_node_contract(values)` 按顺序检查：
+### 校验规则（两阶段）
+
+`validate_node_contract(values, protocol, node_level=False)` 按顺序检查：
 
 1. **必填字段**：`required` 中缺失或为空的字段 → 400
 2. **固定取值**：`fixed` 中字段不等于约定值 → 400（如 tuic 必须 tls）
 3. **条件依赖**：字段取特定值时必须同时提供依赖字段 → 400（如 reality 必须有 public_key）
 4. **互斥**：字段取值组合冲突 → 400
 
-创建节点时校验完整数据；更新节点时用「现有值合并更新值」后的完整视图校验。
+**节点创建/更新**（`node_level=True`）：只校验节点自有字段（`required ∩ NODE_OWNED_FIELDS`），
+uuid/password 等用户级凭证不在节点 payload 中，此时不校验。
+
+**导出阶段**（`build_singbox_outbound`，`node_level=False`）：节点字段与用户凭证合并成完整视图后全量校验——
+tuic 缺 uuid/password、vless 缺 uuid 等直接 400，**不静默导出坏配置**（与不支持协议明确报错同一原则）。
 
 ## 3. 代理核心注册表 (CORE_REGISTRY)
 
@@ -68,15 +74,17 @@ CORE_REGISTRY = {
 
 ## 5. 测试
 
-`uv run python test_node_contract.py`（17 项断言）：
-- 契约单元校验：tuic/vless 固定取值、reality 依赖、必填缺失、未知协议
+`uv run python test_node_contract.py`：
+- 契约单元校验：tuic/vless 固定取值、reality 依赖、必填缺失、未知协议、全量/节点级两阶段校验
 - API 层：POST /api/nodes 非法数据 400 / 合法数据 200
 - 核心注册表：未知核心拒绝、不支持协议明确报错、支持协议放行
 
-回归：test_verification.py / test_config_override.py / test_file_dist.py 全部通过。
+回归：test_verification.py / test_config_override.py / test_file_dist.py / test_e2e_http.py 全部通过。
 
 ## 6. 版本
 
 - pyproject: 0.8.0（待 bump 至 0.9.0 随前端一起发版）
+- 本次对齐：Node 表新增 `tag`（outbound 标识，契约必填）与 `congestion_control`（tuic 可选）；
+  老库自动 ALTER 迁移 + `tag=node_name` 回填；导出阶段合并用户凭证全量校验
 - 新增模块：`app/contracts.py`
 - 重构：`models.py` 的协议校验迁移至契约驱动；`routers/nodes.py` 改用契约校验；`singbox.py` 加导出守卫

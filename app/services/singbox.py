@@ -4,7 +4,7 @@ import json
 from typing import List
 
 from app.config import ALLOWED_OVERRIDE_KEYS, TEMPLATE_PATH
-from app.contracts import assert_protocol_supported, get_core
+from app.contracts import assert_protocol_supported, get_core, validate_node_contract
 from app.models import Node, User, parse_config_override
 
 
@@ -12,7 +12,28 @@ def build_singbox_outbound(node: Node, user: User) -> dict:
     protocol = (node.protocol or "vless").lower()
     # 导出守卫：核心不支持该协议时明确报错（singbox 当前支持全部协议）
     assert_protocol_supported(get_core("singbox"), protocol)
-    tag = node.node_name
+    # 老数据兜底：tag 为空时用 node_name（新数据契约强制 tag 必填）
+    tag = node.tag or node.node_name
+
+    # 导出守卫：节点 + 用户凭证合并视图按契约全量校验
+    # （uuid/password 属用户级凭证，节点 CRUD 阶段不校验，导出时统一把关）
+    user_uuid = user.uuid or user.token
+    user_password = user.password or user.token
+    merged = {
+        "tag": tag,
+        "server_address": node.server_address,
+        "server_port": node.server_port,
+        "uuid": user_uuid,
+        "password": user_password,
+        "security": (node.security or "").lower(),
+        "node_name": node.node_name,
+        "flow": node.flow,
+        "public_key": node.public_key,
+        "short_id": node.short_id,
+        "fingerprint": node.fingerprint,
+        "congestion_control": node.congestion_control,
+    }
+    validate_node_contract(merged, protocol)
 
     outbound = {
         "type": protocol,
@@ -21,13 +42,10 @@ def build_singbox_outbound(node: Node, user: User) -> dict:
         "server_port": node.server_port,
     }
 
-    user_uuid = user.uuid or user.token
-    user_password = user.password or user.token
-
     if protocol == "tuic":
         outbound["uuid"] = user_uuid
         outbound["password"] = user_password
-        outbound["congestion_control"] = "bbr"
+        outbound["congestion_control"] = node.congestion_control or "bbr"
         outbound["zero_rtt_handshake"] = False
         tls_config = {"enabled": True}
         if node.sni:

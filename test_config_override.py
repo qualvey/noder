@@ -1,4 +1,4 @@
-import io, json, secrets, sys, uuid
+import io, json, os, secrets, sys, tempfile, uuid
 from pathlib import Path
 
 # 控制台 UTF-8 输出，避免 Windows cp1252 打印中文报错
@@ -8,24 +8,38 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 from fastapi import HTTPException
 from sqlmodel import Session
+import app.config as cfg
+import app.database as database
 from app.config import ALLOWED_OVERRIDE_KEYS
-from app.database import create_db_and_tables, engine
 from app.models import Node, NodeCreate, User, UserCreate, parse_config_override
 from app.routers.nodes import create_node
 from app.routers.subscription import get_singbox_config
 from app.routers.users import create_user
 
+_TMP_DB = None
+
 def reset_db():
-    db = Path(__file__).parent / "data.db"
-    if db.exists():
-        db.unlink()
-    create_db_and_tables()
+    """临时库，避免污染/锁定 data.db（dev server 运行时也可跑）。"""
+    global _TMP_DB
+    if _TMP_DB and os.path.exists(_TMP_DB):
+        try:
+            os.remove(_TMP_DB)
+        except OSError:
+            pass
+    _TMP_DB = tempfile.mktemp(suffix=".db")
+    cfg.DB_PATH = Path(_TMP_DB)
+    database.DB_PATH = cfg.DB_PATH
+    database.engine = database.create_engine(
+        f"sqlite:///{_TMP_DB}", connect_args={"check_same_thread": False}
+    )
+    database.create_db_and_tables()
 
 def test_config_override_workflow():
     reset_db()
-    with Session(engine) as session:
+    with Session(database.engine) as session:
         # 建一个节点
         node = create_node(NodeCreate(
+            tag="hk-tuic",
             node_name="HK TUIC Node",
             protocol="tuic", server_address="hk.example.com",
             server_port=8443, security="tls", sni="hk.example.com",
@@ -85,7 +99,7 @@ def test_config_override_workflow():
         # 模板的其他键 (log/services/inbounds/outbounds) 保留
         assert "log" in config and "inbounds" in config
         # outbounds 节点注入仍生效
-        assert any(o.get("tag") == "HK TUIC Node" for o in config["outbounds"])
+        assert any(o.get("tag") == "hk-tuic" for o in config["outbounds"])
         print("OK: /sub applied route+dns override, preserved template + node injection")
 
         # 6. 无 override 的用户不改变模板

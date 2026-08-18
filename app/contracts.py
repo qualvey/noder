@@ -34,6 +34,16 @@ class NodeContract:
     # 互斥: [(字段A, 取值A, 字段B, 取值B)] 表示 A==取值A 时 B 不能等于取值B
     conflicts: List[Tuple[str, str, str, str]] = field(default_factory=list)
 
+# ------------------------------------------------------------------
+# 节点自有字段：Node 表单/表可直接提供的字段。
+# uuid/password 属于用户级凭证（每个用户独立，见 models.py 方案 3），
+# 节点 CRUD 校验只看自有字段；导出时由 build_singbox_outbound 合并用户凭证后全量校验。
+# ------------------------------------------------------------------
+NODE_OWNED_FIELDS = {
+    "tag", "node_name", "server_address", "server_port", "security", "sni",
+    "method", "transport_type", "path", "public_key", "short_id",
+    "fingerprint", "flow", "remark", "congestion_control",
+}
 
 # ------------------------------------------------------------------
 # 协议契约定义
@@ -41,18 +51,19 @@ class NodeContract:
 PROTOCOL_CONTRACTS: Dict[str, NodeContract] = {
     "tuic": NodeContract(
         protocol="tuic",
-        required={"server_address", "server_port"},
-        optional={"node_name", "method", "sni", "remark"},
+        required={"tag","server_address", "server_port", "uuid","password"},
+        optional={"congestion_control"},
         fixed={"security": "tls"},  # TUIC 严格要求 tls
     ),
     "vless": NodeContract(
         protocol="vless",
-        required={"server_address", "server_port"},
-        optional={"node_name", "method", "sni", "transport_type", "path", "remark"},
+        required={"tag", "server_address", "server_port", "uuid"},
+        optional={"node_name", "flow"},
         fixed={"security": "reality"},  # VLESS 严格要求 reality
         deps={
             "security": {
                 "reality": ["public_key", "short_id"],  # REALITY 必须公钥+short_id
+                "utls":  ["fingerprint"]
             },
         },
     ),
@@ -82,17 +93,22 @@ def _is_empty(value) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
 
 
-def validate_node_contract(values: dict, protocol: Optional[str] = None) -> None:
-    """按契约校验节点字段 (核心读取阶段)。
+def validate_node_contract(
+    values: dict, protocol: Optional[str] = None, node_level: bool = False
+) -> None:
+    """按契约校验节点字段。
 
-    :param values: 节点完整字段 dict（创建=全部；更新=现有值合并更新值）
+    :param values: 节点字段 dict（创建=全部；更新=现有值合并更新值；导出=节点+用户凭证合并视图）
     :param protocol: 协议名；缺省时从 values['protocol'] 取
+    :param node_level: True=节点创建/更新场景，必填字段只查节点自有字段
+        （uuid/password 等用户级凭证由导出阶段合并后全量校验）
     校验失败抛 HTTPException 400。
     """
     contract = get_contract(protocol or values.get("protocol"))
 
-    # 1. 必填字段
-    missing = [f for f in contract.required if _is_empty(values.get(f))]
+    # 1. 必填字段（node_level 时只查节点自有字段；用户级凭证在导出合并视图校验）
+    required = contract.required if not node_level else contract.required & NODE_OWNED_FIELDS
+    missing = [f for f in required if _is_empty(values.get(f))]
     if missing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

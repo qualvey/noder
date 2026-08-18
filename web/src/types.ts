@@ -2,7 +2,8 @@
 
 export interface Node {
   id: number
-  node_name: string
+  tag: string
+  node_name?: string | null
   protocol: 'tuic' | 'vless' | 'anytls'
   server_address: string
   server_port: number
@@ -16,6 +17,7 @@ export interface Node {
   short_id?: string | null
   fingerprint?: string | null
   flow?: string | null
+  congestion_control?: string | null
   remark?: string | null
 }
 

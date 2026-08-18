@@ -20,7 +20,8 @@ class UserNodeLink(SQLModel, table=True):
 
 
 class NodeBase(SQLModel):
-    node_name: str                              # 节点名称
+    tag: Optional[str] = Field(default=None, index=True)  # 节点标识 (outbound tag)，契约必填
+    node_name: Optional[str] = Field(default=None)        # 展示名称 (可选，仅管理员可见)
     protocol: str = Field(default="vless")       # 仅限: tuic, vless, anytls
     server_address: str                         # 上游 IP / 域名
     server_port: int                            # 端口
@@ -36,6 +37,7 @@ class NodeBase(SQLModel):
     short_id: Optional[str] = None               # REALITY Short ID
     fingerprint: Optional[str] = "chrome"        # uTLS 指纹 (默认 chrome)
     flow: Optional[str] = "xtls-rprx-vision"     # 流控 (默认 xtls-rprx-vision)
+    congestion_control: Optional[str] = None      # TUIC 拥塞控制 (bbr/cubic/new_reno)，默认 bbr
     remark: Optional[str] = Field(default=None)  # 管理员备注 (仅管理员可见)
 
 
@@ -54,6 +56,7 @@ class NodeRead(NodeBase):
 
 
 class NodeUpdate(SQLModel):
+    tag: Optional[str] = None
     node_name: Optional[str] = None
     protocol: Optional[str] = None
     server_address: Optional[str] = None
@@ -68,6 +71,7 @@ class NodeUpdate(SQLModel):
     short_id: Optional[str] = None
     fingerprint: Optional[str] = None
     flow: Optional[str] = None
+    congestion_control: Optional[str] = None
     remark: Optional[str] = None
 
 

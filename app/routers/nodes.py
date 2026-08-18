@@ -19,7 +19,8 @@ router = APIRouter(
 
 @router.post("", response_model=NodeRead, summary="创建节点")
 def create_node(node_data: NodeCreate, session: Session = Depends(get_session)):
-    validate_node_contract(node_data.model_dump(), node_data.protocol)
+    # 节点级校验：只查节点自有字段（tag/地址/端口/fixed/deps）；uuid/password 在导出时合并校验
+    validate_node_contract(node_data.model_dump(), node_data.protocol, node_level=True)
     node = Node.model_validate(node_data)
     session.add(node)
     session.commit()
@@ -50,7 +51,7 @@ def update_node(node_id: int, node_data: NodeUpdate, session: Session = Depends(
     target_proto = update_dict.get("protocol", node.protocol)
     # 合并后的完整字段用于契约校验（更新只传部分字段）
     merged = {**node.model_dump(), **update_dict}
-    validate_node_contract(merged, target_proto)
+    validate_node_contract(merged, target_proto, node_level=True)
 
     for key, value in update_dict.items():
         setattr(node, key, value)

@@ -19,12 +19,18 @@ def create_db_and_tables():
     """建表 + 兼容旧库的 ALTER 迁移（幂等，失败忽略）。"""
     SQLModel.metadata.create_all(engine)
     with engine.connect() as conn:
-        for col in ["public_key", "short_id", "fingerprint", "flow", "remark"]:
+        for col in ["public_key", "short_id", "fingerprint", "flow", "remark", "tag", "congestion_control"]:
             try:
                 conn.execute(text(f"ALTER TABLE node ADD COLUMN {col} VARCHAR"))
                 conn.commit()
             except Exception:
                 pass
+        # 老数据回填：tag 为空时用 node_name 兜底（契约要求 tag 必填）
+        try:
+            conn.execute(text("UPDATE node SET tag = node_name WHERE tag IS NULL OR tag = ''"))
+            conn.commit()
+        except Exception:
+            pass
         for col in ["remark", "config_override"]:
             try:
                 conn.execute(text(f"ALTER TABLE user ADD COLUMN {col} VARCHAR"))
@@ -52,15 +58,18 @@ def seed_default_data():
 
         tuic_node = Node(
             node_name="TUIC 高速专线 01",
+            tag="tuic-01",
             protocol="tuic",
             server_address="tuic.example.com",
             server_port=8443,
             security="tls",
             sni="tuic.example.com",
+            congestion_control="bbr",
             is_active=True,
         )
         vless_node = Node(
             node_name="VLESS REALITY 专线 02",
+            tag="vless-02",
             protocol="vless",
             server_address="example.com",
             server_port=8443,
@@ -74,6 +83,7 @@ def seed_default_data():
         )
         anytls_node = Node(
             node_name="AnyTLS 极速专线 03",
+            tag="anytls-03",
             protocol="anytls",
             server_address="anytls.example.com",
             server_port=8443,

@@ -1,27 +1,36 @@
 import os
 import secrets
+import sys
+import tempfile
 import uuid
 from pathlib import Path
+
+# Windows 控制台 UTF-8 输出，避免 cp1252 打印中文报错
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from fastapi import HTTPException
 from sqlmodel import Session
-from app.database import create_db_and_tables, engine
+import app.config as cfg
+import app.database as database
 from app.models import Node, NodeCreate, User, UserCreate
 from app.routers.nodes import create_node
 from app.routers.subscription import get_singbox_config, get_user_nodes, verify_user_token
 from app.routers.users import create_user
 
 def test_full_workflow():
-    db_file = Path(__file__).parent / "data.db"
-    if db_file.exists():
-        try:
-            os.remove(db_file)
-        except Exception:
-            pass
-    create_db_and_tables()
-    
-    with Session(engine) as session:
+    # 临时库，避免污染/锁定 data.db（dev server 运行时也可跑）
+    tmp_db = tempfile.mktemp(suffix=".db")
+    cfg.DB_PATH = Path(tmp_db)
+    database.DB_PATH = cfg.DB_PATH
+    database.engine = database.create_engine(f"sqlite:///{tmp_db}", connect_args={"check_same_thread": False})
+    database.create_db_and_tables()
+
+    with Session(database.engine) as session:
         # 1. 测试 TUIC 协议非 TLS 被拦截
         invalid_tuic_data = NodeCreate(
+            tag="invalid-tuic",
             node_name="Invalid TUIC Node",
             protocol="tuic",
             server_address="invalid.com",
@@ -38,6 +47,7 @@ def test_full_workflow():
 
         # 2. 测试 VLESS 非 REALITY (如 tls) 被拦截
         invalid_vless_sec = NodeCreate(
+            tag="invalid-vless",
             node_name="Invalid VLESS TLS",
             protocol="vless",
             server_address="vless.example.com",
@@ -54,6 +64,7 @@ def test_full_workflow():
 
         # 3. 测试 VLESS REALITY 缺少 public_key / short_id 被拦截
         invalid_vless_data = NodeCreate(
+            tag="invalid-vless-reality",
             node_name="Invalid VLESS REALITY",
             protocol="vless",
             server_address="vless.example.com",
@@ -70,6 +81,7 @@ def test_full_workflow():
 
         # 3. 创建合规的 TUIC 节点 (带管理员备注)
         tuic_data = NodeCreate(
+            tag="hk-tuic-01",
             node_name="HK TUIC Node 01",
             protocol="tuic",
             server_address="hk.example.com",
@@ -84,6 +96,7 @@ def test_full_workflow():
         
         # 4. 创建完全符合 doc/vless.md 规格的 VLESS REALITY 节点
         vless_data = NodeCreate(
+            tag="bella-reality",
             node_name="bella-reality",
             protocol="vless",
             server_address="example.com",
@@ -100,6 +113,7 @@ def test_full_workflow():
         
         # 5. 创建 AnyTLS 节点
         anytls_data = NodeCreate(
+            tag="sg-anytls-01",
             node_name="SG AnyTLS Node 01",
             protocol="anytls",
             server_address="sg.example.com",
@@ -154,6 +168,11 @@ def test_full_workflow():
         print("First node outbound tag:", user_nodes[0]["outbound"]["tag"])
 
         print("\nALL VLESS REALITY AND /node API SPECIFICATION TESTS PASSED SUCCESSFULLY!")
+
+    try:
+        os.remove(tmp_db)
+    except OSError:
+        pass
 
 if __name__ == "__main__":
     test_full_workflow()
