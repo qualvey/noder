@@ -22,6 +22,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
 import main as app_module  # noqa: E402
+import app.config as cfg  # noqa: E402
+import app.database as database  # noqa: E402
+import app.services.dist as dist_svc  # noqa: E402
+import app.routers.files as files_router  # noqa: E402
+import app.routers.download as download_router  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 ADMIN = {"X-Admin-Token": "admin-secret"}
@@ -51,12 +56,18 @@ def make_test_zip(template_text: str) -> bytes:
 def main():
     # 使用临时数据库，避免污染 data.db
     tmp_db = tempfile.mktemp(suffix=".db")
-    app_module.DB_PATH = app_module.BASE_DIR / tmp_db
-    app_module.engine = app_module.create_engine(
-        f"sqlite:///{app_module.DB_PATH}", connect_args={"check_same_thread": False}
+    tmp_db_path = cfg.BASE_DIR / tmp_db
+    cfg.DB_PATH = tmp_db_path
+    database.DB_PATH = tmp_db_path
+    database.engine = database.create_engine(
+        f"sqlite:///{tmp_db_path}", connect_args={"check_same_thread": False}
     )
-    app_module.FILES_DIR = app_module.BASE_DIR / "data" / "files_test"
-    app_module.create_db_and_tables()
+    test_files_dir = cfg.BASE_DIR / "data" / "files_test"
+    cfg.FILES_DIR = test_files_dir
+    dist_svc.FILES_DIR = test_files_dir
+    files_router.FILES_DIR = test_files_dir
+    download_router.FILES_DIR = test_files_dir
+    database.create_db_and_tables()
 
     client = TestClient(app_module.app)
 
@@ -247,12 +258,12 @@ sing_box_bin: "./sing-box.exe"
 
     r = client.delete(f"/api/files/{apk_file['id']}", headers=ADMIN)
     check("删除文件成功", r.status_code == 200)
-    check("磁盘文件已清理", not (app_module.FILES_DIR / apk_file["stored_name"]).exists())
+    check("磁盘文件已清理", not (test_files_dir / apk_file["stored_name"]).exists())
 
     # 清理测试目录
-    if app_module.FILES_DIR.exists():
+    if test_files_dir.exists():
         import shutil
-        shutil.rmtree(app_module.FILES_DIR, ignore_errors=True)
+        shutil.rmtree(test_files_dir, ignore_errors=True)
     try:
         os.remove(tmp_db)
     except OSError:

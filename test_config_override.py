@@ -8,12 +8,12 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 from fastapi import HTTPException
 from sqlmodel import Session
-from main import (
-    engine, create_db_and_tables, Node, User,
-    create_node, create_user, get_singbox_config,
-    parse_config_override, ALLOWED_OVERRIDE_KEYS,
-    NodeCreate, UserCreate
-)
+from app.config import ALLOWED_OVERRIDE_KEYS
+from app.database import create_db_and_tables, engine
+from app.models import Node, NodeCreate, User, UserCreate, parse_config_override
+from app.routers.nodes import create_node
+from app.routers.subscription import get_singbox_config
+from app.routers.users import create_user
 
 def reset_db():
     db = Path(__file__).parent / "data.db"

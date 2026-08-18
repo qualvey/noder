@@ -4,11 +4,11 @@ import uuid
 from pathlib import Path
 from fastapi import HTTPException
 from sqlmodel import Session
-from main import (
-    engine, create_db_and_tables, Node, User,
-    create_node, create_user, get_singbox_config, get_user_nodes, verify_user_token,
-    NodeCreate, UserCreate
-)
+from app.database import create_db_and_tables, engine
+from app.models import Node, NodeCreate, User, UserCreate
+from app.routers.nodes import create_node
+from app.routers.subscription import get_singbox_config, get_user_nodes, verify_user_token
+from app.routers.users import create_user
 
 def test_full_workflow():
     db_file = Path(__file__).parent / "data.db"
