@@ -1,9 +1,8 @@
 <script setup lang="ts">
 // 使用指引与 API 说明
-import { apiBase } from '../api'
+import { apiLinkPrefix } from '../utils'
 
-const base = apiBase() || ''
-const origin = location.origin + base
+const origin = location.origin + apiLinkPrefix()
 </script>
 
 <template>

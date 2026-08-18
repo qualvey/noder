@@ -77,15 +77,15 @@ export async function copyText(text: string): Promise<boolean> {
 
 // 用户订阅链接（兼容子路径反代：基于当前 origin + BASE_URL）
 // 注意: base='./'(相对路径构建) 时 apiBase() 为 '.', 拼绝对 URL 必须剔除
-function linkPrefix(): string {
+export function apiLinkPrefix(): string {
   const b = apiBase()
   return b === '.' || b === '' ? '' : b
 }
 
 export function buildSubLink(token: string): string {
-  return `${location.origin}${linkPrefix()}/sub?token=${encodeURIComponent(token)}`
+  return `${location.origin}${apiLinkPrefix()}/sub?token=${encodeURIComponent(token)}`
 }
 
 export function buildMihomoLink(token: string): string {
-  return `${location.origin}${linkPrefix()}/mihomo?token=${encodeURIComponent(token)}`
+  return `${location.origin}${apiLinkPrefix()}/mihomo?token=${encodeURIComponent(token)}`
 }
