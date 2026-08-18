@@ -192,8 +192,8 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
         <div class="modal-title">{{ editing ? '编辑节点' : '新增代理节点' }}</div>
         <button class="modal-close" @click="emit('close')">&times;</button>
       </div>
-      <form @submit.prevent="saveNode">
-        <div style="margin-bottom: 14px; background: rgba(59,130,246,0.1); padding: 10px; border-radius: 8px; border: 1px dashed rgba(59,130,246,0.4)">
+      <form @submit.prevent="saveNode" class="modal-form">
+        <div class="form-span" style="margin-bottom: 14px; background: rgba(59,130,246,0.1); padding: 10px; border-radius: 8px; border: 1px dashed rgba(59,130,246,0.4)">
           <div style="display: flex; justify-content: space-between; align-items: center">
             <span style="font-size: 0.8rem; color: var(--primary); font-weight: 600">📋 从 JSON 导入 <span style="font-weight: normal; font-size: 0.75rem; color: var(--text-muted)">(按 Ctrl+V 快捷提取)</span></span>
             <button type="button" class="btn btn-secondary btn-sm" @click="showJsonImport = !showJsonImport">展开/折叠导入</button>
@@ -206,46 +206,42 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
         </div>
 
         <div class="form-group">
-          <label>节点标识 Tag <span style="color: var(--accent-rose)">*</span> <span style="font-size: 0.75rem; color: var(--text-muted)">(导出配置文件中的唯一标识，如 my-node-01)</span></label>
-          <input v-model="form.tag" class="form-control" placeholder="例如：hk-hkt-01" required />
+          <label>节点标识 Tag <span style="color: var(--accent-rose)">*</span></label>
+          <input v-model="form.tag" class="form-control" placeholder="如 hk-hkt-01（配置内唯一标识）" required />
         </div>
         <div class="form-group">
-          <label>展示名称 (可选，仅后台显示)</label>
-          <input v-model="form.node_name" class="form-control" placeholder="例如：香港 HKT 专线 01" />
+          <label>展示名称 (可选)</label>
+          <input v-model="form.node_name" class="form-control" placeholder="如：香港 HKT 专线 01" />
         </div>
         <div class="form-group">
           <label>管理员备注 (仅管理员可见)</label>
           <input v-model="form.remark" class="form-control" placeholder="如：香港 HKT 物理机 2026到期" />
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>协议类型 (仅限 3 种)</label>
-            <select v-model="form.protocol" class="form-control" @change="onProtocolChange">
-              <option value="tuic">TUIC</option>
-              <option value="vless">VLESS</option>
-              <option value="anytls">AnyTLS</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>端口</label>
-            <input v-model.number="form.server_port" type="number" class="form-control" placeholder="8443" required />
-          </div>
+        <div class="form-group">
+          <label>协议类型 (仅限 3 种)</label>
+          <select v-model="form.protocol" class="form-control" @change="onProtocolChange">
+            <option value="tuic">TUIC</option>
+            <option value="vless">VLESS</option>
+            <option value="anytls">AnyTLS</option>
+          </select>
         </div>
         <div class="form-group">
+          <label>端口</label>
+          <input v-model.number="form.server_port" type="number" class="form-control" placeholder="8443" required />
+        </div>
+        <div class="form-group form-span">
           <label>服务器地址 (IP / 域名)</label>
           <input v-model="form.server_address" class="form-control" placeholder="1.2.3.4 或 hk.example.com" required />
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>传输安全 (Security)</label>
-            <select v-model="form.security" class="form-control">
-              <option v-for="opt in securityOptions[form.protocol] || ['tls']" :key="opt" :value="opt">{{ opt.toUpperCase() }}</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>TLS SNI / ServerName</label>
-            <input v-model="form.sni" class="form-control" placeholder="aws.amazon.com" />
-          </div>
+        <div class="form-group">
+          <label>传输安全 (Security)</label>
+          <select v-model="form.security" class="form-control">
+            <option v-for="opt in securityOptions[form.protocol] || ['tls']" :key="opt" :value="opt">{{ opt.toUpperCase() }}</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>TLS SNI / ServerName</label>
+          <input v-model="form.sni" class="form-control" placeholder="aws.amazon.com" />
         </div>
 
         <div v-if="form.protocol === 'tuic'" class="form-group">
@@ -257,20 +253,18 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
           </select>
         </div>
 
-        <div v-if="form.security === 'reality'" style="background: rgba(15,23,42,0.4); padding: 12px; border-radius: 8px; border: 1px solid var(--border-glass); margin-bottom: 16px">
+        <div v-if="form.security === 'reality'" class="form-span reality-panel">
           <div class="form-group">
             <label>Public Key (REALITY 公钥 <span style="color: var(--accent-rose)">*</span>)</label>
             <input v-model="form.public_key" class="form-control" placeholder="如 99BZ0JCnaSB55YEQYOCV66GhKTiK2ZGMPR3b6D_Q3wo" />
           </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Short ID (简短 ID <span style="color: var(--accent-rose)">*</span>)</label>
-              <input v-model="form.short_id" class="form-control" placeholder="如 1a91" />
-            </div>
-            <div class="form-group">
-              <label>uTLS 指纹 (Fingerprint)</label>
-              <input v-model="form.fingerprint" class="form-control" placeholder="chrome" />
-            </div>
+          <div class="form-group">
+            <label>Short ID (简短 ID <span style="color: var(--accent-rose)">*</span>)</label>
+            <input v-model="form.short_id" class="form-control" placeholder="如 1a91" />
+          </div>
+          <div class="form-group">
+            <label>uTLS 指纹 (Fingerprint)</label>
+            <input v-model="form.fingerprint" class="form-control" placeholder="chrome" />
           </div>
           <div class="form-group">
             <label>Flow (流控方式)</label>
@@ -278,20 +272,18 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
           </div>
         </div>
 
-        <div v-if="['vless', 'anytls'].includes(form.protocol)" class="form-row">
-          <div class="form-group">
-            <label>传输层 (Transport)</label>
-            <select v-model="form.transport_type" class="form-control">
-              <option value="direct">direct</option>
-              <option value="ws">WebSocket (ws)</option>
-              <option value="grpc">gRPC</option>
-              <option value="http">HTTP</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>路径 (Path)</label>
-            <input v-model="form.path" class="form-control" placeholder="/path" />
-          </div>
+        <div v-if="['vless', 'anytls'].includes(form.protocol)" class="form-group">
+          <label>传输层 (Transport)</label>
+          <select v-model="form.transport_type" class="form-control">
+            <option value="direct">direct</option>
+            <option value="ws">WebSocket (ws)</option>
+            <option value="grpc">gRPC</option>
+            <option value="http">HTTP</option>
+          </select>
+        </div>
+        <div v-if="['vless', 'anytls'].includes(form.protocol)" class="form-group">
+          <label>路径 (Path)</label>
+          <input v-model="form.path" class="form-control" placeholder="/path" />
         </div>
 
         <div class="modal-footer">
