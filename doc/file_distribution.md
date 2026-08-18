@@ -7,6 +7,7 @@
 
 - **APK**：全部用户共用同一份，直接静态分发；也可填远程链接自动拉取缓存。
 - **ZIP**：一个文件夹，内含 **1 个 yaml 模板**（内容按用户个性化渲染）+ 其他公共文件（原样分发）。
+- **文本 (text)**：粘贴一段文本内容即生成下载链接，下载时按用户渲染占位符（免打包的模板组件）。
 
 ## 2. 架构设计
 
@@ -54,7 +55,7 @@
 
 | 方法 | 路径 | 说明 |
 | :--- | :--- | :--- |
-| POST | `/api/files` | multipart 上传：`file`(可选) + `source_url`(可选，二选一) + `file_type`(auto/apk/zip) + `template_name`(可选) + `name` + `remark`。ZIP 未指定模板名时自动取第一个 `.yaml/.yml` |
+| POST | `/api/files` | multipart 上传，三选一：`file` / `source_url` / `content_text`(文本)；另可带 `file_type`(auto/apk/zip) + `template_name`(可选) + `name` + `remark`。ZIP 未指定模板名时自动取第一个 `.yaml/.yml` |
 | POST | `/api/files/{id}/refresh` | 强制刷新远程文件缓存 |
 | GET | `/api/files` | 文件列表（按 id 倒序） |
 | PUT | `/api/files/{id}` | 更新元数据：`name` / `template_name` / `is_active` / `remark` |
@@ -137,9 +138,15 @@ nodes:
 
 回归：`uv run python test_verification.py`、`test_config_override.py`、`test_e2e_http.py` 均通过。
 
+### 文本组件 (file_type=text)
+
+- 提交 `content_text` 字段即可：内容存为 UTF-8 文本文件，`original_name` 取 `name`（无后缀自动补 `.txt`）。
+- 下载时**同样经过模板渲染引擎**（占位符 + 硬编码凭证智能替换），每个用户拿到自己渲染后的版本，`text/plain` 附件返回。
+- 适合：个性化配置文件、启动脚本、说明文档等免打包场景。
+
 ## 8. 版本
 
-- pyproject: 0.5.0 → 0.6.0
-- FastAPI app version: 0.7.0 → 0.8.0
-- 新能力：远程链接拉取 + 1 天缓存 + 手动刷新
+- pyproject: 0.6.0 → 0.7.0
+- FastAPI app version: 0.8.0 → 0.9.0
+- 新能力：文本内容组件 (字符串 → 下载链接，支持模板渲染)
 - 新依赖：`python-multipart`（上传）、`pyyaml`（YAML 渲染）；dev 依赖：`httpx2`（TestClient）

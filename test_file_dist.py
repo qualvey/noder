@@ -200,7 +200,38 @@ sing_box_bin: "./sing-box.exe"
 
     srv.shutdown()
 
-    print("== 4. 权限与状态控制 ==")
+    print("== 4. 文本内容组件 (字符串 -> 下载链接) ==")
+    r = client.post("/api/files", headers=ADMIN, data={
+        "name": "launcher.conf", "content_text": "upstream: https://hk.ryugo.org/sub?token={{token}}\ntoken: \"{{token}}\"\nuser: {{name}}\nsing_box_bin: ./sing-box.exe\n"
+    })
+    check("文本内容创建成功", r.status_code == 200, r.text)
+    text_file = r.json()
+    check("类型识别为 text", text_file["file_type"] == "text")
+    check("文件名保留指定后缀", text_file["original_name"] == "launcher.conf", text_file["original_name"])
+    check("文本模式无 source_url", text_file["source_url"] is None)
+
+    r = client.get(f"/dl/{text_file['id']}", params={"token": token})
+    check("文本下载 200", r.status_code == 200)
+    body = r.content.decode("utf-8")
+    check("占位符按用户渲染 token", f"token: \"{token}\"" in body, body)
+    check("URL 内占位符渲染", f"sub?token={token}" in body)
+    check("占位符渲染 name", f"user: 测试用户甲" in body)
+    check("公共内容原样", "sing_box_bin: ./sing-box.exe" in body)
+    check("响应 Content-Disposition 附件", "attachment" in r.headers.get("content-disposition", ""))
+
+    # 硬编码 token 智能替换同样作用于文本模式
+    r = client.post("/api/files", headers=ADMIN, data={
+        "name": "conf2.txt", "content_text": f"token: \"{token_b}\"\n"
+    })
+    assert r.status_code == 200, r.text
+    text_file2 = r.json()
+    r = client.get(f"/dl/{text_file2['id']}", params={"token": token})
+    body2 = r.content.decode("utf-8")
+    check("文本模式硬编码 token 自动替换", f"token: \"{token}\"" in body2, body2)
+    check("用户乙 token 不再出现", token_b not in body2)
+
+    print("== 5. 权限与状态控制 ==")
+
 
     r = client.get(f"/dl/{apk_file['id']}", params={"token": "wrong-token"})
     check("无效 token 拒绝 401", r.status_code == 401)
@@ -211,7 +242,7 @@ sing_box_bin: "./sing-box.exe"
     check("停用后下载 404", r.status_code == 404)
 
     r = client.get("/api/files", headers=ADMIN)
-    check("文件列表 4 条", len(r.json()) == 4)
+    check("文件列表 5 条", len(r.json()) == 6)
     check("管理 API 无 token 拒绝", client.get("/api/files").status_code == 401)
 
     r = client.delete(f"/api/files/{apk_file['id']}", headers=ADMIN)

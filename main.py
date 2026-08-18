@@ -41,7 +41,7 @@ ALLOWED_OVERRIDE_KEYS = {"route", "dns"}
 
 # 分发文件存储目录与限制
 FILES_DIR = BASE_DIR / "data" / "files"
-ALLOWED_FILE_TYPES = {"apk", "zip"}
+ALLOWED_FILE_TYPES = {"apk", "zip", "text"}
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 REMOTE_CACHE_TTL = 86400  # 远程拉取缓存有效期: 1 天 (秒)
 
@@ -334,7 +334,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Sing-Box Subscription Middleman",
     description="支持多协议节点与动态 Sing-Box 多节点订阅导出的中间件管理服务",
-    version="0.8.0",
+    version="0.9.0",
     lifespan=lifespan
 )
 
@@ -892,9 +892,10 @@ async def create_dist_file(
     name: Optional[str] = Form(None),
     remark: Optional[str] = Form(None),
     source_url: Optional[str] = Form(None),
+    content_text: Optional[str] = Form(None),
     session: Session = Depends(get_session),
 ):
-    # 数据来源：本地文件 或 远程链接 (二选一)
+    # 数据来源：本地文件 / 远程链接 / 文本内容 (三选一)
     if file is not None and file.filename:
         content = await file.read()
         if not content:
@@ -906,8 +907,17 @@ async def create_dist_file(
         source_url = validate_remote_url(source_url.strip())
         content = fetch_remote_file(source_url)
         original_name = Path(urllib.parse.urlparse(source_url).path).name or "remote.bin"
+    elif content_text is not None:
+        payload = content_text
+        content = payload.encode("utf-8")
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"文本过大，最大支持 {MAX_FILE_SIZE // (1024 * 1024)}MB")
+        original_name = (name or "file").strip() or "file.txt"
+        if not Path(original_name).suffix:
+            original_name += ".txt"
+        file_type = "text"
     else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请上传文件或填写远程链接 (二选一)")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请上传文件、填写远程链接或输入文本内容 (三选一)")
 
     # 类型判定：auto 时按扩展名推断
     if file_type in ("auto", "", None):
@@ -1018,6 +1028,18 @@ def download_dist_file(file_id: int, token: str = Query(..., description="用户
             stored_path = FILES_DIR / dist.stored_name
         except HTTPException as e:
             print(f"[file-dist] remote refresh failed, serving stale cache: {e.detail}")
+
+    if dist.file_type == "text":
+        # 文本文件：支持模板占位符渲染，按用户个性化输出
+        known_tokens = {u.token for u in session.exec(select(User)).all()}
+        rendered = render_template_text(
+            stored_path.read_text(encoding="utf-8", errors="replace"), user, known_tokens
+        ).encode("utf-8")
+        return Response(
+            content=rendered,
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{dist.original_name}"'},
+        )
 
     if dist.file_type == "zip":
         known_tokens = {u.token for u in session.exec(select(User)).all()}

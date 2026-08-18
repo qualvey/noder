@@ -878,7 +878,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <td>${escapeHtml(f.name)}${f.remark ? `<div style="font-size:0.72rem;color:var(--text-muted);">${escapeHtml(f.remark)}</div>` : ''}</td>
         <td><span class="badge badge-${f.file_type === 'zip' ? 'vless' : 'tuic'}">${f.file_type.toUpperCase()}</span></td>
         <td>${formatFileSize(f.size)}</td>
-        <td>${f.source_url ? `<span title="${escapeHtml(f.source_url)}" style="cursor:help;">🔗 远程</span>` : '<span style="color:var(--text-muted);">📁 本地</span>'}</td>
+        <td>${f.source_url ? `<span title="${escapeHtml(f.source_url)}" style="cursor:help;">🔗 远程</span>` : (f.file_type === 'text' ? '<span style="color:var(--text-muted);">📝 文本</span>' : '<span style="color:var(--text-muted);">📁 本地</span>')}</td>
         <td>${f.file_type === 'zip' ? (f.template_name || '-') : '-'}</td>
         <td>${f.is_active ? '<span style="color:var(--accent-emerald);">🟢 启用</span>' : '<span style="color:var(--accent-rose);">🔴 停用</span>'}</td>
         <td>
@@ -950,22 +950,28 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     const fileInput = document.getElementById('fileInput');
     const sourceUrl = document.getElementById('fileSourceUrl').value.trim();
+    const content = document.getElementById('fileContent').value;
 
     const hasFile = fileInput.files.length > 0;
-    if (!hasFile && !sourceUrl) {
-      showToast('请选择文件或填写远程链接', 'error');
+    const hasUrl = sourceUrl.length > 0;
+    const hasContent = content.trim().length > 0;
+    const chosen = [hasFile, hasUrl, hasContent].filter(Boolean).length;
+    if (chosen === 0) {
+      showToast('请选择文件、填写远程链接或输入文本内容', 'error');
       return;
     }
-    if (hasFile && sourceUrl) {
-      showToast('本地文件与远程链接只能二选一', 'error');
+    if (chosen > 1) {
+      showToast('本地文件 / 远程链接 / 文本内容只能三选一', 'error');
       return;
     }
 
     const fd = new FormData();
     if (hasFile) {
       fd.append('file', fileInput.files[0]);
-    } else {
+    } else if (hasUrl) {
       fd.append('source_url', sourceUrl);
+    } else {
+      fd.append('content_text', content);
     }
     fd.append('file_type', document.getElementById('fileType').value);
     fd.append('template_name', document.getElementById('fileTemplateName').value.trim());
@@ -973,7 +979,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fd.append('remark', document.getElementById('fileRemark').value.trim());
     try {
       await apiFetch('/api/files', { method: 'POST', body: fd });
-      showToast(sourceUrl ? '远程文件已添加 (首次拉取完成)' : '分发文件上传成功');
+      showToast(sourceUrl ? '远程文件已添加 (首次拉取完成)' : (content ? '文本内容已保存' : '分发文件上传成功'));
       closeModal('fileModal');
       fetchFiles();
     } catch (err) {}
