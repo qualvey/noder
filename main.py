@@ -21,7 +21,7 @@ from app.routers import download, files, nodes, subscription, users
 app = FastAPI(
     title="Sing-Box Subscription Middleman",
     description="支持多协议节点与动态 Sing-Box 多节点订阅导出的中间件管理服务",
-    version="0.10.0",
+    version="0.11.0",
     lifespan=lifespan,
 )
 

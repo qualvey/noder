@@ -10,7 +10,7 @@ from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlmodel import Field, Relationship, SQLModel
 
-from app.config import ALLOWED_OVERRIDE_KEYS, ALLOWED_PROTOCOLS
+from app.config import ALLOWED_OVERRIDE_KEYS
 
 
 class UserNodeLink(SQLModel, table=True):
@@ -143,33 +143,6 @@ class DistFileUpdate(SQLModel):
 # ------------------------------------------------------------------
 # 校验辅助函数
 # ------------------------------------------------------------------
-def validate_node_protocol_and_security(protocol: str, security: Optional[str], public_key: Optional[str] = None, short_id: Optional[str] = None):
-    proto = protocol.lower() if protocol else "vless"
-    sec = (security or "").lower()
-
-    if proto not in ALLOWED_PROTOCOLS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Protocol '{protocol}' is invalid. Allowed protocols: {', '.join(ALLOWED_PROTOCOLS)}"
-        )
-    if proto == "tuic" and sec != "tls":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="TUIC protocol strictly requires security mode to be 'tls'."
-        )
-    if proto == "vless":
-        if sec != "reality":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="VLESS protocol strictly requires security mode to be 'reality'."
-            )
-        if not public_key or not short_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="VLESS REALITY protocol strictly requires both 'public_key' and 'short_id'."
-            )
-
-
 def parse_config_override(raw: Optional[str]) -> Optional[dict]:
     """校验并规范化用户 config_override (JSON 字符串)。返回规范化后的 dict；为空/None 返回 None。"""
     if raw is None:

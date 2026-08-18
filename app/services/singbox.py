@@ -4,11 +4,14 @@ import json
 from typing import List
 
 from app.config import ALLOWED_OVERRIDE_KEYS, TEMPLATE_PATH
+from app.contracts import assert_protocol_supported, get_core
 from app.models import Node, User, parse_config_override
 
 
 def build_singbox_outbound(node: Node, user: User) -> dict:
     protocol = (node.protocol or "vless").lower()
+    # 导出守卫：核心不支持该协议时明确报错（singbox 当前支持全部协议）
+    assert_protocol_supported(get_core("singbox"), protocol)
     tag = node.node_name
 
     outbound = {

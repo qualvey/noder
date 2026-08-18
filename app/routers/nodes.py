@@ -5,9 +5,10 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
+from app.contracts import validate_node_contract
 from app.database import get_session
 from app.deps import verify_admin_token
-from app.models import Node, NodeCreate, NodeRead, NodeUpdate, validate_node_protocol_and_security
+from app.models import Node, NodeCreate, NodeRead, NodeUpdate
 
 router = APIRouter(
     prefix="/api/nodes",
@@ -18,7 +19,7 @@ router = APIRouter(
 
 @router.post("", response_model=NodeRead, summary="创建节点")
 def create_node(node_data: NodeCreate, session: Session = Depends(get_session)):
-    validate_node_protocol_and_security(node_data.protocol, node_data.security, node_data.public_key, node_data.short_id)
+    validate_node_contract(node_data.model_dump(), node_data.protocol)
     node = Node.model_validate(node_data)
     session.add(node)
     session.commit()
@@ -47,10 +48,9 @@ def update_node(node_id: int, node_data: NodeUpdate, session: Session = Depends(
 
     update_dict = node_data.model_dump(exclude_unset=True)
     target_proto = update_dict.get("protocol", node.protocol)
-    target_sec = update_dict.get("security", node.security)
-    target_pbk = update_dict.get("public_key", node.public_key)
-    target_sid = update_dict.get("short_id", node.short_id)
-    validate_node_protocol_and_security(target_proto, target_sec, target_pbk, target_sid)
+    # 合并后的完整字段用于契约校验（更新只传部分字段）
+    merged = {**node.model_dump(), **update_dict}
+    validate_node_contract(merged, target_proto)
 
     for key, value in update_dict.items():
         setattr(node, key, value)
