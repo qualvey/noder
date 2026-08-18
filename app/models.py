@@ -153,6 +153,11 @@ class DistFileUpdate(SQLModel):
     remark: Optional[str] = None
 
 
+class TextContentUpdate(SQLModel):
+    """文本文件内容更新。"""
+    content_text: str
+
+
 # ------------------------------------------------------------------
 # 校验辅助函数
 # ------------------------------------------------------------------

@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 from app.config import ALLOWED_FILE_TYPES, FILES_DIR, MAX_FILE_SIZE
 from app.database import get_session
 from app.deps import verify_admin_token
-from app.models import DistFile, DistFileUpdate
+from app.models import DistFile, DistFileUpdate, TextContentUpdate
 from app.services.dist import fetch_remote_file, refresh_remote_file, validate_remote_url
 
 router = APIRouter(
@@ -102,6 +102,37 @@ async def create_dist_file(
         source_url=source_url,
         cached_at=datetime.now().isoformat(timespec="seconds") if source_url else None,
     )
+    session.add(dist)
+    session.commit()
+    session.refresh(dist)
+    return dist
+
+
+@router.get("/{file_id}/content", summary="获取文本文件内容 (管理端)")
+def get_file_content(file_id: int, session: Session = Depends(get_session)):
+    dist = session.get(DistFile, file_id)
+    if not dist:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    if dist.file_type != "text":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅文本类型文件支持内容查看")
+    stored_path = FILES_DIR / dist.stored_name
+    if not stored_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File data missing on disk")
+    return {"content": stored_path.read_text(encoding="utf-8", errors="replace")}
+
+
+@router.post("/{file_id}/content", response_model=DistFile, summary="更新文本文件内容 (管理端)")
+def update_file_content(file_id: int, payload: TextContentUpdate, session: Session = Depends(get_session)):
+    dist = session.get(DistFile, file_id)
+    if not dist:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    if dist.file_type != "text":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅文本类型文件支持内容编辑")
+    content = payload.content_text.encode("utf-8")
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"文本过大，最大支持 {MAX_FILE_SIZE // (1024 * 1024)}MB")
+    (FILES_DIR / dist.stored_name).write_bytes(content)
+    dist.size = len(content)
     session.add(dist)
     session.commit()
     session.refresh(dist)

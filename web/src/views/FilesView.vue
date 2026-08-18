@@ -14,6 +14,12 @@ const showModal = ref(false)
 const sharedToken = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 
+// 文本文件编辑弹窗
+const showTextModal = ref(false)
+const textEdit = ref<DistFile | null>(null)
+const textForm = ref({ name: '', downloadName: '', remark: '', content: '' })
+const textLoading = ref(false)
+
 type FileType = 'apk' | 'zip' | 'text'
 const form = ref({
   type: 'apk' as FileType,
@@ -156,6 +162,40 @@ function removeFile(f: DistFile) {
     .catch((e) => toast(e.message, 'error'))
 }
 
+// 文本文件编辑：拉取内容 -> 弹窗 -> 保存
+async function openTextEdit(f: DistFile) {
+  textLoading.value = true
+  textEdit.value = f
+  showTextModal.value = true
+  try {
+    const r = await api.files.getContent(f.id)
+    textForm.value = { name: f.name, downloadName: f.download_name || '', remark: f.remark || '', content: r.content }
+  } catch (e) {
+    toast((e as Error).message, 'error')
+    showTextModal.value = false
+  } finally {
+    textLoading.value = false
+  }
+}
+
+async function saveTextEdit() {
+  if (!textEdit.value) return
+  try {
+    // 内容 + 元数据（名称/下载文件名/备注）
+    await api.files.updateContent(textEdit.value.id, textForm.value.content)
+    await api.files.update(textEdit.value.id, {
+      name: textForm.value.name.trim() || textEdit.value.name,
+      download_name: textForm.value.downloadName.trim() || null,
+      remark: textForm.value.remark.trim() || null,
+    })
+    toast('文本文件已更新')
+    showTextModal.value = false
+    fetchData()
+  } catch (e) {
+    toast((e as Error).message, 'error')
+  }
+}
+
 onMounted(fetchData)
 </script>
 
@@ -231,6 +271,7 @@ onMounted(fetchData)
             </td>
             <td>
               <div style="display: flex; gap: 6px">
+                <button v-if="f.file_type === 'text'" class="btn btn-secondary btn-sm" @click="openTextEdit(f)">编辑</button>
                 <button v-if="f.source_url" class="btn btn-secondary btn-sm" @click="refreshRemote(f, $event.currentTarget as HTMLButtonElement)">🔄 刷新</button>
                 <button class="btn btn-secondary btn-sm" @click="toggleActive(f)">{{ f.is_active ? '停用' : '启用' }}</button>
                 <button class="btn btn-danger btn-sm" @click="popover.show($event.currentTarget as Element, '⚠️ 确定删除该分发文件？(磁盘文件一并删除)', () => removeFile(f))">删除</button>
@@ -324,6 +365,39 @@ onMounted(fetchData)
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" @click="showModal = false">取消</button>
           <button type="submit" class="btn btn-primary">上传</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 文本文件编辑 Modal -->
+  <div class="modal-overlay" :class="{ active: showTextModal }" @click.self="showTextModal = false">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">编辑文本文件{{ textEdit ? `：${textEdit.name}` : '' }}</div>
+        <button class="modal-close" @click="showTextModal = false">&times;</button>
+      </div>
+      <form @submit.prevent="saveTextEdit" class="modal-form">
+        <div class="form-group">
+          <label>显示名称</label>
+          <input v-model="textForm.name" class="form-control" placeholder="列表展示名称" />
+        </div>
+        <div class="form-group">
+          <label>下载文件名 (含后缀)</label>
+          <input v-model="textForm.downloadName" class="form-control" placeholder="留空用原始名" />
+        </div>
+        <div class="form-group form-span">
+          <label>文本内容（原样分发，不做渲染）</label>
+          <textarea v-model="textForm.content" class="form-control" rows="10" style="font-family: var(--font-mono); font-size: 0.78rem"
+            placeholder="正在加载..." :disabled="textLoading"></textarea>
+        </div>
+        <div class="form-group form-span">
+          <label>备注</label>
+          <input v-model="textForm.remark" class="form-control" placeholder="如 仅供付费用户下载" />
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" @click="showTextModal = false">取消</button>
+          <button type="submit" class="btn btn-primary" :disabled="textLoading">保存</button>
         </div>
       </form>
     </div>

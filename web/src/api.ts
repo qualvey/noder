@@ -68,6 +68,9 @@ export const api = {
     update: (id: number, body: Partial<DistFile>) => request<DistFile>(`/api/files/${id}`, { method: 'PUT', body }),
     remove: (id: number) => request<{ message: string }>(`/api/files/${id}`, { method: 'DELETE' }),
     refresh: (id: number) => request<DistFile>(`/api/files/${id}/refresh`, { method: 'POST' }),
+    getContent: (id: number) => request<{ content: string }>(`/api/files/${id}/content`),
+    updateContent: (id: number, content_text: string) =>
+      request<DistFile>(`/api/files/${id}/content`, { method: 'POST', body: { content_text } }),
   },
   settings: {
     sharedToken: () => request<{ token: string }>('/api/settings/shared-token'),

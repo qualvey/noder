@@ -264,6 +264,21 @@ sing_box_bin: "./sing-box.exe"
     check("文本模式硬编码 token 原样保留", f"token: \"{token_b}\"" in body2, body2)
     check("未替换为下载者 token", f"token: \"{token}\"" not in body2)
 
+    print("== 4.1 文本文件编辑 ==")
+    r = client.get(f"/api/files/{text_file['id']}/content", headers=ADMIN)
+    check("拉取文本内容 200", r.status_code == 200, r.text)
+    check("内容与上传一致", "sing_box_bin: ./sing-box.exe" in r.json()["content"])
+    r = client.post(f"/api/files/{text_file['id']}/content", headers=ADMIN, json={
+        "content_text": "edited: new content line\nsecond line\n"
+    })
+    check("更新文本内容 200", r.status_code == 200, r.text)
+    check("大小已更新", r.json()["size"] == len("edited: new content line\nsecond line\n".encode("utf-8")), r.text)
+    r = client.get(f"/dl/{text_file['id']}", params={"token": shared})
+    check("下载返回编辑后内容", r.status_code == 200 and "edited: new content line" in r.content.decode("utf-8"), r.text[:100])
+    r = client.post(f"/api/files/{apk_file['id']}/content", headers=ADMIN, json={"content_text": "x"})
+    check("非文本文件拒绝编辑 400", r.status_code == 400, r.text)
+
+
     print("== 5. 权限与状态控制 ==")
 
 
