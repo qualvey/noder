@@ -6,6 +6,7 @@ import { inject, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { api } from '../api'
 import type { Node } from '../types'
 import { parseNodeJson } from '../utils'
+import { TUIC_CONGESTION_CONTROLS, UTLS_FINGERPRINTS, VLESS_FLOWS, isEnumValue } from '../constants'
 
 const props = defineProps<{
   open: boolean
@@ -79,8 +80,11 @@ function loadForm(n: Node) {
     server_port: n.server_port, security: n.security || 'tls', sni: n.sni || '',
     transport_type: n.transport_type || 'direct', path: n.path || '',
     public_key: n.public_key || '', short_id: n.short_id || '',
-    fingerprint: n.fingerprint || 'chrome', flow: n.flow || 'xtls-rprx-vision',
-    congestion_control: n.congestion_control || 'bbr', remark: n.remark || '',
+    // 老数据可能含契约外取值，回填时归一到白名单（后端保存时会再次拒绝非法值）
+    fingerprint: isEnumValue(UTLS_FINGERPRINTS, n.fingerprint) ? n.fingerprint : 'chrome',
+    flow: isEnumValue(VLESS_FLOWS, n.flow) ? n.flow : 'xtls-rprx-vision',
+    congestion_control: isEnumValue(TUIC_CONGESTION_CONTROLS, n.congestion_control) ? n.congestion_control : 'bbr',
+    remark: n.remark || '',
   })
   showJsonImport.value = false
   jsonInput.value = ''
@@ -158,9 +162,13 @@ function applyJsonImport() {
   form.sni = String(tls.server_name || '')
   form.public_key = String(reality.public_key || '')
   form.short_id = String(reality.short_id || '')
-  form.fingerprint = String((utls.fingerprint as string) || 'chrome')
-  form.flow = String(obj.flow || 'xtls-rprx-vision')
-  form.congestion_control = String((obj.congestion_control as string) || 'bbr')
+  // 导入值先过契约白名单，非法值回落默认（与后端 enum 对齐）
+  const importedFp = String(utls.fingerprint ?? '')
+  form.fingerprint = isEnumValue(UTLS_FINGERPRINTS, importedFp) ? importedFp : 'chrome'
+  const importedFlow = obj.flow === undefined || obj.flow === null ? '' : String(obj.flow)
+  form.flow = isEnumValue(VLESS_FLOWS, importedFlow) ? importedFlow : 'xtls-rprx-vision'
+  const importedCc = String(obj.congestion_control ?? '')
+  form.congestion_control = isEnumValue(TUIC_CONGESTION_CONTROLS, importedCc) ? importedCc : 'bbr'
   form.transport_type = String(transport.type || 'direct')
   form.path = String(transport.path || '')
   onProtocolChange()
@@ -264,11 +272,15 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
           </div>
           <div class="form-group">
             <label>uTLS 指纹 (Fingerprint)</label>
-            <input v-model="form.fingerprint" class="form-control" placeholder="chrome" />
+            <select v-model="form.fingerprint" class="form-control">
+              <option v-for="fp in UTLS_FINGERPRINTS" :key="fp" :value="fp">{{ fp }}</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Flow (流控方式)</label>
-            <input v-model="form.flow" class="form-control" placeholder="xtls-rprx-vision" />
+            <select v-model="form.flow" class="form-control">
+              <option v-for="fl in VLESS_FLOWS" :key="fl" :value="fl">{{ fl === '' ? '无流控 (空)' : fl }}</option>
+            </select>
           </div>
         </div>
 
