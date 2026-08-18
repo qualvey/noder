@@ -684,12 +684,13 @@ body {
 }
 
 .code-viewer {
-  background: #090d16;
+  background: var(--bg-input);          /* 浅色下为 #f1f5f9 浅灰底，深色下跟随默认输入框/暗底 */
+  color: var(--primary);                /* 浅色下为 #2563eb 蓝，暗色下为主色 */
+  border: 1px solid var(--border-glass);/* 浅色下为 12% 不透明度的深色细边框 */
   border-radius: var(--radius-md);
   padding: 14px;
   font-family: var(--font-mono);
   font-size: 0.8rem;
-  color: #38bdf8;
   overflow-x: auto;
   max-height: 340px;
   white-space: pre-wrap;
@@ -764,3 +765,4 @@ body {
   background: rgba(59, 130, 246, 0.08) !important;
   box-shadow: 0 0 12px rgba(59, 130, 246, 0.2);
 }
+

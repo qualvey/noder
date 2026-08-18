@@ -1,3 +1,4 @@
+<!--HelpView.vue -->
 <script setup lang="ts">
 // 使用指引与 API 说明
 import { apiLinkPrefix } from '../utils'
