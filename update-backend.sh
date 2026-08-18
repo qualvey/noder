@@ -64,7 +64,8 @@ fi
 if [[ -x "$UV_BIN" ]]; then
     log_info "使用 uv 增量安装/升级 Python 运行依赖..."
     "$UV_BIN" venv --allow-existing .venv 2>/dev/null || true
-    "$UV_BIN" pip install -r pyproject.toml 2>/dev/null || true
+    "$UV_BIN" sync --frozen --no-dev 2>/dev/null || \
+        "$UV_BIN" pip install fastapi uvicorn sqlmodel pydantic python-multipart pyyaml 2>/dev/null || true
 fi
 
 # 重启后端 Systemd 服务

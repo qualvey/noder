@@ -95,7 +95,9 @@ if [[ -f "${SCRIPT_DIR}/main.py" ]]; then
     log_info "使用本地现有脚本目录同步文件..."
     mkdir -p "${INSTALL_DIR}"
     if [[ "${SCRIPT_DIR}" != "${INSTALL_DIR}" ]]; then
-        cp -rf "${SCRIPT_DIR}/"* "${INSTALL_DIR}/"
+        # 排除 data.db / data/ 上传目录 / .venv，避免覆盖线上数据与虚拟环境
+        rsync -av --exclude='data.db' --exclude='data/' --exclude='.venv' "${SCRIPT_DIR}/" "${INSTALL_DIR}/" 2>/dev/null || \
+        cp -rf "${SCRIPT_DIR}/main.py" "${SCRIPT_DIR}/pyproject.toml" "${SCRIPT_DIR}/uv.lock" "${SCRIPT_DIR}/template.json" "${SCRIPT_DIR}/static" "${SCRIPT_DIR}/doc" "${INSTALL_DIR}/"
     fi
 else
     log_info "准备从 GitHub 远程仓库克隆最新代码..."
@@ -135,7 +137,10 @@ fi
 # 7. 构建虚拟环境并安装 Python 依赖
 log_info "正在使用 uv 安装依赖与初始化 Python 虚拟环境..."
 "$UV_BIN" venv --allow-existing .venv
-"$UV_BIN" pip install -r pyproject.toml || "$UV_BIN" pip install fastapi uvicorn sqlmodel pydantic
+"$UV_BIN" sync --frozen --no-dev || {
+    log_warn "uv sync 失败，回退安装基础依赖..."
+    "$UV_BIN" pip install fastapi uvicorn sqlmodel pydantic python-multipart pyyaml
+}
 
 UVICORN_BIN="${INSTALL_DIR}/.venv/bin/uvicorn"
 if [[ ! -x "$UVICORN_BIN" ]]; then
