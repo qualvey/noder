@@ -117,6 +117,28 @@ cd "${INSTALL_DIR}"
 # 6. 配置密钥与端口 (兼容管道 curl | bash 非交互模式)
 RANDOM_SECRET=$(openssl rand -hex 16 2>/dev/null || echo "secret-$(date +%s)")
 
+# 检测已有服务：默认只更新代码，保留现有配置，不重新交互配置参数
+UPDATE_ONLY="N"
+if [[ -f "$SERVICE_FILE" ]]; then
+    if [ -t 0 ] || [ -c /dev/tty ]; then
+        read -p "检测到已有 ${SERVICE_NAME} 服务。只更新代码并保留现有配置？[Y/n] " UPDATE_ONLY < /dev/tty || true
+    else
+        UPDATE_ONLY="Y"
+    fi
+fi
+if [[ "${UPDATE_ONLY}" =~ ^[Yy]$ ]]; then
+    log_info "只更新代码，保留现有 Admin Token / 端口 / 绑定 IP 配置..."
+    EXISTING_ADMIN_TOKEN=$(sed -n 's/.*ADMIN_SECRET_TOKEN="\([^"]*\)".*/\1/p' "$SERVICE_FILE" | head -1)
+    EXISTING_PORT=$(sed -n 's/.*--port \([0-9]*\).*/\1/p' "$SERVICE_FILE" | head -1)
+    EXISTING_HOST=$(sed -n 's/.*--host \([^ ]*\).*/\1/p' "$SERVICE_FILE" | head -1)
+    ADMIN_TOKEN="${EXISTING_ADMIN_TOKEN:-$RANDOM_SECRET}"
+    LISTEN_PORT="${EXISTING_PORT:-8000}"
+    LISTEN_HOST="${EXISTING_HOST:-0.0.0.0}"
+    SKIP_SERVICE_REGENERATE=1
+fi
+
+
+if [[ -z "$SKIP_SERVICE_REGENERATE" ]]; then
 if [ -t 0 ] || [ -c /dev/tty ]; then
     # 有可用的交互终端
     read -p "请输入 Admin Secret Token (留空使用随机生成的密钥: ${RANDOM_SECRET}): " ADMIN_TOKEN < /dev/tty || true
@@ -133,6 +155,7 @@ else
     LISTEN_PORT=${LISTEN_PORT:-8000}
     LISTEN_HOST=${LISTEN_HOST:-0.0.0.0}
 fi
+fi
 
 # 7. 构建虚拟环境并安装 Python 依赖
 log_info "正在使用 uv 安装依赖与初始化 Python 虚拟环境..."
@@ -148,7 +171,8 @@ if [[ ! -x "$UVICORN_BIN" ]]; then
     UVICORN_BIN="$(which uvicorn || echo "${INSTALL_DIR}/.venv/bin/uvicorn")"
 fi
 
-# 8. 创建 Systemd 服务文件
+# 8. 创建 Systemd 服务文件 (仅全新安装/重新配置时生成；更新模式保留现有配置)
+if [[ -z "$SKIP_SERVICE_REGENERATE" ]]; then
 log_info "生成 Systemd 服务文件 ${SERVICE_FILE}..."
 cat <<EOF > "${SERVICE_FILE}"
 [Unit]
@@ -168,6 +192,7 @@ LimitNOFILE=65535
 [Install]
 WantedBy=multi-user.target
 EOF
+fi
 
 # 9. 启动 Systemd 服务
 log_info "重新加载 Systemd 并启动服务..."
