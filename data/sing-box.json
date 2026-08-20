@@ -119,7 +119,7 @@
                 "rules": [
                     {
                         "rule_set": [
-                            "gfw"
+                            "gfw-site"
                         ],
                         "invert": true
                     },
@@ -238,6 +238,19 @@
                 "action": "bypass",
                 "outbound": "direct"
             },
+                        {
+                "type": "logical",
+                "mode": "and",
+                "rules": [
+                    {
+                        "protocol": [
+                            "stun",
+                            "dtls"
+                        ]
+                    }
+                ],
+                "action": "reject"
+            },
             {
                 "protocol": "bittorrent",
                 "action": "bypass",
@@ -256,20 +269,7 @@
                 "clash_mode": "global",
                 "outbound": "Proxy"
             },
-            {
-                "type": "logical",
-                "mode": "and",
-                "rules": [
-                    {
-                        "protocol": [
-                            "quic",
-                            "stun",
-                            "dtls"
-                        ]
-                    }
-                ],
-                "action": "reject"
-            },
+
             {
                 "domain_suffix": [
                     "example.com",
@@ -279,7 +279,7 @@
                 "outbound": "direct"
             },
             {
-                "rule_set": "gfw",
+                "rule_set": "gfw-site",
                 "outbound": "Proxy"
             },
             {
@@ -390,10 +390,14 @@
                 "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-xiaohongshu.srs"
             },
             {
-                "tag": "gfw",
                 "type": "remote",
-                "format": "binary",
-                "url": "https://github.com/QuixoticHeart/rule-set/raw/refs/heads/ruleset/singbox/version5/gfw.srs"
+                "tag": "gfw-site",
+                "url": "https://raw.githubusercontent.com/qualvey/rule-set/refs/heads/ruleset/singbox/version5/gfw-site.srs"
+            },
+            {
+                "type": "remote",
+                "tag": "gfw-ip",
+                "url": "https://raw.githubusercontent.com/qualvey/rule-set/refs/heads/ruleset/singbox/version5/gfw-ip.srs"
             }
         ]
     }

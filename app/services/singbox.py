@@ -3,7 +3,7 @@
 import json
 from typing import List
 
-from app.config import ALLOWED_OVERRIDE_KEYS, TEMPLATE_PATH
+from app.config import ALLOWED_OVERRIDE_KEYS, SING_BOX_TEMPLATE_PATH
 from app.contracts import assert_protocol_supported, get_core, validate_node_contract
 from app.models import Node, User, parse_config_override
 
@@ -93,9 +93,9 @@ def build_singbox_outbound(node: Node, user: User) -> dict:
 
 def load_singbox_template() -> dict:
     """读取外置 template.json 模板文件。"""
-    if TEMPLATE_PATH.exists():
+    if SING_BOX_TEMPLATE_PATH.exists():
         try:
-            with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
+            with open(SING_BOX_TEMPLATE_PATH, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             print(f"Error loading template.json ({e}), falling back to basic template.")

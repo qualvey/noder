@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 全局 UI 状态：toast 提示 + 鼠标位置删除确认弹窗
-import { provide, ref } from 'vue'
+import { computed, provide, ref } from 'vue'
 
 export interface ToastItem {
   id: number
@@ -58,6 +58,24 @@ const activeTab = ref<'nodes' | 'users' | 'files' | 'help'>('nodes')
 const adminTokenInput = ref(localStorage.getItem('admin_token') || 'admin-secret')
 const metrics = ref({ nodes: 0, users: 0 })
 
+// 明暗模式（初始值由 main.ts mount 前设置，此处读取实际生效值）
+const theme = ref<'light' | 'dark'>(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark')
+
+function toggleTheme() {
+  theme.value = theme.value === 'light' ? 'dark' : 'light'
+  document.documentElement.dataset.theme = theme.value
+  localStorage.setItem('noder_theme', theme.value)
+}
+
+// Tab 定义 + 滑块位移索引
+const tabs = [
+  { key: 'nodes' as const, label: '节点管理 (Nodes)' },
+  { key: 'users' as const, label: '用户管理 (Users)' },
+  { key: 'files' as const, label: '文件分发 (Files)' },
+  { key: 'help' as const, label: '使用指引与 API' },
+]
+const tabIndex = computed(() => tabs.findIndex((t) => t.key === activeTab.value))
+
 import { getAdminToken, setAdminToken } from './api'
 import NodesView from './views/NodesView.vue'
 import UsersView from './views/UsersView.vue'
@@ -87,6 +105,9 @@ provide('metrics', updateMetrics)
         </div>
       </div>
       <div class="header-controls">
+        <button class="btn btn-secondary btn-sm theme-toggle" :title="theme === 'light' ? '切换到深色模式' : '切换到浅色模式'" @click="toggleTheme">
+          {{ theme === 'light' ? '☀️' : '🌙' }}
+        </button>
         <div class="admin-token-box">
           <label for="adminTokenInput">Admin Token:</label>
           <input type="password" id="adminTokenInput" v-model="adminTokenInput" placeholder="输入密钥" />
@@ -112,27 +133,20 @@ provide('metrics', updateMetrics)
         </div>
         <div class="metric-icon icon-user">👤</div>
       </div>
-      <div class="metric-card">
-        <div class="metric-info">
-          <h4>支持核心协议</h4>
-          <div class="value">TUIC / VLESS / AnyTLS</div>
-        </div>
-        <div class="metric-icon icon-protocol">🔒</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-info">
-          <h4>服务 API 状态</h4>
-          <div class="value" style="color: var(--accent-emerald)">运行中</div>
-        </div>
-        <div class="metric-icon icon-status">✅</div>
-      </div>
+
     </div>
 
     <div class="tab-navigation">
-      <button class="tab-btn" :class="{ active: activeTab === 'nodes' }" @click="activeTab = 'nodes'">节点管理 (Nodes)</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'users' }" @click="activeTab = 'users'">用户管理 (Users)</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'files' }" @click="activeTab = 'files'">文件分发 (Files)</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'help' }" @click="activeTab = 'help'">使用指引与 API</button>
+      <div class="tab-slider" :data-index="tabIndex"></div>
+      <button
+        v-for="t in tabs"
+        :key="t.key"
+        class="tab-btn"
+        :class="{ active: activeTab === t.key }"
+        @click="activeTab = t.key"
+      >
+        {{ t.label }}
+      </button>
     </div>
 
     <NodesView v-if="activeTab === 'nodes'" />

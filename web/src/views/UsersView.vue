@@ -1,8 +1,8 @@
 <script setup lang="ts">
-// 用户管理：表格 / 全选批量删除 / 右键复制订阅链接（新增/编辑表单在 UserFormModal 组件）
+// 用户管理：表格 / 全选批量删除 / 右键复制订阅链接 + 下载配置包（新增/编辑表单在 UserFormModal 组件）
 import { inject, onMounted, ref } from 'vue'
 import { api } from '../api'
-import type { Node, User } from '../types'
+import type { DistFile, Node, User } from '../types'
 import { buildMihomoLink, buildSubLink, copyText } from '../utils'
 import UserFormModal from '../components/UserFormModal.vue'
 import ContextMenu, { type ContextMenuItem } from '../components/ContextMenu.vue'
@@ -13,10 +13,12 @@ const updateMetrics = inject('metrics') as (nodes: number, users: number) => voi
 
 const users = ref<User[]>([])
 const nodes = ref<Node[]>([])
+const zipFiles = ref<DistFile[]>([])
 const selected = ref<Set<number>>(new Set())
 const showModal = ref(false)
 const editingUser = ref<User | null>(null)
 const ctxMenu = ref<{ x: number; y: number; user: User } | null>(null)
+const downloading = ref<string | null>(null) // waiting 页文案；null=不显示
 
 // 右键菜单：复制订阅链接
 function onRowContextMenu(e: MouseEvent, user: User) {
@@ -47,16 +49,50 @@ function copyMihomoLink() {
   closeCtxMenu()
 }
 
-const ctxMenuItems = (): ContextMenuItem[] => [
-  { label: '复制 Sing-Box 链接', icon: '📋', onClick: copySubLink },
-  { label: '复制 Mihomo (Clash) 链接', icon: '🔄', onClick: copyMihomoLink },
-]
+// 下载 ZIP 配置包：等待页 + blob 触发浏览器下载
+async function downloadZip(f: DistFile) {
+  const user = ctxMenu.value?.user
+  if (!user) return
+  closeCtxMenu()
+  downloading.value = `正在为「${user.name}」生成配置包 ${f.name} ...`
+  try {
+    const blob = await api.downloadZip(f.id, user.token)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = f.download_name || f.original_name || f.name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    toast('配置包已生成并下载')
+  } catch (e) {
+    toast((e as Error).message, 'error')
+  } finally {
+    downloading.value = null
+  }
+}
+
+const ctxMenuItems = (): ContextMenuItem[] => {
+  const items: ContextMenuItem[] = [
+    { label: '复制 Sing-Box 链接', icon: '📋', onClick: copySubLink },
+    { label: '复制 Mihomo (Clash) 链接', icon: '🔄', onClick: copyMihomoLink },
+  ]
+  if (zipFiles.value.length) {
+    items.push({ label: '配置文件下载', icon: '📦', divider: true, onClick: () => {} })
+    for (const z of zipFiles.value) {
+      items.push({ label: `下载 ${z.name}`, icon: '📦', onClick: () => downloadZip(z) })
+    }
+  }
+  return items
+}
 
 async function fetchData() {
   try {
-    const [u, n] = await Promise.all([api.users.list(), api.nodes.list()])
+    const [u, n, f] = await Promise.all([api.users.list(), api.nodes.list(), api.files.list()])
     users.value = u
     nodes.value = n
+    zipFiles.value = f.filter((x) => x.file_type === 'zip' && x.is_active)
     updateMetrics(n.length, u.length)
   } catch (e) {
     toast((e as Error).message, 'error')
@@ -185,4 +221,13 @@ onMounted(fetchData)
     :items="ctxMenuItems()"
     @close="closeCtxMenu"
   />
+
+  <!-- ZIP 生成等待页 -->
+  <div v-if="downloading" class="download-waiting">
+    <div class="waiting-box">
+      <div class="waiting-spinner"></div>
+      <div class="waiting-text">{{ downloading }}</div>
+      <div style="font-size: 0.75rem; color: var(--text-muted)">配置渲染需要一点时间，请稍候</div>
+    </div>
+  </div>
 </template>

@@ -87,46 +87,46 @@ dns:
 
 proxies: 
 
-  - name: "vless-reality-vision"
-    type: vless
-    server: server
-    port: 443
-    uuid: uuid
-    network: tcp
-    tls: true
-    udp: true
-    flow: xtls-rprx-vision
-    servername: www.microsoft.com # REALITY servername
-    reality-opts:
-      public-key: xxx
-      short-id: xxx # optional
-    client-fingerprint: chrome # cannot be empty
+  # - name: "vless-reality-vision"
+  #   type: vless
+  #   server: server
+  #   port: 443
+  #   uuid: uuid
+  #   network: tcp
+  #   tls: true
+  #   udp: true
+  #   flow: xtls-rprx-vision
+  #   servername: www.microsoft.com # REALITY servername
+  #   reality-opts:
+  #     public-key: xxx
+  #     short-id: xxx # optional
+  #   client-fingerprint: chrome # cannot be empty
 
-  - name: tuic
-    server: server
-    port: 10443
-    type: tuic
-    uuid: 00000000-0000-0000-0000-000000000001
-    password: PASSWORD_1
-    # ip: 127.0.0.1 # for overwriting the DNS lookup result of the server address set in option 'server'
-    # heartbeat-interval: 10000
-    alpn: [h3]
-    disable-sni: false
-    request-timeout: 8000
-    udp-relay-mode: native # Available: "native", "quic". Default: "native"
-    congestion-controller: bbr 
-    skip-cert-verify: false
-    sni: example.com
-    # ech-opts:
-    #   enable: true # 必须手动开启
-    #   # 如果config为空则通过dns解析，不为空则通过该值指定，格式为经过base64编码的ech参数（dig +short TYPE65 tls-ech.dev）
-    #   config: AEn+DQBFKwAgACABWIHUGj4u+PIggYXcR5JF0gYk3dCRioBW8uJq9H4mKAAIAAEAAQABAANAEnB1YmxpYy50bHMtZWNoLmRldgAA
-    #   # query-server-name: xxx.com # 可选项，不为空时用于指定通过dns解析时的域名
-    #
-    # meta 和 sing-box 私有扩展，将 ss-uot 用于 udp 中继，开启此选项后 udp-relay-mode 将失效
-    # 警告，与原版 tuic 不兼容！！！
-    # udp-over-stream: false
-    # udp-over-stream-version: 1
+  # - name: tuic
+  #   server: server
+  #   port: 10443
+  #   type: tuic
+  #   uuid: 00000000-0000-0000-0000-000000000001
+  #   password: PASSWORD_1
+  #   # ip: 127.0.0.1 # for overwriting the DNS lookup result of the server address set in option 'server'
+  #   # heartbeat-interval: 10000
+  #   alpn: [h3]
+  #   disable-sni: false
+  #   request-timeout: 8000
+  #   udp-relay-mode: native # Available: "native", "quic". Default: "native"
+  #   congestion-controller: bbr 
+  #   skip-cert-verify: false
+  #   sni: example.com
+  #   # ech-opts:
+  #   #   enable: true # 必须手动开启
+  #   #   # 如果config为空则通过dns解析，不为空则通过该值指定，格式为经过base64编码的ech参数（dig +short TYPE65 tls-ech.dev）
+  #   #   config: AEn+DQBFKwAgACABWIHUGj4u+PIggYXcR5JF0gYk3dCRioBW8uJq9H4mKAAIAAEAAQABAANAEnB1YmxpYy50bHMtZWNoLmRldgAA
+  #   #   # query-server-name: xxx.com # 可选项，不为空时用于指定通过dns解析时的域名
+  #   #
+  #   # meta 和 sing-box 私有扩展，将 ss-uot 用于 udp 中继，开启此选项后 udp-relay-mode 将失效
+  #   # 警告，与原版 tuic 不兼容！！！
+  #   # udp-over-stream: false
+  #   # udp-over-stream-version: 1
 
 # dns 出站会将请求劫持到内部 dns 模块，所有请求均在内部处理
   - name: "dns-out"
@@ -152,82 +152,82 @@ proxy-groups:
     # default-selected: ss1 # 默认选择的节点（该项为空或者设置的节点名不存在时，默认选择组中第一个节点）
 
 rule-providers:
-  rule1:
-    behavior: classical # domain ipcidr
-    interval: 259200
-    path: /path/to/save/file.yaml # 默认只允许存储在 mihomo 的 Home Dir，如果想存储到其他位置，请通过设置 SAFE_PATHS 环境变量指定额外的安全路径。该环境变量的语法同本操作系统的PATH环境变量解析规则（即Windows下以分号分割，其他系统下以冒号分割）
-    type: http # http 的 path 可空置，默认储存路径为 homedir 的 rules 文件夹，文件名为 url 的 md5
-    url: "url"
-    proxy: DIRECT
-    # size-limit: 10240 # 限制下载文件最大为10kb，默认为0即不限制文件大小
-  rule2:
-    behavior: classical
-    interval: 259200
-    path: /path/to/save/file.yaml
-    type: file
-  rule3:
-    # mrs类型ruleset，目前仅支持domain和ipcidr(即不支持classical），
-    #
-    # 对于behavior=domain:
-    #  - format=yaml 可以通过“mihomo convert-ruleset domain yaml XXX.yaml XXX.mrs”转换到mrs格式
-    #  - format=text 可以通过“mihomo convert-ruleset domain text XXX.text XXX.mrs”转换到mrs格式
-    #  - XXX.mrs 可以通过"mihomo convert-ruleset domain mrs XXX.mrs XXX.text"转换回text格式（暂不支持转换回yaml格式）
-    #
-    # 对于behavior=ipcidr:
-    #  - format=yaml 可以通过“mihomo convert-ruleset ipcidr yaml XXX.yaml XXX.mrs”转换到mrs格式
-    #  - format=text 可以通过“mihomo convert-ruleset ipcidr text XXX.text XXX.mrs”转换到mrs格式
-    #  - XXX.mrs 可以通过"mihomo convert-ruleset ipcidr mrs XXX.mrs XXX.text"转换回text格式（暂不支持转换回yaml格式）
-    #
-    type: http
-    url: "url"
-    format: mrs
-    behavior: domain
-    path: /path/to/save/file.mrs
-    # path-in-bundle: "geo/geosite/cn.mrs" # 当设置该选项时，如果本地文件不存在，会优先从 Home Dir的 BundleMRS.7z 中解压该文件，此项的值用于指定在 BundleMRS.7z 中的路径
-  rule4:
-    type: inline
-    behavior: domain # classical / ipcidr
-    payload:
-      - '.blogger.com'
-      - '*.*.microsoft.com'
-      - 'books.itunes.apple.com'
+#   rule1:
+#     behavior: classical # domain ipcidr
+#     interval: 259200
+#     path: /path/to/save/file.yaml # 默认只允许存储在 mihomo 的 Home Dir，如果想存储到其他位置，请通过设置 SAFE_PATHS 环境变量指定额外的安全路径。该环境变量的语法同本操作系统的PATH环境变量解析规则（即Windows下以分号分割，其他系统下以冒号分割）
+#     type: http # http 的 path 可空置，默认储存路径为 homedir 的 rules 文件夹，文件名为 url 的 md5
+#     url: "url"
+#     proxy: DIRECT
+#     # size-limit: 10240 # 限制下载文件最大为10kb，默认为0即不限制文件大小
+#   rule2:
+#     behavior: classical
+#     interval: 259200
+#     path: /path/to/save/file.yaml
+#     type: file
+#   rule3:
+#     # mrs类型ruleset，目前仅支持domain和ipcidr(即不支持classical），
+#     #
+#     # 对于behavior=domain:
+#     #  - format=yaml 可以通过“mihomo convert-ruleset domain yaml XXX.yaml XXX.mrs”转换到mrs格式
+#     #  - format=text 可以通过“mihomo convert-ruleset domain text XXX.text XXX.mrs”转换到mrs格式
+#     #  - XXX.mrs 可以通过"mihomo convert-ruleset domain mrs XXX.mrs XXX.text"转换回text格式（暂不支持转换回yaml格式）
+#     #
+#     # 对于behavior=ipcidr:
+#     #  - format=yaml 可以通过“mihomo convert-ruleset ipcidr yaml XXX.yaml XXX.mrs”转换到mrs格式
+#     #  - format=text 可以通过“mihomo convert-ruleset ipcidr text XXX.text XXX.mrs”转换到mrs格式
+#     #  - XXX.mrs 可以通过"mihomo convert-ruleset ipcidr mrs XXX.mrs XXX.text"转换回text格式（暂不支持转换回yaml格式）
+#     #
+#     type: http
+#     url: "url"
+#     format: mrs
+#     behavior: domain
+#     path: /path/to/save/file.mrs
+#     # path-in-bundle: "geo/geosite/cn.mrs" # 当设置该选项时，如果本地文件不存在，会优先从 Home Dir的 BundleMRS.7z 中解压该文件，此项的值用于指定在 BundleMRS.7z 中的路径
+#   rule4:
+#     type: inline
+#     behavior: domain # classical / ipcidr
+#     payload:
+#       - '.blogger.com'
+#       - '*.*.microsoft.com'
+#       - 'books.itunes.apple.com'
 
-rules:
-  - RULE-SET,rule1,REJECT
-  - IP-ASN,1,PROXY
-  - DOMAIN-REGEX,^abc,DIRECT
-  - DOMAIN-SUFFIX,baidu.com,DIRECT
-  - DOMAIN-KEYWORD,google,ss1
-  - DOMAIN-WILDCARD,test.*.mihomo.com,ss1
-  - IP-CIDR,1.1.1.1/32,ss1
-  - IP-CIDR6,2409::/64,DIRECT
-  # 当满足条件是 TCP 或 UDP 流量时，使用名为 sub-rule-name1 的规则集
-  - SUB-RULE,(OR,((NETWORK,TCP),(NETWORK,UDP))),sub-rule-name1
-  - SUB-RULE,(AND,((NETWORK,UDP))),sub-rule-name2
-# 定义多个子规则集，规则将以分叉匹配，使用 SUB-RULE 使用
-#                                               google.com(not match)--> baidu.com(match)
-#                                                /                                ｜
-#                                               /                                 ｜
-#  https://baidu.com  --> rule1 --> rule2 --> sub-rule-name1(match tcp)          使用 DIRECT
-#
-#
-#                                              google.com(not match)--> baidu.com(not match)
-#                                                /                            ｜
-#                                               /                             ｜
-#  dns 1.1.1.1  --> rule1 --> rule2 --> sub-rule-name1(match udp)         sub-rule-name2(match udp)
-#                                                                             ｜
-#                                                                             ｜
-#                                                                 使用 REJECT <-- 1.1.1.1/32(match)
-#
+# rules:
+#   - RULE-SET,rule1,REJECT
+#   - IP-ASN,1,PROXY
+#   - DOMAIN-REGEX,^abc,DIRECT
+#   - DOMAIN-SUFFIX,baidu.com,DIRECT
+#   - DOMAIN-KEYWORD,google,ss1
+#   - DOMAIN-WILDCARD,test.*.mihomo.com,ss1
+#   - IP-CIDR,1.1.1.1/32,ss1
+#   - IP-CIDR6,2409::/64,DIRECT
+#   # 当满足条件是 TCP 或 UDP 流量时，使用名为 sub-rule-name1 的规则集
+#   - SUB-RULE,(OR,((NETWORK,TCP),(NETWORK,UDP))),sub-rule-name1
+#   - SUB-RULE,(AND,((NETWORK,UDP))),sub-rule-name2
+# # 定义多个子规则集，规则将以分叉匹配，使用 SUB-RULE 使用
+# #                                               google.com(not match)--> baidu.com(match)
+# #                                                /                                ｜
+# #                                               /                                 ｜
+# #  https://baidu.com  --> rule1 --> rule2 --> sub-rule-name1(match tcp)          使用 DIRECT
+# #
+# #
+# #                                              google.com(not match)--> baidu.com(not match)
+# #                                                /                            ｜
+# #                                               /                             ｜
+# #  dns 1.1.1.1  --> rule1 --> rule2 --> sub-rule-name1(match udp)         sub-rule-name2(match udp)
+# #                                                                             ｜
+# #                                                                             ｜
+# #                                                                 使用 REJECT <-- 1.1.1.1/32(match)
+# #
 
-sub-rules:
-  sub-rule-name1:
-    - DOMAIN,google.com,ss1
-    - DOMAIN,baidu.com,DIRECT
-  sub-rule-name2:
-    - IP-CIDR,1.1.1.1/32,REJECT
-    - IP-CIDR,8.8.8.8/32,ss1
-    - DOMAIN,dns.alidns.com,REJECT
+# sub-rules:
+#   sub-rule-name1:
+#     - DOMAIN,google.com,ss1
+#     - DOMAIN,baidu.com,DIRECT
+#   sub-rule-name2:
+#     - IP-CIDR,1.1.1.1/32,REJECT
+#     - IP-CIDR,8.8.8.8/32,ss1
+#     - DOMAIN,dns.alidns.com,REJECT
 
 listeners:
   - name: mixed-in-1

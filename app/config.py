@@ -5,7 +5,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "data.db"
-TEMPLATE_PATH = BASE_DIR / "template.json"
+SING_BOX_TEMPLATE_PATH = BASE_DIR / "data" / "sing-box.json"
 MIHOMO_TEMPLATE_PATH = BASE_DIR / "data" / "mihomo.yml"
 STATIC_DIR = BASE_DIR / "static"
 

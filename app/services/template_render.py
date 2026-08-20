@@ -14,8 +14,15 @@ from app.exporters.mihomo import build_mihomo_proxies_yaml
 from app.services.singbox import build_singbox_outbound
 
 
-def build_template_context(user: User) -> dict:
-    """构建模板占位符 -> 渲染值映射。未知占位符原样保留。"""
+MIHOMO_PLACEHOLDER = "{{mihomo_proxies_yaml}}"
+
+
+def build_template_context(user: User, include_mihomo: bool = True) -> dict:
+    """构建模板占位符 -> 渲染值映射。未知占位符原样保留。
+
+    :param include_mihomo: 仅当模板文本真正使用 {{mihomo_proxies_yaml}} 时才构建该值
+        （懒加载：避免用户绑了 mihomo 不支持的协议时，普通 zip 下载也被导出守卫阻断）
+    """
     nodes = [n for n in (user.nodes or []) if n.is_active]
     node_meta = [
         {
@@ -31,7 +38,7 @@ def build_template_context(user: User) -> dict:
     def _yaml(obj) -> str:
         return yaml.safe_dump(obj, allow_unicode=True, sort_keys=False, default_flow_style=False).rstrip()
 
-    return {
+    ctx = {
         "uuid": user.uuid or "",
         "password": user.password or "",
         "token": user.token,
@@ -41,8 +48,10 @@ def build_template_context(user: User) -> dict:
         "node_list_json": json.dumps(node_meta, ensure_ascii=False, indent=2),
         "outbounds_yaml": _yaml(outbounds),
         "outbounds_json": json.dumps(outbounds, ensure_ascii=False, indent=2),
-        "mihomo_proxies_yaml": build_mihomo_proxies_yaml(nodes, user),
     }
+    if include_mihomo:
+        ctx["mihomo_proxies_yaml"] = build_mihomo_proxies_yaml(nodes, user)
+    return ctx
 
 
 def render_template_text(text: str, user: User, known_tokens: Optional[set] = None) -> str:
@@ -53,7 +62,7 @@ def render_template_text(text: str, user: User, known_tokens: Optional[set] = No
     2. 键名感知：token:/uuid:/password: 键后的 UUID 值按键替换 (兼容 yaml/json 写法)
     3. 兜底：任何等于已知用户 token 的 UUID 值替换为当前用户 token
     """
-    ctx = build_template_context(user)
+    ctx = build_template_context(user, include_mihomo=MIHOMO_PLACEHOLDER in text)
     for key, value in ctx.items():
         text = text.replace("{{" + key + "}}", str(value))
 

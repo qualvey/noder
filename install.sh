@@ -53,33 +53,51 @@ fi
 
 log_info "开始安装/更新 Sing-Box Subscription Middleman 全套服务..."
 
-# 3. 安装依赖工具 (curl, git, python3)
-log_info "检查并安装必要依赖工具..."
-if command -v apt-get &>/dev/null; then
-    apt-get update -y
-    apt-get install -y curl git python3 python3-pip openssl
-elif command -v dnf &>/dev/null; then
-    dnf install -y curl git python3 python3-pip openssl
-elif command -v yum &>/dev/null; then
-    yum install -y curl git python3 python3-pip openssl
+# 2.5 检测是否已安装过服务（已安装 -> 更新模式，跳过系统依赖检查）
+IS_INSTALLED="false"
+if [[ -f "$SERVICE_FILE" ]]; then
+    IS_INSTALLED="true"
+    log_info "检测到已安装 ${SERVICE_NAME} 服务（更新模式），将跳过系统依赖检查..."
+fi
+
+# 3. 安装依赖工具 (curl, git, python3) —— 已安装过服务则跳过
+if [[ "${IS_INSTALLED}" == "true" ]]; then
+    log_info "已安装服务，跳过系统依赖安装 (curl/git/python3/openssl)..."
+else
+    log_info "检查并安装必要依赖工具..."
+    if command -v apt-get &>/dev/null; then
+        apt-get update -y
+        apt-get install -y curl git python3 python3-pip openssl
+    elif command -v dnf &>/dev/null; then
+        dnf install -y curl git python3 python3-pip openssl
+    elif command -v yum &>/dev/null; then
+        yum install -y curl git python3 python3-pip openssl
+    fi
 fi
 
 # 4. 检查/安装 uv (Astral uv - 安装并软链接到 /usr/local/bin 实现全局系统可用)
-if ! command -v uv &>/dev/null; then
+if command -v uv &>/dev/null || [[ -x "$HOME/.local/bin/uv" ]] || [[ -x "/usr/local/bin/uv" ]]; then
+    log_info "检测到 uv 已存在，跳过 uv 安装..."
+else
+    if [[ "${IS_INSTALLED}" == "true" ]]; then
+        log_warn "服务已安装但未检测到 uv（环境异常），将重新安装 uv..."
+    fi
     log_info "未检测到 uv，正在自动安装 Astral uv 并设置为全局命令..."
     curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="/usr/local/bin" sh 2>/dev/null || \
     curl -LsSf https://astral.sh/uv/install.sh | sh
     export PATH="/usr/local/bin:$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 fi
 
-# 建立全局软链接，确保所有 Shell（如 zsh/bash）及所有用户均全局可用 uv / uvx
-if [[ -f "$HOME/.local/bin/uv" && ! -f "/usr/local/bin/uv" ]]; then
-    cp -f "$HOME/.local/bin/uv" /usr/local/bin/uv 2>/dev/null || ln -sf "$HOME/.local/bin/uv" /usr/local/bin/uv 2>/dev/null || true
+# 建立全局软链接，确保所有 Shell（如 zsh/bash）及所有用户均全局可用 uv / uvx（仅全新安装时执行）
+if [[ "${IS_INSTALLED}" != "true" ]]; then
+    if [[ -f "$HOME/.local/bin/uv" && ! -f "/usr/local/bin/uv" ]]; then
+        cp -f "$HOME/.local/bin/uv" /usr/local/bin/uv 2>/dev/null || ln -sf "$HOME/.local/bin/uv" /usr/local/bin/uv 2>/dev/null || true
+    fi
+    if [[ -f "$HOME/.local/bin/uvx" && ! -f "/usr/local/bin/uvx" ]]; then
+        cp -f "$HOME/.local/bin/uvx" /usr/local/bin/uvx 2>/dev/null || ln -sf "$HOME/.local/bin/uvx" /usr/local/bin/uvx 2>/dev/null || true
+    fi
+    chmod +x /usr/local/bin/uv /usr/local/bin/uvx 2>/dev/null || true
 fi
-if [[ -f "$HOME/.local/bin/uvx" && ! -f "/usr/local/bin/uvx" ]]; then
-    cp -f "$HOME/.local/bin/uvx" /usr/local/bin/uvx 2>/dev/null || ln -sf "$HOME/.local/bin/uvx" /usr/local/bin/uvx 2>/dev/null || true
-fi
-chmod +x /usr/local/bin/uv /usr/local/bin/uvx 2>/dev/null || true
 
 # 确认 uv 可用
 UV_BIN="$(command -v uv || echo "/usr/local/bin/uv")"
@@ -119,7 +137,7 @@ RANDOM_SECRET=$(openssl rand -hex 16 2>/dev/null || echo "secret-$(date +%s)")
 
 # 检测已有服务：默认只更新代码，保留现有配置，不重新交互配置参数
 UPDATE_ONLY="N"
-if [[ -f "$SERVICE_FILE" ]]; then
+if [[ "${IS_INSTALLED}" == "true" ]]; then
     if [ -t 0 ] || [ -c /dev/tty ]; then
         read -p "检测到已有 ${SERVICE_NAME} 服务。只更新代码并保留现有配置？[Y/n] " UPDATE_ONLY < /dev/tty || true
         UPDATE_ONLY=${UPDATE_ONLY:-Y}

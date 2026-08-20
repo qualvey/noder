@@ -68,6 +68,19 @@ export const api = {
     update: (id: number, body: Partial<DistFile>) => request<DistFile>(`/api/files/${id}`, { method: 'PUT', body }),
     remove: (id: number) => request<{ message: string }>(`/api/files/${id}`, { method: 'DELETE' }),
     refresh: (id: number) => request<DistFile>(`/api/files/${id}/refresh`, { method: 'POST' }),
+    getContent: (id: number) => request<{ content: string }>(`/api/files/${id}/content`),
+    updateContent: (id: number, content_text: string) =>
+      request<DistFile>(`/api/files/${id}/content`, { method: 'POST', body: { content_text } }),
+  },
+  settings: {
+    sharedToken: () => request<{ token: string }>('/api/settings/shared-token'),
+    resetSharedToken: () => request<{ token: string }>('/api/settings/shared-token/reset', { method: 'POST' }),
+  },
+  // 用户侧下载（无需 Admin Token）：ZIP 个性化渲染走用户 token
+  downloadZip: async (id: number, token: string): Promise<Blob> => {
+    const res = await fetch(`${apiBase()}/dl/${id}?${new URLSearchParams({ token }).toString()}`)
+    if (!res.ok) throw new ApiError(res.status, `下载失败 (${res.status})`)
+    return res.blob()
   },
   // 用户侧订阅预览（无需 Admin Token）
   sub: async (token: string): Promise<Record<string, unknown>> => {

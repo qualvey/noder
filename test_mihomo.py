@@ -29,6 +29,7 @@ from app.exporters.mihomo import (
     generate_mihomo_config,
 )
 from app.models import Node, User
+from app.services.template_render import build_template_context
 
 PASS = 0
 FAIL = 0
@@ -175,6 +176,20 @@ rules:
         tmp_tpl.unlink()
     except OSError:
         pass
+
+    print("== 6. 模板占位符懒加载 (mihomo 守卫不阻断普通 zip) ==")
+    anytls_user = User(
+        name="anytls-user", token="u2",
+        uuid="22222222-2222-3333-4444-555555555555", password="p2",
+        nodes=[anytls], is_active=True,
+    )
+    ctx_without = build_template_context(anytls_user, include_mihomo=False)
+    check("不含 mihomo 占位符的上下文不触发守卫", "mihomo_proxies_yaml" not in ctx_without)
+    expect_400(
+        "含 mihomo 占位符时守卫仍然拦截 (anytls)",
+        lambda: build_template_context(anytls_user, include_mihomo=True),
+        "Mihomo",
+    )
 
     print(f"\n结果: {PASS} 通过, {FAIL} 失败")
     sys.exit(1 if FAIL else 0)

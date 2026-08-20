@@ -1,3 +1,4 @@
+<!--HelpView.vue -->
 <script setup lang="ts">
 // 使用指引与 API 说明
 import { apiLinkPrefix } from '../utils'
@@ -25,11 +26,15 @@ const origin = location.origin + apiLinkPrefix()
       <h4 style="margin-bottom: 12px; color: var(--primary)">3. 用户 Token 验证与数据查询 API</h4>
       <div class="code-viewer" style="margin-bottom: 16px">{{ origin }}/api/user/verify?token={USER_TOKEN}</div>
 
-      <h4 style="margin-bottom: 12px; color: var(--primary)">4. 文件分发下载 API (Token 鉴权)</h4>
-      <div class="code-viewer" style="margin-bottom: 16px">{{ origin }}/dl/{file_id}?token={USER_TOKEN}</div>
-      <p style="color: var(--text-muted); font-size: 0.9rem">
-        APK：全员公用原样下载；ZIP：模板按用户渲染后打包；text：死字符原样分发。
-      </p>
+      <h4 style="margin-bottom: 12px; color: var(--primary)">4. 文件分发下载 API</h4>
+      <div class="code-viewer" style="margin-bottom: 8px">{{ origin }}/dl/{file_id}?token={共享或用户 Token}</div>
+      <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 16px">
+        ZIP：用<b>用户 Token</b>，按用户个性化渲染后打包；普通文件/文本：用<b>共享下载 Token</b>（在文件分发页查看/重置）。
+      </div>
+
+      <h4 style="margin-bottom: 12px; color: var(--primary)">4b. 共享下载 Token 管理 API</h4>
+      <div class="code-viewer" style="margin-bottom: 8px">GET /api/settings/shared-token &nbsp; POST /api/settings/shared-token/reset</div>
+      <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 16px">重置后旧 token 立即失效（Header: X-Admin-Token）</div>
 
       <h4 style="margin-bottom: 12px; color: var(--primary)">5. 管理员 API (Header: X-Admin-Token)</h4>
       <div class="code-viewer" style="margin-bottom: 8px">GET/POST /api/nodes &nbsp; PUT/DELETE /api/nodes/{id}</div>
