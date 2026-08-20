@@ -19,6 +19,7 @@ const showModal = ref(false)
 const editingUser = ref<User | null>(null)
 const ctxMenu = ref<{ x: number; y: number; user: User } | null>(null)
 const downloading = ref<string | null>(null) // waiting 页文案；null=不显示
+const loading = ref(false) // 如果组件挂载时立即请求，可初始化为 true
 
 // 右键菜单：复制订阅链接
 function onRowContextMenu(e: MouseEvent, user: User) {
@@ -93,15 +94,20 @@ const ctxMenuItems = (): ContextMenuItem[] => {
     { label: '复制 节点列表', icon: '11', onClick: copyNodes }
   ]
   if (zipFiles.value.length) {
-    items.push({ label: '配置文件下载', icon: '📦', divider: true, onClick: () => {} })
+    items.push({ label: '配置文件下载', icon: '📦', divider: true, onClick: () => { } })
     for (const z of zipFiles.value) {
       items.push({ label: `下载 ${z.name}`, icon: '📦', onClick: () => downloadZip(z) })
     }
   }
   return items
 }
-
+const sleep = (ms: number): Promise<void> => {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+};
 async function fetchData() {
+  loading.value = true
+  await sleep(2000);
+
   try {
     const [u, n, f] = await Promise.all([api.users.list(), api.nodes.list(), api.files.list()])
     users.value = u
@@ -110,6 +116,8 @@ async function fetchData() {
     updateMetrics(n.length, u.length)
   } catch (e) {
     toast((e as Error).message, 'error')
+  } finally {
+    loading.value = false
   }
 }
 
@@ -167,7 +175,8 @@ onMounted(fetchData)
     <div class="section-header">
       <div class="section-title">订阅用户列表 (支持多节点绑定)</div>
       <div style="display: flex; gap: 10px; align-items: center">
-        <button v-if="selected.size" class="btn btn-danger btn-sm" @click="bulkDelete">🗑️ 批量删除 ({{ selected.size }})</button>
+        <button v-if="selected.size" class="btn btn-danger btn-sm" @click="bulkDelete">🗑️ 批量删除 ({{ selected.size
+        }})</button>
         <button class="btn btn-primary" @click="openCreate"><span>+</span> 新增用户</button>
       </div>
     </div>
@@ -177,7 +186,8 @@ onMounted(fetchData)
         <thead>
           <tr>
             <th style="width: 40px; text-align: center">
-              <input type="checkbox" :checked="selected.size === users.length && users.length > 0" @change="toggleSelectAll" />
+              <input type="checkbox" :checked="selected.size === users.length && users.length > 0"
+                @change="toggleSelectAll" />
             </th>
             <th>ID</th>
             <th>用户备注</th>
@@ -189,7 +199,19 @@ onMounted(fetchData)
           </tr>
         </thead>
         <tbody>
-          <tr v-if="!users.length">
+          <tr v-if="loading">
+            <td :colspan="8" style="text-align: center; padding: 40px 0;">
+              <div class="table-loading-container">
+                <!-- SVG 转圈 -->
+                <svg class="spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="spinner-track" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="spinner-head" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                <span class="loading-text">正在加载用户数据...</span>
+              </div>
+            </td>
+          </tr>
+          <tr v-else-if="!users.length">
             <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px">暂无订阅用户，点击右上角新增</td>
           </tr>
           <tr v-for="user in users" :key="user.id" @contextmenu.prevent="onRowContextMenu($event, user)">
@@ -197,7 +219,9 @@ onMounted(fetchData)
               <input type="checkbox" :checked="selected.has(user.id)" @change="toggleSelect(user.id)" />
             </td>
             <td>{{ user.id }}</td>
-            <td>{{ user.name }}<div v-if="user.remark" style="font-size: 0.72rem; color: var(--text-muted)">{{ user.remark }}</div></td>
+            <td>{{ user.name }}<div v-if="user.remark" style="font-size: 0.72rem; color: var(--text-muted)">{{
+              user.remark }}</div>
+            </td>
             <td><code style="font-size: 0.72rem">{{ user.token }}</code></td>
             <td style="font-size: 0.75rem">
               <div>UUID: <code>{{ user.uuid || '-' }}</code></div>
@@ -209,14 +233,16 @@ onMounted(fetchData)
             </td>
             <td style="font-size: 0.72rem; max-width: 180px">
               <template v-if="user.node_ids.length">
-                <span v-for="nid in user.node_ids" :key="nid" class="badge" style="margin: 2px">{{ nodes.find((n) => n.id === nid)?.node_name || `#${nid}` }}</span>
+                <span v-for="nid in user.node_ids" :key="nid" class="badge" style="margin: 2px">{{nodes.find((n) =>
+                  n.id === nid)?.node_name || `#${nid}`}}</span>
               </template>
               <span v-else style="color: var(--text-muted)">未绑定</span>
             </td>
             <td>
               <div style="display: flex; gap: 6px">
                 <button class="btn btn-secondary btn-sm" @click="openEdit(user)">编辑</button>
-                <button class="btn btn-danger btn-sm" @click="popover.show($event.currentTarget as Element, '⚠️ 确定删除该用户？', () => removeUser(user.id))">删除</button>
+                <button class="btn btn-danger btn-sm"
+                  @click="popover.show($event.currentTarget as Element, '⚠️ 确定删除该用户？', () => removeUser(user.id))">删除</button>
               </div>
             </td>
           </tr>
@@ -225,16 +251,11 @@ onMounted(fetchData)
     </div>
   </section>
 
-  <UserFormModal :open="showModal" :editing="editingUser" :nodes="nodes" @close="showModal = false" @saved="fetchData" />
+  <UserFormModal :open="showModal" :editing="editingUser" :nodes="nodes" @close="showModal = false"
+    @saved="fetchData" />
 
-  <ContextMenu
-    v-if="ctxMenu"
-    :x="ctxMenu.x"
-    :y="ctxMenu.y"
-    :title="ctxMenu.user.name"
-    :items="ctxMenuItems()"
-    @close="closeCtxMenu"
-  />
+  <ContextMenu v-if="ctxMenu" :x="ctxMenu.x" :y="ctxMenu.y" :title="ctxMenu.user.name" :items="ctxMenuItems()"
+    @close="closeCtxMenu" />
 
   <!-- ZIP 生成等待页 -->
   <div v-if="downloading" class="download-waiting">
