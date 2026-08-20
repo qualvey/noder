@@ -1,7 +1,7 @@
 {
     "log": {
         "level": "info",
-        "timestamp": true
+        "timestamp": false
     },
     "experimental": {
         "clash_api": {

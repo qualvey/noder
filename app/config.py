@@ -5,8 +5,8 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "data.db"
-SING_BOX_TEMPLATE_PATH = BASE_DIR / "data" / "sing-box.json"
-MIHOMO_TEMPLATE_PATH = BASE_DIR / "data" / "mihomo.yml"
+SING_BOX_TEMPLATE_PATH = BASE_DIR / "templates" / "sing-box.json"
+MIHOMO_TEMPLATE_PATH = BASE_DIR / "templates" / "mihomo.yml"
 STATIC_DIR = BASE_DIR / "static"
 
 # 管理员秘钥配置 (可以通过环境变量 ADMIN_SECRET_TOKEN 覆盖)

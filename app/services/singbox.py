@@ -104,7 +104,7 @@ def load_singbox_template() -> dict:
     return {
         "log": {"level": "info", "timestamp": True},
         "outbounds": [
-            {"type": "direct", "tag": "direct", "routing_mark": 1024},
+            {"type": "direct", "tag": "direct"},
             {"tag": "Proxy", "type": "selector", "outbounds": ["urltest"]},
             {"tag": "urltest", "type": "urltest", "outbounds": []},
         ],
