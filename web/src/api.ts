@@ -94,4 +94,10 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, `订阅拉取失败 (${res.status})`)
     return res.text()
   },
+  // 用户侧节点 JSON（无需 Admin Token）
+  userNodes: async (token: string): Promise<Record<string, unknown>[]> => {
+    const res = await fetch(`${apiBase()}/api/user/nodes?token=${encodeURIComponent(token)}`)
+    if (!res.ok) throw new ApiError(res.status, `节点列表拉取失败 (${res.status})`)
+    return res.json()
+  },
 }

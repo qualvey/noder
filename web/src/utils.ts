@@ -89,3 +89,4 @@ export function buildSubLink(token: string): string {
 export function buildMihomoLink(token: string): string {
   return `${location.origin}${apiLinkPrefix()}/mihomo?token=${encodeURIComponent(token)}`
 }
+

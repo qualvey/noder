@@ -18,8 +18,8 @@ router = APIRouter(
     dependencies=[Depends(verify_admin_token)],
 )
 
-
 def _to_read(user: User) -> UserRead:
+    assert user.id is not None, "User has not been committed to the database."
     return UserRead(
         id=user.id,
         name=user.name,
@@ -27,7 +27,7 @@ def _to_read(user: User) -> UserRead:
         token=user.token,
         uuid=user.uuid,
         password=user.password,
-        node_ids=[n.id for n in user.nodes],
+        node_ids=[n.id for n in user.nodes if n.id is not None],
         config_override=user.config_override,
     )
 
@@ -78,7 +78,6 @@ def get_user(user_id: int, session: Session = Depends(get_session)):
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return _to_read(user)
-
 
 @router.put("/{user_id}", response_model=UserRead, summary="更新用户")
 def update_user(user_id: int, user_data: UserUpdate, session: Session = Depends(get_session)):

@@ -39,7 +39,7 @@ function copySubLink() {
   })
   closeCtxMenu()
 }
-
+//TODO: 复制节点列表（标准格式）
 function copyMihomoLink() {
   const user = ctxMenu.value?.user
   if (!user) return
@@ -49,6 +49,19 @@ function copyMihomoLink() {
   closeCtxMenu()
 }
 
+async function copyNodes() {
+  const user = ctxMenu.value?.user
+  if (!user) return
+  closeCtxMenu()
+  try {
+    const nodes = await api.userNodes(user.token)
+    const formattedText = nodes.map(node => JSON.stringify(node, null, 2)).join(',\n')
+    const ok = await copyText(formattedText)
+    toast(ok ? '节点列表（JSON）已经复制到剪贴板' : '复制失败', ok ? 'info' : 'error')
+  } catch (e) {
+    toast((e as Error).message, 'error')
+  }
+}
 // 下载 ZIP 配置包：等待页 + blob 触发浏览器下载
 async function downloadZip(f: DistFile) {
   const user = ctxMenu.value?.user
@@ -77,6 +90,7 @@ const ctxMenuItems = (): ContextMenuItem[] => {
   const items: ContextMenuItem[] = [
     { label: '复制 Sing-Box 链接', icon: '📋', onClick: copySubLink },
     { label: '复制 Mihomo (Clash) 链接', icon: '🔄', onClick: copyMihomoLink },
+    { label: '复制 节点列表', icon: '11', onClick: copyNodes }
   ]
   if (zipFiles.value.length) {
     items.push({ label: '配置文件下载', icon: '📦', divider: true, onClick: () => {} })

@@ -16,7 +16,8 @@ router = APIRouter(tags=["subscription"])
 def _get_active_user(session: Session, token: str) -> User:
     user = session.exec(select(User).where(User.token == token)).first()
     if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or inactive user token")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Invalid or inactive user token")
     return user
 
 
@@ -25,7 +26,8 @@ def get_singbox_config(token: str = Query(..., description="用户鉴权 Token")
     user = _get_active_user(session, token)
     active_nodes = [n for n in user.nodes if n.is_active]
     if not active_nodes:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active nodes associated with this user")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="No active nodes associated with this user")
     return generate_singbox_config(active_nodes, user)
 
 
@@ -34,7 +36,8 @@ def get_user_nodes(token: str = Query(..., description="用户鉴权 Token"), se
     user = _get_active_user(session, token)
     active_nodes = [n for n in user.nodes if n.is_active]
     if not active_nodes:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active nodes associated with this user")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="No active nodes associated with this user")
     return [
         {
             "id": node.id,
@@ -54,7 +57,8 @@ def get_mihomo_config(token: str = Query(..., description="用户鉴权 Token"),
     user = _get_active_user(session, token)
     active_nodes = [n for n in user.nodes if n.is_active]
     if not active_nodes:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active nodes associated with this user")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="No active nodes associated with this user")
     return Response(
         content=build_mihomo_config_yaml(active_nodes, user),
         media_type="text/yaml; charset=utf-8",
@@ -67,7 +71,8 @@ def verify_user_token(token: str = Query(..., description="用户 Token"), sessi
     user = _get_active_user(session, token)
     active_nodes = [n for n in user.nodes if n.is_active]
     if not active_nodes:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户绑定的节点不存在或已被禁用")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="用户绑定的节点不存在或已被禁用")
     node_config = generate_singbox_config(active_nodes, user)
     return {
         "valid": True,
@@ -77,3 +82,22 @@ def verify_user_token(token: str = Query(..., description="用户 Token"), sessi
         "nodes": [{"id": n.id, "node_name": n.node_name, "protocol": n.protocol} for n in active_nodes],
         "singbox_config": node_config,
     }
+
+
+@router.get("/api/user/nodes")
+def get_nodes_for_user(
+    token: str = Query(..., description="用户鉴权 Token"),
+    session: Session = Depends(get_session),
+):
+    user = _get_active_user(session, token)
+    active_nodes = [node for node in user.nodes if node.is_active]
+
+    if not active_nodes:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active nodes associated with this user",
+        )
+    return [
+        build_singbox_outbound(node, user)
+        for node in active_nodes
+    ]
