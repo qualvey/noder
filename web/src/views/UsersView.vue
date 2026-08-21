@@ -6,8 +6,9 @@ import type { DistFile, Node, User } from '../types'
 import { buildMihomoLink, buildSubLink, copyText } from '../utils'
 import UserFormModal from '../components/UserFormModal.vue'
 import ContextMenu, { type ContextMenuItem } from '../components/ContextMenu.vue'
+import { ToastType } from '@/App.vue'
 
-const toast = inject('toast') as (msg: string, type?: 'info' | 'error') => void
+const toast = inject('toast') as (msg: string, type?: ToastType) => void
 const popover = inject('popover') as { show: (el: Element, title: string, cb: () => void) => void }
 const updateMetrics = inject('metrics') as (nodes: number, users: number) => void
 
@@ -63,6 +64,27 @@ async function copyNodes() {
     toast((e as Error).message, 'error')
   }
 }
+
+async function copyUser() {
+  const user = ctxMenu.value?.user
+  if (!user) return
+  closeCtxMenu()
+  try {
+    const payload = {
+          name: user.name,
+          uuid: user.uuid ?? "",
+          password: user.password ?? ""
+        }
+    const textToCopy = JSON.stringify(payload, null, 2)
+    await navigator.clipboard.writeText(textToCopy)
+
+    toast("User copied to clipboard", "success")
+  } catch(e) {
+    toast((e as Error).message,
+    "error"
+  )
+  }
+}
 // 下载 ZIP 配置包：等待页 + blob 触发浏览器下载
 async function downloadZip(f: DistFile) {
   const user = ctxMenu.value?.user
@@ -91,7 +113,8 @@ const ctxMenuItems = (): ContextMenuItem[] => {
   const items: ContextMenuItem[] = [
     { label: '复制 Sing-Box 链接', icon: '📋', onClick: copySubLink },
     { label: '复制 Mihomo (Clash) 链接', icon: '🔄', onClick: copyMihomoLink },
-    { label: '复制 节点列表', icon: '11', onClick: copyNodes }
+    { label: '复制 节点列表', icon: '11', onClick: copyNodes },
+    { label: '复制sing-box user', icon: 'none', onClick: copyUser}
   ]
   if (zipFiles.value.length) {
     items.push({ label: '配置文件下载', icon: '📦', divider: true, onClick: () => { } })

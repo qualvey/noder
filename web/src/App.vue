@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // 全局 UI 状态：toast 提示 + 鼠标位置删除确认弹窗
 import { computed, provide, ref } from 'vue'
-
+export type ToastType = 'info' | 'error' | 'success' | 'warning'
 export interface ToastItem {
   id: number
   message: string
-  type: 'info' | 'error'
+  type: ToastType
 }
 
 export interface PopoverState {
@@ -19,7 +19,7 @@ const toasts = ref<ToastItem[]>([])
 const popover = ref<PopoverState | null>(null)
 let toastId = 0
 
-function showToast(message: string, type: 'info' | 'error' = 'info') {
+function showToast(message: string, type: ToastType = 'info') {
   const id = ++toastId
   toasts.value.push({ id, message, type })
   setTimeout(() => {
