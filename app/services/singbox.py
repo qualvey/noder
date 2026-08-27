@@ -114,7 +114,7 @@ def load_singbox_template() -> dict:
 def generate_singbox_config(nodes: List[Node], user: User) -> dict:
     active_nodes = [n for n in nodes if n.is_active]
     node_outbounds = [build_singbox_outbound(n, user) for n in active_nodes]
-    node_tags = [n.node_name for n in active_nodes]
+    node_tags = [n.tag for n in active_nodes]
 
     # 读取外置 template.json
     config = load_singbox_template()
