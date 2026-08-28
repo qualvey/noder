@@ -13,14 +13,10 @@ const nodes = ref<Node[]>([])
 const selected = ref<Set<number>>(new Set())
 const showModal = ref(false)
 const editingNode = ref<Node | null>(null)
-const loading = ref(false) // 如果组件挂载时立即请求，可初始化为 true
+const loading = ref(true)
 
-const sleep = (ms: number): Promise<void> => {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-};
 async function fetchNodes() {
   loading.value = true
-  await sleep(2000);
   try {
     nodes.value = await api.nodes.list()
     updateMetrics(nodes.value.length, nodes.value.length) // users 由 UsersView 覆盖

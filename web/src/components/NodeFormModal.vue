@@ -22,6 +22,8 @@ const toast = inject('toast') as (msg: string, type?: 'info' | 'error') => void
 
 const showJsonImport = ref(false)
 const jsonInput = ref('')
+const formInitialized = ref(false)
+const draftKey = () => `noder.node-form.${props.editing?.id ?? 'new'}`
 
 const form = reactive<{
   tag: string
@@ -74,6 +76,11 @@ function resetForm() {
   jsonInput.value = ''
 }
 
+function closeModal(clearDraft = false) {
+  if (clearDraft) localStorage.removeItem(draftKey())
+  emit('close')
+}
+
 function loadForm(n: Node) {
   Object.assign(form, {
     tag: n.tag || '', node_name: n.node_name || '', protocol: n.protocol, server_address: n.server_address,
@@ -95,10 +102,26 @@ watch(
   () => props.open,
   (open) => {
     if (!open) return
-    if (props.editing) loadForm(props.editing)
+    const draft = localStorage.getItem(draftKey())
+    if (draft) {
+      try {
+        Object.assign(form, JSON.parse(draft))
+        showJsonImport.value = false
+        jsonInput.value = ''
+      } catch {
+        localStorage.removeItem(draftKey())
+        if (props.editing) loadForm(props.editing)
+        else resetForm()
+      }
+    } else if (props.editing) loadForm(props.editing)
     else resetForm()
+    formInitialized.value = true
   },
 )
+
+watch(form, (value) => {
+  if (props.open && formInitialized.value) localStorage.setItem(draftKey(), JSON.stringify(value))
+}, { deep: true })
 
 // 协议联动：锁定 security 选项
 function onProtocolChange() {
@@ -133,6 +156,7 @@ async function saveNode() {
       await api.nodes.create(payload)
       toast('新节点添加成功')
     }
+    localStorage.removeItem(draftKey())
     emit('close')
     emit('saved')
   } catch (e) {
@@ -194,11 +218,11 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
 </script>
 
 <template>
-  <div class="modal-overlay" :class="{ active: open }" @click.self="emit('close')">
+  <div class="modal-overlay" :class="{ active: open }" @click.self="closeModal()">
     <div class="modal">
       <div class="modal-header">
         <div class="modal-title">{{ editing ? '编辑节点' : '新增代理节点' }}</div>
-        <button class="modal-close" @click="emit('close')">&times;</button>
+        <button class="modal-close" @click="closeModal(true)">&times;</button>
       </div>
       <form @submit.prevent="saveNode" class="modal-form">
         <div class="form-span" style="margin-bottom: 14px; background: rgba(59,130,246,0.1); padding: 10px; border-radius: 8px; border: 1px dashed rgba(59,130,246,0.4)">
@@ -299,7 +323,7 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
         </div>
 
         <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" @click="emit('close')">取消</button>
+          <button type="button" class="btn btn-secondary" @click="closeModal()">取消</button>
           <button type="submit" class="btn btn-primary">保存节点</button>
         </div>
       </form>

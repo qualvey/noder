@@ -20,7 +20,7 @@ const showModal = ref(false)
 const editingUser = ref<User | null>(null)
 const ctxMenu = ref<{ x: number; y: number; user: User } | null>(null)
 const downloading = ref<string | null>(null) // waiting 页文案；null=不显示
-const loading = ref(false) // 如果组件挂载时立即请求，可初始化为 true
+const loading = ref(true)
 
 // 右键菜单：复制订阅链接
 function onRowContextMenu(e: MouseEvent, user: User) {
@@ -124,13 +124,8 @@ const ctxMenuItems = (): ContextMenuItem[] => {
   }
   return items
 }
-const sleep = (ms: number): Promise<void> => {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-};
 async function fetchData() {
   loading.value = true
-  await sleep(2000);
-
   try {
     const [u, n, f] = await Promise.all([api.users.list(), api.nodes.list(), api.files.list()])
     users.value = u
