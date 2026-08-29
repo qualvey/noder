@@ -9,7 +9,7 @@ from typing import List, Optional
 
 from fastapi import HTTPException, status
 from sqlmodel import Field, Relationship, SQLModel
-
+from pydantic import ConfigDict
 from app.config import ALLOWED_OVERRIDE_KEYS
 
 
@@ -157,23 +157,28 @@ class TextContentUpdate(SQLModel):
     """文本文件内容更新。"""
     content_text: str
 
-class Template(SQLModel, table=True):
-    """当前正在使用的客户端模板（按内核隔离，如 sing-box、mihomo）"""
-
-    __table_args__ = {"extend_existing": True}
-
-    id: Optional[int] = Field(default=None, primary_key=True)
+# 1. 基础模型（不带 table=True）
+class TemplateBase(SQLModel):
     target: str = Field(
-        index=True, unique=True, description="内核类型：sing-box, mihomo, clash 等"
+        index=True, unique=True, description="内核类型：sing-box, mihomo 等"
     )
-    name: str = Field(description="展示名称，如 'sing-box 官方标准模板'")
-    content_format: str = Field(
-        default="json", description="内容格式：json 或 yaml"
-    )
-    content: str = Field(description="模板原始内容 (JSON 或 YAML 文本)")
-    version: int = Field(default=1, description="当前版本号，每次修改递增")
+    name: str = Field(description="展示名称")
+    content_format: str = Field(default="json", description="内容格式")
+    content: str = Field(description="模板原始内容")
+    version: int = Field(default=1, description="当前版本号")
+
+
+# 2. 数据库实体表（table=True）
+class Template(TemplateBase, table=True):
+    __table_args__ = {"extend_existing": True}
+    id: Optional[int] = Field(default=None, primary_key=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
+
+# 3. 专门给 API 响应使用的 Read 模型（纯 Pydantic，绝不会被序列化过滤）
+class TemplateRead(TemplateBase):
+    id: int
+    updated_at: datetime
 class TemplateHistory(SQLModel, table=True):
     """模板修改历史快照，用于版本回滚与审计"""
 

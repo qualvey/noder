@@ -12,8 +12,8 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.config import DB_PATH
 from app.models import AppSetting, Node, User, Template, TemplateHistory
 
-from services.singbox import load_singbox_template
-from services.mihomo import load_mihomo_template
+from app.services.singbox import load_singbox_template
+from app.services.mihomo import load_mihomo_template
 sqlite_url = f"sqlite:///{DB_PATH}"
 engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
 

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.exporters.mihomo import build_mihomo_config_yaml
+from app.services.mihomo import build_mihomo_config_yaml
 from app.models import User
 from app.services.singbox import build_singbox_outbound, generate_singbox_config
 

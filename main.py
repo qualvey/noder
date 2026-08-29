@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import STATIC_DIR
 from app.database import lifespan
-from app.routers import download, files, nodes, settings, subscription, users
+from app.routers import download, files, nodes, settings, subscription, users, templates
 
 app = FastAPI(
     title="Sing-Box Subscription Middleman",
@@ -42,6 +42,7 @@ app.include_router(nodes.router)
 app.include_router(users.router)
 app.include_router(files.router)
 app.include_router(settings.router)
+app.include_router(templates.router)
 
 # ------------------------------------------------------------------
 # 静态资源 (前端构建产物输出到 static/)

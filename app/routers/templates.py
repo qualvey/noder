@@ -1,21 +1,16 @@
 # -*- coding: utf-8 -*-
-"""管理员 CRUD API - 分发文件管理 (/api/templates)。"""
+"""管理员 CRUD API - 模板管理与历史回滚 (/api/templates)。"""
 from datetime import datetime
-import io
-from pathlib import Path
+import json
 from typing import List, Optional
-import urllib.parse
-import uuid as uuid_lib
-import zipfile
-
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlmodel import Session, select
+import yaml
 
-from app.config import ALLOWED_FILE_TYPES, FILES_DIR, MAX_FILE_SIZE
 from app.database import get_session
 from app.deps import verify_admin_token
-from app.models import DistFile, DistFileUpdate, TextContentUpdate
-from app.services.dist import fetch_remote_file, refresh_remote_file, validate_remote_url
+from app.models import Template, TemplateHistory, TemplateRead
 
 router = APIRouter(
     prefix="/api/templates",
@@ -23,158 +18,137 @@ router = APIRouter(
     dependencies=[Depends(verify_admin_token)],
 )
 
-@router.put("", response_model=DistFile, summary="提交配置文件的基础模板")
-async def save_template(
-    file: Optional[UploadFile] = File(None),
-    file_type: str = Form("auto"),
-    template_name: Optional[str] = Form(None),
-    name: Optional[str] = Form(None),
-    download_name: Optional[str] = Form(None),
-    remark: Optional[str] = Form(None),
-    source_url: Optional[str] = Form(None),
-    content_text: Optional[str] = Form(None),
-    session: Session = Depends(get_session),
+# ================== 1. 结构模型定义 ==================
+
+class SaveTemplateRequest(BaseModel):
+    target: str                  # 如 "sing-box" 或 "mihomo"
+    content: str                 # 模板内容字符串
+    remark: Optional[str] = "Web 前端更新"
+
+
+# ================== 2. 内部校验逻辑 ==================
+
+def validate_template_content(target: str, content: str, content_format: str):
+    """根据目标内核与格式校验语法与必填字段"""
+    try:
+        if content_format == "json":
+            data = json.loads(content)
+            if not isinstance(data, dict):
+                raise ValueError("JSON 根节点必须为对象 (dict)")
+            if target == "sing-box" and "outbounds" not in data:
+                raise ValueError("sing-box 配置缺少必要的 'outbounds' 节点")
+        elif content_format == "yaml":
+            data = yaml.safe_load(content)
+            if not isinstance(data, dict):
+                raise ValueError("YAML 根节点必须为映射对象 (dict)")
+            if target == "mihomo" and "proxy-groups" not in data:
+                raise ValueError("mihomo 配置缺少必要的 'proxy-groups' 节点")
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"模板语法或字段校验失败: {str(e)}"
+        )
+
+# ================== 3. API 路由实现 ==================
+
+@router.get("", response_model=List[TemplateRead], summary="获取所有内核模板列表")
+def list_templates(session: Session = Depends(get_session)):
+    """供前端下拉切换 sing-box / mihomo"""
+    return session.exec(select(Template)).all()
+
+
+@router.get("/{target}", response_model=TemplateRead, summary="获取指定内核的当前模板")
+def get_template(target: str, session: Session = Depends(get_session)):
+    tpl = session.exec(select(Template).where(Template.target == target)).first()
+    if not tpl:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail=f"未找到内核 {target} 的模板"
+        )
+    return tpl
+
+
+@router.put("", response_model=TemplateRead, summary="提交并保存模板内容（自动产生历史快照）")
+def save_template(
+    payload: SaveTemplateRequest,
+    session: Session = Depends(get_session)
 ):
-    # 数据来源：本地文件 / 远程链接 / 文本内容 (三选一)
-    if file is not None and file.filename:
-        content = await file.read()
-        if not content:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上传文件为空")
-        if len(content) > MAX_FILE_SIZE:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"文件过大，最大支持 {MAX_FILE_SIZE // (1024 * 1024)}MB")
-        original_name = Path(file.filename).name
-    elif source_url and source_url.strip():
-        source_url = validate_remote_url(source_url.strip())
-        content = fetch_remote_file(source_url)
-        original_name = Path(urllib.parse.urlparse(source_url).path).name or "remote.bin"
-    elif content_text is not None:
-        content = content_text.encode("utf-8")
-        if len(content) > MAX_FILE_SIZE:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"文本过大，最大支持 {MAX_FILE_SIZE // (1024 * 1024)}MB")
-        original_name = (name or "file").strip() or "file.txt"
-        if not Path(original_name).suffix:
-            original_name += ".txt"
-        file_type = "text"
-    else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请上传文件、填写远程链接或输入文本内容 (三选一)")
+    # 1. 查出现有模板
+    tpl = session.exec(select(Template).where(Template.target == payload.target)).first()
+    if not tpl:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail=f"未找到目标内核 {payload.target} 的模板定义"
+        )
 
-    # 类型判定：auto 时按扩展名推断
-    if file_type in ("auto", "", None):
-        ext = Path(original_name).suffix.lower().lstrip(".")
-        file_type = "zip" if ext == "zip" else "apk"
-    if file_type not in ALLOWED_FILE_TYPES:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"不支持的文件类型 '{file_type}'，仅支持 apk / zip / text")
+    # 2. 格式与业务规则校验
+    validate_template_content(payload.target, payload.content, tpl.content_format)
 
-    # ZIP 校验 + 模板文件确定
-    if file_type == "zip":
-        try:
-            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                names = zf.namelist()
-                bad = zf.testzip()
-        except zipfile.BadZipFile:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的 ZIP 文件")
-        if bad:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"ZIP 文件损坏: {bad}")
-        if not template_name:
-            yaml_names = [n for n in names if n.lower().endswith((".yaml", ".yml"))]
-            if not yaml_names:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ZIP 内未找到 .yaml/.yml 模板，请指定模板文件名")
-            template_name = yaml_names[0]
-        elif not any(Path(n).name == Path(template_name).name for n in names):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"ZIP 中不存在模板文件: {template_name}")
+    # 3. 递增主表版本并更新
+    tpl.version += 1
+    tpl.content = payload.content
+    tpl.updated_at = datetime.utcnow()
+    session.add(tpl)
+    session.commit()
+    session.refresh(tpl)
 
-    # 落盘存储
-    FILES_DIR.mkdir(parents=True, exist_ok=True)
-    stored_name = f"{uuid_lib.uuid4().hex}_{original_name}"
-    (FILES_DIR / stored_name).write_bytes(content)
-
-    dist = DistFile(
-        name=name or original_name,
-        file_type=file_type,
-        template_name=template_name,
-        original_name=original_name,
-        download_name=(download_name or "").strip() or None,
-        stored_name=stored_name,
-        size=len(content),
-        is_active=True,
-        remark=remark or None,
-        source_url=source_url,
-        cached_at=datetime.now().isoformat(timespec="seconds") if source_url else None,
+    # 4. 插入历史版本快照
+    assert tpl.id is not None
+    history = TemplateHistory(
+        template_id=tpl.id,
+        target=tpl.target,
+        version=tpl.version,
+        content=payload.content,
+        remark=payload.remark or f"更新至 v{tpl.version}",
     )
-    session.add(dist)
+    session.add(history)
     session.commit()
-    session.refresh(dist)
-    return dist
+
+    return tpl
 
 
-@router.get("/{file_id}/content", summary="获取文本文件内容 (管理端)")
-def get_file_content(file_id: int, session: Session = Depends(get_session)):
-    dist = session.get(DistFile, file_id)
-    if not dist:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    if dist.file_type != "text":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅文本类型文件支持内容查看")
-    stored_path = FILES_DIR / dist.stored_name
-    if not stored_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File data missing on disk")
-    return {"content": stored_path.read_text(encoding="utf-8", errors="replace")}
+@router.get("/{target}/histories", response_model=List[TemplateHistory], summary="获取指定内核的历史版本列表")
+def get_template_histories(
+    target: str,
+    session: Session = Depends(get_session)
+):
+    stmt = select(TemplateHistory).where(TemplateHistory.target == target).order_by(TemplateHistory.id.desc())
+    return session.exec(stmt).all()
 
 
-@router.post("/{file_id}/content", response_model=DistFile, summary="更新文本文件内容 (管理端)")
-def update_file_content(file_id: int, payload: TextContentUpdate, session: Session = Depends(get_session)):
-    dist = session.get(DistFile, file_id)
-    if not dist:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    if dist.file_type != "text":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅文本类型文件支持内容编辑")
-    content = payload.content_text.encode("utf-8")
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"文本过大，最大支持 {MAX_FILE_SIZE // (1024 * 1024)}MB")
-    (FILES_DIR / dist.stored_name).write_bytes(content)
-    dist.size = len(content)
-    session.add(dist)
+@router.post("/{target}/rollback/{history_id}", response_model=TemplateRead, summary="回滚到指定的历史版本")
+def rollback_template(
+    target: str,
+    history_id: int,
+    session: Session = Depends(get_session)
+):
+    tpl = session.exec(select(Template).where(Template.target == target)).first()
+    history = session.get(TemplateHistory, history_id)
+
+    if not tpl or not history or history.template_id != tpl.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="指定的历史版本或目标模板不存在"
+        )
+
+    # 产生新版本覆盖主表（保留连续递增轨迹）
+    tpl.version += 1
+    tpl.content = history.content
+    tpl.updated_at = datetime.utcnow()
+    session.add(tpl)
     session.commit()
-    session.refresh(dist)
-    return dist
+    session.refresh(tpl)
 
-
-@router.post("/{file_id}/refresh", response_model=DistFile, summary="强制刷新远程文件缓存")
-def refresh_dist_file(file_id: int, session: Session = Depends(get_session)):
-    dist = session.get(DistFile, file_id)
-    if not dist:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    if not dist.source_url:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该文件不是远程链接模式，无需刷新")
-    return refresh_remote_file(dist, session)
-
-
-@router.get("", response_model=List[DistFile], summary="获取分发文件列表")
-def list_dist_files(session: Session = Depends(get_session)):
-    return session.exec(select(DistFile).order_by(DistFile.id.desc())).all()
-
-
-@router.put("/{file_id}", response_model=DistFile, summary="更新分发文件元数据")
-def update_dist_file(file_id: int, file_data: DistFileUpdate, session: Session = Depends(get_session)):
-    dist = session.get(DistFile, file_id)
-    if not dist:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    update_dict = file_data.model_dump(exclude_unset=True)
-    for key, value in update_dict.items():
-        setattr(dist, key, value)
-    session.add(dist)
+    # 记录一条回滚动作作为新历史
+    assert tpl.id is not None
+    new_history = TemplateHistory(
+        template_id=tpl.id,
+        target=tpl.target,
+        version=tpl.version,
+        content=history.content,
+        remark=f"从版本 v{history.version} 执行回滚 (快照 ID: {history.id})",
+    )
+    session.add(new_history)
     session.commit()
-    session.refresh(dist)
-    return dist
 
-
-@router.delete("/{file_id}", summary="删除分发文件")
-def delete_dist_file(file_id: int, session: Session = Depends(get_session)):
-    dist = session.get(DistFile, file_id)
-    if not dist:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    stored_path = FILES_DIR / dist.stored_name
-    if stored_path.exists():
-        stored_path.unlink()
-    session.delete(dist)
-    session.commit()
-    return {"message": f"File {file_id} deleted successfully"}
+    return tpl
