@@ -3,17 +3,41 @@
 from contextlib import asynccontextmanager
 import secrets
 import uuid as uuid_lib
-
+import json
+import yaml
 from fastapi import FastAPI
 from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import DB_PATH
-from app.models import AppSetting, Node, User
+from app.models import AppSetting, Node, User, Template, TemplateHistory
 
+from services.singbox import load_singbox_template
+from services.mihomo import load_mihomo_template
 sqlite_url = f"sqlite:///{DB_PATH}"
 engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
 
+def get_default_templates() -> list[dict]:
+
+    return [
+        {
+            "target": "sing-box",
+            "name": "sing-box 基础分流模板",
+            "content_format": "json",
+            "content": json.dumps(load_singbox_template(), indent=2, ensure_ascii=False)
+        },
+        {
+        "target": "mihomo",
+        "name": "Mihomo (Clash Meta) 标准模板",
+        "content_format": "yaml",
+        "content": yaml.dump(
+            load_mihomo_template(),
+            allow_unicode=True,
+            sort_keys=False,
+            default_flow_style=False,
+        ),
+        },
+    ]
 
 def create_db_and_tables():
     """建表 + 兼容旧库的 ALTER 迁移（幂等，失败忽略）。"""
@@ -110,6 +134,27 @@ def seed_default_data():
         session.add(test_user)
         session.commit()
 
+        for tpl_data in get_default_templates():
+            exists = session.exec(
+                select(Template).where(Template.target == tpl_data["target"])
+            ).first()
+            if not exists:
+                new_tpl = Template(**tpl_data, version=1)
+                session.add(new_tpl)
+                session.commit()
+                session.refresh(new_tpl)
+                assert new_tpl.id is not None
+                # 记录 v1 初始历史
+                session.add(
+                    TemplateHistory(
+                        template_id=new_tpl.id,
+                        target=new_tpl.target,
+                        version=1,
+                        content=new_tpl.content,
+                        remark="系统初始内置版本",
+                    )
+                )
+                session.commit()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

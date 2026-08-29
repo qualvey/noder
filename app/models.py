@@ -157,7 +157,39 @@ class TextContentUpdate(SQLModel):
     """文本文件内容更新。"""
     content_text: str
 
+class Template(SQLModel, table=True):
+    """当前正在使用的客户端模板（按内核隔离，如 sing-box、mihomo）"""
 
+    __table_args__ = {"extend_existing": True}
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    target: str = Field(
+        index=True, unique=True, description="内核类型：sing-box, mihomo, clash 等"
+    )
+    name: str = Field(description="展示名称，如 'sing-box 官方标准模板'")
+    content_format: str = Field(
+        default="json", description="内容格式：json 或 yaml"
+    )
+    content: str = Field(description="模板原始内容 (JSON 或 YAML 文本)")
+    version: int = Field(default=1, description="当前版本号，每次修改递增")
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+class TemplateHistory(SQLModel, table=True):
+    """模板修改历史快照，用于版本回滚与审计"""
+
+    __table_args__ = {"extend_existing": True}
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    template_id: int = Field(
+        foreign_key="template.id", index=True, description="关联的模板 ID"
+    )
+    target: str = Field(description="冗余记录内核类型，方便快速过滤")
+    version: int = Field(description="当时的版本号")
+    content: str = Field(description="快照内容")
+    remark: Optional[str] = Field(
+        default=None, description="变更备注，如 '新增 Netflix 分流规则'"
+    )
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 # ------------------------------------------------------------------
 # 校验辅助函数
 # ------------------------------------------------------------------
