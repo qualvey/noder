@@ -45,6 +45,9 @@ def get_node(node_id: int, session: Session = Depends(get_session)):
 
 @router.put("/{node_id}", response_model=NodeRead, summary="更新节点")
 def update_node(node_id: int, node_data: NodeUpdate, session: Session = Depends(get_session)):
+    if not node_data.node_name:  # 或者 if node_in.node_name is None:
+        node_data.node_name = node_data.tag 
+        
     node = session.get(Node, node_id)
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")

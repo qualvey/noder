@@ -21,7 +21,7 @@ class UserNodeLink(SQLModel, table=True):
 
 class NodeBase(SQLModel):
     tag: Optional[str] = Field(default=None, index=True)  # 节点标识 (outbound tag)，契约必填
-    node_name: Optional[str] = Field(default=None)        # 展示名称 (可选，仅管理员可见)
+    node_name: Optional[str] = Field(default=None, nullable=True)        # 展示名称 (可选，仅管理员可见)
     protocol: str = Field(default="vless")       # 仅限: tuic, vless, anytls
     server_address: str                         # 上游 IP / 域名
     server_port: int                            # 端口
