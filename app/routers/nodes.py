@@ -16,12 +16,14 @@ router = APIRouter(
     dependencies=[Depends(verify_admin_token)],
 )
 
-
 @router.post("", response_model=NodeRead, summary="创建节点")
 def create_node(node_data: NodeCreate, session: Session = Depends(get_session)):
+    if not node_data.node_name:  # 或者 if node_in.node_name is None:
+        node_data.node_name = node_data.tag 
     # 节点级校验：只查节点自有字段（tag/地址/端口/fixed/deps）；uuid/password 在导出时合并校验
     validate_node_contract(node_data.model_dump(), node_data.protocol, node_level=True)
     node = Node.model_validate(node_data)
+    
     session.add(node)
     session.commit()
     session.refresh(node)
