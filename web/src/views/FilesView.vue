@@ -442,7 +442,7 @@ onMounted(fetchData)
         </div>
       </div>
 
-      <form @submit.prevent="submitUpload" class="modal-form">
+      <form @submit.prevent="submitUpload" class="upload-flow-form">
         <!-- CHOOSE FILE TYPE -->
         <div class="section-label">CHOOSE FILE TYPE</div>
         <div class="type-cards-grid">
@@ -761,13 +761,20 @@ onMounted(fetchData)
 
 /* UXPilot Upload Modal Styling */
 .upload-modal {
-  max-width: 640px !important;
-  width: 95% !important;
+  max-width: 660px !important;
+  width: min(94vw, 660px) !important;
   padding: 26px 30px !important;
   border-radius: 20px !important;
   border: 1px solid var(--border-glass) !important;
-  background: rgba(15, 23, 42, 0.95) !important;
+  background: rgba(15, 23, 42, 0.96) !important;
   box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7), 0 0 35px rgba(59, 130, 246, 0.08) !important;
+  box-sizing: border-box !important;
+}
+
+.upload-flow-form {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
 }
 
 .header-left {
@@ -867,6 +874,7 @@ onMounted(fetchData)
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 12px;
+  margin-bottom: 20px;
 }
 
 .type-card {
@@ -1104,6 +1112,10 @@ onMounted(fetchData)
   gap: 14px;
 }
 
+.details-bottom-grid .form-group {
+  margin-bottom: 0;
+}
+
 .input-hint {
   font-size: 0.7rem;
   color: var(--text-dim);
@@ -1237,5 +1249,17 @@ onMounted(fetchData)
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+
+@media (max-width: 580px) {
+  .upload-modal {
+    padding: 20px 16px !important;
+  }
+  .type-cards-grid {
+    grid-template-columns: 1fr;
+  }
+  .details-bottom-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
