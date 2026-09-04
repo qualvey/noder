@@ -324,6 +324,29 @@ sing_box_bin: "./sing-box.exe"
     check("删除文件成功", r.status_code == 200)
     check("磁盘文件已清理", not (test_files_dir / apk_file["stored_name"]).exists())
 
+    print("== 6. 防重传机制测试 ==")
+    dup_content = b"anti-duplicate test content"
+    r = client.post("/api/files", headers=ADMIN, files={
+        "file": ("dup_check.apk", io.BytesIO(dup_content), "application/vnd.android.package-archive")
+    }, data={"file_type": "apk", "allow_duplicate": "true"})
+    check("首次上传 dup_check.apk 成功", r.status_code == 200, r.text)
+    dup_id = r.json()["id"]
+
+    r = client.post("/api/files", headers=ADMIN, files={
+        "file": ("dup_check.apk", io.BytesIO(dup_content), "application/vnd.android.package-archive")
+    }, data={"file_type": "apk", "allow_duplicate": "false"})
+    check("防重传生效拒绝重复上传 409", r.status_code == 409, r.text)
+
+    r = client.post("/api/files", headers=ADMIN, files={
+        "file": ("dup_check.apk", io.BytesIO(dup_content), "application/vnd.android.package-archive")
+    }, data={"file_type": "apk", "allow_duplicate": "true"})
+    check("允许重传时上传成功 200", r.status_code == 200, r.text)
+
+    # 清理测试文件
+    client.delete(f"/api/files/{dup_id}", headers=ADMIN)
+    client.delete(f"/api/files/{r.json()['id']}", headers=ADMIN)
+
+
     # 清理测试目录
     if test_files_dir.exists():
         import shutil
