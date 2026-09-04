@@ -65,6 +65,47 @@ export const api = {
   files: {
     list: () => request<DistFile[]>('/api/files'),
     create: (fd: FormData) => request<DistFile>('/api/files', { method: 'POST', body: fd }),
+    createWithProgress: (
+      fd: FormData,
+      onProgress?: (percent: number, loaded: number, total: number) => void
+    ): Promise<DistFile> => {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('POST', apiBase() + '/api/files')
+        xhr.setRequestHeader('X-Admin-Token', adminToken)
+
+        if (xhr.upload && onProgress) {
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+              const percent = Math.min(100, Math.round((e.loaded / e.total) * 100))
+              onProgress(percent, e.loaded, e.total)
+            }
+          }
+        }
+
+        xhr.onload = () => {
+          if (xhr.status === 401) {
+            return reject(new ApiError(401, '鉴权失败：Admin Token 无效'))
+          }
+          try {
+            const data = JSON.parse(xhr.responseText || '{}')
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve(data as DistFile)
+            } else {
+              reject(new ApiError(xhr.status, data.detail || xhr.statusText || '上传失败'))
+            }
+          } catch {
+            reject(new ApiError(xhr.status, xhr.statusText || '上传失败'))
+          }
+        }
+
+        xhr.onerror = () => {
+          reject(new ApiError(0, '网络异常，上传中断'))
+        }
+
+        xhr.send(fd)
+      })
+    },
     update: (id: number, body: Partial<DistFile>) => request<DistFile>(`/api/files/${id}`, { method: 'PUT', body }),
     remove: (id: number) => request<{ message: string }>(`/api/files/${id}`, { method: 'DELETE' }),
     refresh: (id: number) => request<DistFile>(`/api/files/${id}/refresh`, { method: 'POST' }),
