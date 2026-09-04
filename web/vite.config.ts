@@ -22,10 +22,22 @@ export default defineConfig({
   server: {
     port: 5273,
     proxy: {
-      '/api': 'http://127.0.0.1:8000',
-      '/sub': 'http://127.0.0.1:8000',
-      '/node': 'http://127.0.0.1:8000',
-      '/dl': 'http://127.0.0.1:8000',
+      '/api': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+      },
+      '/sub': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+      },
+      '/node/': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+      },
+      '/dl': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+      },
     },
   },
 })

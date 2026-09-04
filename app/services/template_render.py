@@ -10,7 +10,7 @@ import zipfile
 import yaml
 
 from app.models import User
-from app.exporters.mihomo import build_mihomo_proxies_yaml
+from app.services.mihomo import build_mihomo_proxies_yaml
 from app.services.singbox import build_singbox_outbound
 
 
