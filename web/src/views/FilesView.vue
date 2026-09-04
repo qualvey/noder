@@ -17,14 +17,13 @@ const fileInput = ref<HTMLInputElement | null>(null)
 // 文本文件编辑弹窗
 const showTextModal = ref(false)
 const textEdit = ref<DistFile | null>(null)
-const textForm = ref({ name: '', downloadName: '', remark: '', content: '' })
+const textForm = ref({ downloadName: '', remark: '', content: '' })
 const textLoading = ref(false)
 
 type FileType = 'apk' | 'zip' | 'text'
 const form = ref({
   type: 'apk' as FileType,
   templateName: '',
-  name: '',
   downloadName: '',
   remark: '',
   sourceUrl: '',
@@ -48,7 +47,7 @@ async function fetchData() {
 }
 
 function openCreate() {
-  Object.assign(form.value, { type: 'apk', templateName: '', name: '', downloadName: '', remark: '', sourceUrl: '', contentText: '' })
+  Object.assign(form.value, { type: 'apk', templateName: '', downloadName: '', remark: '', sourceUrl: '', contentText: '' })
   if (fileInput.value) fileInput.value.value = ''
   showModal.value = true
 }
@@ -91,8 +90,11 @@ async function submitUpload() {
   if (hasContent) fd.append('content_text', form.value.contentText)
   fd.append('file_type', form.value.type)
   fd.append('template_name', form.value.templateName.trim())
-  fd.append('name', form.value.name.trim())
-  fd.append('download_name', form.value.downloadName.trim())
+  const dlName = form.value.downloadName.trim()
+  if (dlName) {
+    fd.append('name', dlName)
+    fd.append('download_name', dlName)
+  }
   fd.append('remark', form.value.remark.trim())
 
   try {
@@ -169,7 +171,7 @@ async function openTextEdit(f: DistFile) {
   showTextModal.value = true
   try {
     const r = await api.files.getContent(f.id)
-    textForm.value = { name: f.name, downloadName: f.download_name || '', remark: f.remark || '', content: r.content }
+    textForm.value = { downloadName: f.download_name || f.original_name || f.name, remark: f.remark || '', content: r.content }
   } catch (e) {
     toast((e as Error).message, 'error')
     showTextModal.value = false
@@ -181,11 +183,12 @@ async function openTextEdit(f: DistFile) {
 async function saveTextEdit() {
   if (!textEdit.value) return
   try {
-    // 内容 + 元数据（名称/下载文件名/备注）
+    // 内容 + 元数据（文件名/备注）
     await api.files.updateContent(textEdit.value.id, textForm.value.content)
+    const dlName = textForm.value.downloadName.trim()
     await api.files.update(textEdit.value.id, {
-      name: textForm.value.name.trim() || textEdit.value.name,
-      download_name: textForm.value.downloadName.trim() || null,
+      name: dlName || textEdit.value.name,
+      download_name: dlName || null,
       remark: textForm.value.remark.trim() || null,
     })
     toast('文本文件已更新')
@@ -221,11 +224,10 @@ onMounted(fetchData)
         <thead>
           <tr>
             <th>ID</th>
-            <th>名称</th>
+            <th>文件名</th>
             <th>类型</th>
             <th>大小</th>
             <th>来源</th>
-            <th>下载文件名</th>
             <th>ZIP 模板文件</th>
             <th>状态</th>
             <th>下载方式</th>
@@ -234,13 +236,13 @@ onMounted(fetchData)
         </thead>
         <tbody>
           <tr v-if="!files.length">
-            <td colspan="10" style="text-align: center; color: var(--text-muted); padding: 30px">暂无分发文件，点击右上角上传</td>
+            <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px">暂无分发文件，点击右上角上传</td>
           </tr>
           <tr v-for="f in files" :key="f.id">
             <td>{{ f.id }}</td>
             <td>
-              {{ f.name }}
-              <div v-if="f.remark" style="font-size: 0.72rem; color: var(--text-muted)">{{ f.remark }}</div>
+              <code>{{ f.download_name || f.original_name || f.name }}</code>
+              <div v-if="f.remark" style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px">{{ f.remark }}</div>
             </td>
             <td>
               <span class="badge" :class="f.file_type === 'zip' ? 'badge-vless' : f.file_type === 'text' ? 'badge-anytls' : 'badge-tuic'">
@@ -253,9 +255,6 @@ onMounted(fetchData)
               <span v-else-if="f.file_type === 'text'" style="color: var(--text-muted)">📝 文本</span>
               <span v-else style="color: var(--text-muted)">📁 本地</span>
             </td>
-            <td style="font-size: 0.78rem">
-              <code>{{ f.download_name || f.original_name }}</code>
-            </td>
             <td>{{ f.file_type === 'zip' ? f.template_name || '-' : '-' }}</td>
             <td>
               <span v-if="f.is_active" style="color: var(--accent-emerald)">🟢 启用</span>
@@ -263,7 +262,7 @@ onMounted(fetchData)
             </td>
             <td>
               <template v-if="f.file_type === 'zip'">
-                <span style="font-size: 0.75rem; color: var(--text-muted)">📦 用户列表右键下载（按用户个性化）</span>
+                <span style="font-size: 0.75rem; color: var(--text-muted)">📦 用户列表右键复制下载链接（按用户个性化）</span>
               </template>
               <template v-else>
                 <button class="btn btn-secondary btn-sm" @click="copySharedLink(f)">复制共享链接</button>
@@ -350,15 +349,11 @@ onMounted(fetchData)
         </template>
 
         <div class="form-group">
-          <label>显示名称 (列表展示用)</label>
-          <input v-model="form.name" class="form-control" placeholder="如 客户端安装包" />
-        </div>
-        <div class="form-group">
-          <label>下载文件名 (含后缀，可自定义；留空用原始名)</label>
+          <label>文件名 (含后缀，如 client.apk / 留空自动使用原始名)</label>
           <input v-model="form.downloadName" class="form-control" placeholder="如 client-v2.apk / 客户端配置.conf" />
         </div>
         <div class="form-group">
-          <label>备注</label>
+          <label>备注 (仅管理员可见)</label>
           <input v-model="form.remark" class="form-control" placeholder="如 仅供付费用户下载" />
         </div>
 
@@ -374,17 +369,13 @@ onMounted(fetchData)
   <div class="modal-overlay" :class="{ active: showTextModal }" @click.self="showTextModal = false">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title">编辑文本文件{{ textEdit ? `：${textEdit.name}` : '' }}</div>
+        <div class="modal-title">编辑文本文件{{ textEdit ? `：${textEdit.download_name || textEdit.original_name || textEdit.name}` : '' }}</div>
         <button class="modal-close" @click="showTextModal = false">&times;</button>
       </div>
       <form @submit.prevent="saveTextEdit" class="modal-form">
-        <div class="form-group">
-          <label>显示名称</label>
-          <input v-model="textForm.name" class="form-control" placeholder="列表展示名称" />
-        </div>
-        <div class="form-group">
-          <label>下载文件名 (含后缀)</label>
-          <input v-model="textForm.downloadName" class="form-control" placeholder="留空用原始名" />
+        <div class="form-group form-span">
+          <label>文件名 (含后缀)</label>
+          <input v-model="textForm.downloadName" class="form-control" placeholder="如 client.conf / 留空用原始名" />
         </div>
         <div class="form-group form-span">
           <label>文本内容（原样分发，不做渲染）</label>
@@ -392,7 +383,7 @@ onMounted(fetchData)
             placeholder="正在加载..." :disabled="textLoading"></textarea>
         </div>
         <div class="form-group form-span">
-          <label>备注</label>
+          <label>备注 (仅管理员可见)</label>
           <input v-model="textForm.remark" class="form-control" placeholder="如 仅供付费用户下载" />
         </div>
         <div class="modal-footer">

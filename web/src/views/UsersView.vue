@@ -3,7 +3,7 @@
 import { inject, onMounted, ref } from 'vue'
 import { api } from '../api'
 import type { DistFile, Node, User } from '../types'
-import { buildMihomoLink, buildSubLink, copyText } from '../utils'
+import { buildDownloadLink, buildMihomoLink, buildSubLink, copyText } from '../utils'
 import UserFormModal from '../components/UserFormModal.vue'
 import ContextMenu, { type ContextMenuItem } from '../components/ContextMenu.vue'
 import { ToastType } from '@/App.vue'
@@ -85,28 +85,22 @@ async function copyUser() {
   )
   }
 }
-// 下载 ZIP 配置包：等待页 + blob 触发浏览器下载
-async function downloadZip(f: DistFile) {
+
+function copyValue(val: string | undefined | null, label: string) {
+  if (!val || val === '-') return
+  copyText(val).then((ok) => {
+    toast(ok ? `${label} 已复制到剪贴板` : '复制失败', ok ? 'info' : 'error')
+  })
+}
+// 复制 ZIP 配置包下载链接
+function copyZipLink(f: DistFile) {
   const user = ctxMenu.value?.user
   if (!user) return
   closeCtxMenu()
-  downloading.value = `正在为「${user.name}」生成配置包 ${f.name} ...`
-  try {
-    const blob = await api.downloadZip(f.id, user.token)
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = f.download_name || f.original_name || f.name
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
-    toast('配置包已生成并下载')
-  } catch (e) {
-    toast((e as Error).message, 'error')
-  } finally {
-    downloading.value = null
-  }
+  const url = buildDownloadLink(f.id, user.token)
+  copyText(url).then((ok) => {
+    toast(ok ? `${f.name} 下载链接已复制到剪贴板` : '复制失败', ok ? 'info' : 'error')
+  })
 }
 
 const ctxMenuItems = (): ContextMenuItem[] => {
@@ -114,12 +108,12 @@ const ctxMenuItems = (): ContextMenuItem[] => {
     { label: '复制 Sing-Box 链接', icon: '📋', onClick: copySubLink },
     { label: '复制 Mihomo (Clash) 链接', icon: '🔄', onClick: copyMihomoLink },
     { label: '复制 节点列表', icon: '11', onClick: copyNodes },
-    { label: '复制sing-box user', icon: 'none', onClick: copyUser}
+    { label: '复制sing-box user', icon: 'none', onClick: copyUser }
   ]
   if (zipFiles.value.length) {
     items.push({ label: '配置文件下载', icon: '📦', divider: true, onClick: () => { } })
     for (const z of zipFiles.value) {
-      items.push({ label: `下载 ${z.name}`, icon: '📦', onClick: () => downloadZip(z) })
+      items.push({ label: `复制 ${z.name} 下载链接`, icon: '🔗', onClick: () => copyZipLink(z) })
     }
   }
   return items
@@ -242,8 +236,25 @@ onMounted(fetchData)
             </td>
             <td><code style="font-size: 0.72rem">{{ user.token }}</code></td>
             <td style="font-size: 0.75rem">
-              <div>UUID: <code>{{ user.uuid || '-' }}</code></div>
-              <div>PWD: <code>{{ user.password || '-' }}</code></div>
+              <div
+                v-if="user.uuid"
+                class="copyable-cell"
+                title="点击复制 UUID"
+                @click.stop="copyValue(user.uuid, 'UUID')"
+              >
+                UUID: <code class="clickable-code">{{ user.uuid }}</code>
+              </div>
+              <div v-else style="color: var(--text-dim)">UUID: <code>-</code></div>
+
+              <div
+                v-if="user.password"
+                class="copyable-cell"
+                title="点击复制 PWD"
+                @click.stop="copyValue(user.password, 'PWD')"
+              >
+                PWD: <code class="clickable-code">{{ user.password }}</code>
+              </div>
+              <div v-else style="color: var(--text-dim)">PWD: <code>-</code></div>
             </td>
             <td>
               <span v-if="user.is_active" style="color: var(--accent-emerald)">🟢 启用</span>
@@ -284,3 +295,23 @@ onMounted(fetchData)
     </div>
   </div>
 </template>
+
+<style scoped>
+.copyable-cell {
+  cursor: pointer;
+  padding: 1px 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  user-select: none;
+}
+.copyable-cell:hover .clickable-code {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--bg-hover);
+}
+.clickable-code {
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+</style>
