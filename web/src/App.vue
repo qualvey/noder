@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 全局 UI 状态：toast 提示 + 鼠标位置删除确认弹窗
-import { computed, provide, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 export type ToastType = 'info' | 'error' | 'success' | 'warning'
 export interface ToastItem {
   id: number
@@ -76,6 +76,70 @@ const tabs = [
 ]
 const tabIndex = computed(() => tabs.findIndex((t) => t.key === activeTab.value))
 
+const stickyAnchorRef = ref<HTMLElement | null>(null)
+const tabNavPinned = ref(false)
+const isHeightExpanded = ref(false)
+
+function getNavNaturalScrollY(): number {
+  if (!stickyAnchorRef.value) return 0
+  const anchorRect = stickyAnchorRef.value.getBoundingClientRect()
+  return Math.max(0, window.scrollY + anchorRect.top)
+}
+
+function updateTabNavSticky() {
+  if (!stickyAnchorRef.value) return
+  const anchorRect = stickyAnchorRef.value.getBoundingClientRect()
+  const currentScrollY = window.scrollY
+
+  // 1. 吸顶视觉状态：当锚点触顶且未在页面绝对顶部时生效
+  const isStuck = anchorRect.top <= 1 && currentScrollY > 2
+  tabNavPinned.value = isStuck
+
+  // 2. 如果触顶，开启高度支撑，保证后续切 Tab 或向上滑动的平滑过渡
+  if (isStuck) {
+    isHeightExpanded.value = true
+  }
+
+  // 3. 只有当向上滑动直到 Header 完全显示在视口（scrollY <= 2）时，才释放支撑高度
+  if (currentScrollY <= 2) {
+    isHeightExpanded.value = false
+    tabNavPinned.value = false
+  }
+}
+
+const handleTabNavScroll = () => updateTabNavSticky()
+
+watch(activeTab, async () => {
+  const wasSticky = tabNavPinned.value || isHeightExpanded.value
+  const targetScrollY = getNavNaturalScrollY()
+
+  if (wasSticky) {
+    isHeightExpanded.value = true
+    window.scrollTo({ top: targetScrollY, behavior: 'instant' })
+  }
+
+  await nextTick()
+
+  if (wasSticky) {
+    window.scrollTo({ top: targetScrollY, behavior: 'instant' })
+    tabNavPinned.value = true
+    isHeightExpanded.value = true
+  } else {
+    updateTabNavSticky()
+  }
+})
+
+onMounted(() => {
+  updateTabNavSticky()
+  window.addEventListener('scroll', handleTabNavScroll, { passive: true })
+  window.addEventListener('resize', handleTabNavScroll, { passive: true })
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', handleTabNavScroll)
+  window.removeEventListener('resize', handleTabNavScroll)
+})
+
 import { getAdminToken, setAdminToken } from './api'
 import NodesView from './views/NodesView.vue'
 import UsersView from './views/UsersView.vue'
@@ -136,8 +200,18 @@ provide('metrics', updateMetrics)
 
     </div>
 
-    <div class="tab-navigation">
-      <div class="tab-slider" :data-index="tabIndex"></div>
+    <!-- 锚点：在正常文档流中精准标定 tab-navigation 的起始位置 -->
+    <div ref="stickyAnchorRef" class="tab-sticky-anchor"></div>
+
+    <div class="tab-navigation" :class="{ pinned: tabNavPinned }">
+      <div
+        class="tab-slider"
+        :data-index="tabIndex"
+        :style="{
+          transform: `translateX(${tabIndex * 100}%)`,
+          width: `${100 / tabs.length}%`,
+        }"
+      ></div>
       <button
         v-for="t in tabs"
         :key="t.key"
@@ -149,10 +223,12 @@ provide('metrics', updateMetrics)
       </button>
     </div>
 
-    <NodesView v-if="activeTab === 'nodes'" />
-    <UsersView v-else-if="activeTab === 'users'" />
-    <FilesView v-else-if="activeTab === 'files'" />
-    <HelpView v-else />
+    <div class="tab-view-container" :class="{ 'sticky-expanded': isHeightExpanded }">
+      <NodesView v-if="activeTab === 'nodes'" />
+      <UsersView v-else-if="activeTab === 'users'" />
+      <FilesView v-else-if="activeTab === 'files'" />
+      <HelpView v-else />
+    </div>
   </main>
 
   <!-- Toast 容器 -->
@@ -204,6 +280,89 @@ provide('metrics', updateMetrics)
   gap: 8px;
   justify-content: flex-end;
 }
+
+.tab-sticky-anchor {
+  height: 0;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.tab-view-container {
+  min-height: auto;
+}
+
+.tab-view-container.sticky-expanded {
+  min-height: calc(100vh + 200px);
+}
+
+.tab-navigation {
+  position: sticky;
+  top: 0;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 18px 0 20px;
+  padding: 8px;
+  border: 1px solid var(--border-glass);
+  border-radius: 18px;
+  background: var(--bg-card);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  isolation: isolate;
+  transition:
+    box-shadow 0.24s ease,
+    border-color 0.24s ease,
+    background 0.24s ease,
+    transform 0.24s ease;
+}
+
+.tab-navigation.pinned {
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
+  border-color: rgba(99, 102, 241, 0.35);
+  background: var(--bg-card-hover);
+  transform: translateY(-2px);
+}
+
+.tab-slider {
+  position: absolute;
+  inset: 8px auto 8px 8px;
+  width: 25%;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.95), rgba(56, 189, 248, 0.9));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 8px 20px rgba(79, 70, 229, 0.35);
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), width 0.28s ease;
+}
+
+.tab-btn {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.93rem;
+  letter-spacing: 0.01em;
+  padding: 12px 14px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.tab-btn:hover {
+  color: var(--text-main);
+}
+
+.tab-btn.active {
+  color: #fff;
+}
+
 .toast-enter-active,
 .toast-leave-active {
   transition: all 0.3s ease;
