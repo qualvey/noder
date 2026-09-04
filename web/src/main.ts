@@ -10,4 +10,6 @@ const initialTheme = savedTheme === 'light' || savedTheme === 'dark'
   : systemLight ? 'light' : 'dark'
 document.documentElement.dataset.theme = initialTheme
 
-createApp(App).mount('#app')
+import { i18n } from './i18n'
+
+createApp(App).use(i18n).mount('#app')
