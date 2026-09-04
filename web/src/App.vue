@@ -53,6 +53,16 @@ function confirmPopover() {
 provide('toast', showToast)
 provide('popover', { show: showPopover, hide: hidePopover })
 
+import { useI18n } from 'vue-i18n'
+import { setLocale, type LocaleType } from './i18n'
+
+const { t, locale } = useI18n()
+
+function toggleLocale() {
+  const next: LocaleType = locale.value === 'zh' ? 'en' : 'zh'
+  setLocale(next)
+}
+
 // 页面状态
 const activeTab = ref<'nodes' | 'users' | 'files' | 'help'>('nodes')
 const adminTokenInput = ref(localStorage.getItem('admin_token') || 'admin-secret')
@@ -68,13 +78,13 @@ function toggleTheme() {
 }
 
 // Tab 定义 + 滑块位移索引
-const tabs = [
-  { key: 'nodes' as const, label: '节点管理 (Nodes)' },
-  { key: 'users' as const, label: '用户管理 (Users)' },
-  { key: 'files' as const, label: '文件分发 (Files)' },
-  { key: 'help' as const, label: '使用指引与 API' },
-]
-const tabIndex = computed(() => tabs.findIndex((t) => t.key === activeTab.value))
+const tabs = computed(() => [
+  { key: 'nodes' as const, label: t('nav.nodes') },
+  { key: 'users' as const, label: t('nav.users') },
+  { key: 'files' as const, label: t('nav.files') },
+  { key: 'help' as const, label: t('nav.help') },
+])
+const tabIndex = computed(() => tabs.value.findIndex((t) => t.key === activeTab.value))
 
 const stickyAnchorRef = ref<HTMLElement | null>(null)
 const tabNavPinned = ref(false)
@@ -148,7 +158,7 @@ import HelpView from './views/HelpView.vue'
 
 function saveToken() {
   setAdminToken(adminTokenInput.value.trim())
-  showToast('Admin Token 已保存')
+  showToast(t('nav.adminTokenSaved'))
   window.location.reload()
 }
 
@@ -165,17 +175,20 @@ provide('metrics', updateMetrics)
         <div class="brand-icon">⚡</div>
         <div>
           <div class="brand-title">Sing-Box Sub Middleman</div>
-          <div class="brand-subtitle">节点管理与动态订阅生成系统 (TUIC / VLESS REALITY / AnyTLS 版)</div>
+          <div class="brand-subtitle">{{ t('nav.systemOnline') }} (TUIC / VLESS REALITY / AnyTLS)</div>
         </div>
       </div>
       <div class="header-controls">
-        <button class="btn btn-secondary btn-sm theme-toggle" :title="theme === 'light' ? '切换到深色模式' : '切换到浅色模式'" @click="toggleTheme">
+        <button class="btn btn-secondary btn-sm lang-toggle" :title="t('nav.switchLang')" @click="toggleLocale">
+          🌐 {{ locale === 'zh' ? 'EN' : '中文' }}
+        </button>
+        <button class="btn btn-secondary btn-sm theme-toggle" :title="theme === 'light' ? t('nav.themeDark') : t('nav.themeLight')" @click="toggleTheme">
           {{ theme === 'light' ? '☀️' : '🌙' }}
         </button>
         <div class="admin-token-box">
-          <label for="adminTokenInput">Admin Token:</label>
-          <input type="password" id="adminTokenInput" v-model="adminTokenInput" placeholder="输入密钥" />
-          <button class="btn btn-secondary btn-sm" @click="saveToken">保存</button>
+          <label for="adminTokenInput">{{ t('nav.adminToken') }}:</label>
+          <input type="password" id="adminTokenInput" v-model="adminTokenInput" :placeholder="t('nav.adminTokenPlaceholder')" />
+          <button class="btn btn-secondary btn-sm" @click="saveToken">{{ t('common.save') }}</button>
         </div>
       </div>
     </div>
@@ -185,14 +198,14 @@ provide('metrics', updateMetrics)
     <div class="metrics-grid">
       <div class="metric-card">
         <div class="metric-info">
-          <h4>托管节点总数</h4>
+          <h4>{{ t('nav.nodesOnline') }}</h4>
           <div class="value">{{ metrics.nodes }}</div>
         </div>
         <div class="metric-icon icon-node">🌐</div>
       </div>
       <div class="metric-card">
         <div class="metric-info">
-          <h4>活跃订阅用户</h4>
+          <h4>{{ t('nav.usersActive') }}</h4>
           <div class="value">{{ metrics.users }}</div>
         </div>
         <div class="metric-icon icon-user">👤</div>
@@ -244,8 +257,8 @@ provide('metrics', updateMetrics)
   <div v-if="popover" class="delete-confirm-popover active" :style="{ left: popover.x + 'px', top: popover.y + 'px' }">
     <div class="delete-confirm-title">{{ popover.title }}</div>
     <div class="delete-confirm-actions">
-      <button type="button" class="btn btn-secondary btn-sm" @click="hidePopover">取消</button>
-      <button type="button" class="btn btn-danger btn-sm" @click="confirmPopover">确定删除</button>
+      <button type="button" class="btn btn-secondary btn-sm" @click="hidePopover">{{ t('common.cancel') }}</button>
+      <button type="button" class="btn btn-danger btn-sm" @click="confirmPopover">{{ t('common.confirm') }}</button>
     </div>
   </div>
 </template>
