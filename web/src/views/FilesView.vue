@@ -2,10 +2,12 @@
 // 文件分发：先选类型（普通文件 / zip / 文本），按类型展示对应输入
 // 普通文件与文本用共享 token 下载（可重置）；zip 按用户个性化渲染，在用户列表右键下载
 import { computed, inject, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { DistFile } from '../types'
 import { apiLinkPrefix, formatFileSize } from '../utils'
 
+const { t } = useI18n()
 const toast = inject('toast') as (msg: string, type?: 'info' | 'error') => void
 const popover = inject('popover') as { show: (el: Element, title: string, cb: () => void) => void }
 
@@ -41,11 +43,11 @@ const form = ref({
   contentText: '',
 })
 
-const typeOptions: { value: FileType; label: string; desc: string }[] = [
-  { value: 'apk', label: 'Regular File', desc: 'APK / Binary file' },
-  { value: 'zip', label: 'ZIP Config', desc: 'Dynamic template pack' },
-  { value: 'text', label: 'Raw Text', desc: 'Plain text string' },
-]
+const typeOptions = computed(() => [
+  { value: 'apk' as const, label: t('files.modal.typeRegular'), desc: t('files.modal.typeRegularDesc') },
+  { value: 'zip' as const, label: t('files.modal.typeZip'), desc: t('files.modal.typeZipDesc') },
+  { value: 'text' as const, label: t('files.modal.typeText'), desc: t('files.modal.typeTextDesc') },
+])
 
 // 步骤计算
 const currentStep = computed(() => {
@@ -166,21 +168,21 @@ async function submitUpload() {
 
   if (isText) {
     if (!hasContent) {
-      toast('文本类型需要输入字符串内容', 'error')
+      toast(t('files.modal.fillContentFirst'), 'error')
       return
     }
   } else if (isZip) {
     if (!hasFile) {
-      toast('请先选择或拖入 ZIP 配置文件', 'error')
+      toast(t('files.modal.selectZipFirst'), 'error')
       return
     }
   } else if (isRegular) {
     if (regularSourceTab.value === 'local' && !hasFile) {
-      toast('请先选择或拖入要上传的文件', 'error')
+      toast(t('files.modal.selectFileFirst'), 'error')
       return
     }
     if (regularSourceTab.value === 'remote' && !hasUrl) {
-      toast('请填写远程 URL 链接', 'error')
+      toast(t('files.modal.fillUrlFirst'), 'error')
       return
     }
   }
@@ -214,7 +216,7 @@ async function submitUpload() {
       await api.files.create(fd)
     }
 
-    toast(hasUrl ? '远程文件已添加 (首次拉取完成)' : hasContent ? '文本内容已保存' : '分发文件上传成功')
+    toast(hasUrl ? t('files.successRemoteAdded') : hasContent ? t('files.successTextSaved') : t('files.successUploaded'))
     showModal.value = false
     fetchData()
   } catch (e) {
@@ -229,20 +231,20 @@ async function submitUpload() {
 function copySharedLink(f: DistFile) {
   if (!sharedToken.value) return
   const url = `${location.origin}${apiLinkPrefix()}/dl/${f.id}?token=${encodeURIComponent(sharedToken.value)}`
-  navigator.clipboard.writeText(url).then(() => toast('共享下载链接已复制'), () => toast('复制失败', 'error'))
+  navigator.clipboard.writeText(url).then(() => toast(t('common.copied')), () => toast(t('common.copyFailed'), 'error'))
 }
 
 async function copySharedToken() {
   await navigator.clipboard.writeText(sharedToken.value)
-  toast('共享 Token 已复制')
+  toast(t('common.copied'))
 }
 
 function resetSharedToken(btn: Element) {
-  popover.show(btn, '⚠️ 重置共享 Token？旧链接将全部失效', async () => {
+  popover.show(btn, t('files.resetSharedConfirm'), async () => {
     try {
       const r = await api.settings.resetSharedToken()
       sharedToken.value = r.token
-      toast('共享 Token 已重置，旧链接全部失效')
+      toast(t('common.success'))
     } catch (e) {
       toast((e as Error).message, 'error')
     }
@@ -252,7 +254,7 @@ function resetSharedToken(btn: Element) {
 function toggleActive(f: DistFile) {
   api.files.update(f.id, { is_active: !f.is_active })
     .then(() => {
-      toast(f.is_active ? '文件已停用' : '文件已启用')
+      toast(f.is_active ? t('files.statusInactive') : t('files.statusActive'))
       fetchData()
     })
     .catch((e) => toast(e.message, 'error'))
@@ -260,23 +262,23 @@ function toggleActive(f: DistFile) {
 
 function refreshRemote(f: DistFile, btn: HTMLButtonElement) {
   btn.disabled = true
-  btn.textContent = '刷新中...'
+  btn.textContent = t('files.refreshing')
   api.files.refresh(f.id)
     .then(() => {
-      toast('远程文件已刷新')
+      toast(t('files.successRefreshed'))
       fetchData()
     })
     .catch((e) => {
       toast(e.message, 'error')
       btn.disabled = false
-      btn.textContent = '🔄 刷新'
+      btn.textContent = '🔄 ' + t('common.refresh')
     })
 }
 
 function removeFile(f: DistFile) {
   api.files.remove(f.id)
     .then(() => {
-      toast('分发文件已删除')
+      toast(t('common.deleted'))
       fetchData()
     })
     .catch((e) => toast(e.message, 'error'))
@@ -309,7 +311,7 @@ async function saveTextEdit() {
       download_name: dlName || null,
       remark: textForm.value.remark.trim() || null,
     })
-    toast('文本文件已更新')
+    toast(t('files.successTextSaved'))
     showTextModal.value = false
     fetchData()
   } catch (e) {
@@ -323,38 +325,38 @@ onMounted(fetchData)
 <template>
   <section class="tab-content" style="display: block">
     <div class="section-header">
-      <div class="section-title">文件分发 (普通文件 / ZIP 配置包 / 文本)</div>
+      <div class="section-title">{{ t('files.headerTitle') }}</div>
       <div style="display: flex; gap: 10px; align-items: center">
-        <button class="btn btn-primary" @click="openCreate"><span>+</span> 上传分发文件</button>
+        <button class="btn btn-primary" @click="openCreate"><span>+</span> {{ t('files.uploadBtn') }}</button>
       </div>
     </div>
 
     <div class="shared-token-bar">
-      <span style="font-weight: 600">🔑 共享下载 Token</span>
-      <span style="color: var(--text-muted); font-size: 0.8rem">(普通文件 / 文本文件下载鉴权，与用户 Token 独立)</span>
+      <span style="font-weight: 600">{{ t('files.sharedTokenBar') }}</span>
+      <span style="color: var(--text-muted); font-size: 0.8rem">{{ t('files.sharedTokenTip') }}</span>
       <code class="shared-token-value">{{ sharedToken }}</code>
-      <button class="btn btn-secondary btn-sm" @click="copySharedToken">复制</button>
-      <button class="btn btn-danger btn-sm" @click="resetSharedToken($event.currentTarget as Element)">重置 (旧链接失效)</button>
+      <button class="btn btn-secondary btn-sm" @click="copySharedToken">{{ t('files.copySharedToken') }}</button>
+      <button class="btn btn-danger btn-sm" @click="resetSharedToken($event.currentTarget as Element)">{{ t('files.resetSharedToken') }}</button>
     </div>
 
     <div class="table-container">
       <table class="data-table">
         <thead>
           <tr>
-            <th>ID</th>
-            <th>文件名</th>
-            <th>类型</th>
-            <th>大小</th>
-            <th>来源</th>
-            <th>ZIP 模板文件</th>
-            <th>状态</th>
-            <th>下载方式</th>
-            <th>操作</th>
+            <th>{{ t('files.colId') }}</th>
+            <th>{{ t('files.colName') }}</th>
+            <th>{{ t('files.colType') }}</th>
+            <th>{{ t('files.colSize') }}</th>
+            <th>{{ t('files.colSource') }}</th>
+            <th>{{ t('files.colTemplate') }}</th>
+            <th>{{ t('files.colStatus') }}</th>
+            <th>{{ t('files.colLink') }}</th>
+            <th>{{ t('common.actions') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="!files.length">
-            <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px">暂无分发文件，点击右上角上传</td>
+            <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px">{{ t('files.emptyText') }}</td>
           </tr>
           <tr v-for="f in files" :key="f.id">
             <td>{{ f.id }}</td>
@@ -364,34 +366,34 @@ onMounted(fetchData)
             </td>
             <td>
               <span class="badge" :class="f.file_type === 'zip' ? 'badge-vless' : f.file_type === 'text' ? 'badge-anytls' : 'badge-tuic'">
-                {{ f.file_type === 'apk' ? '普通文件' : f.file_type.toUpperCase() }}
+                {{ f.file_type === 'apk' ? t('files.typeRegularShort') : f.file_type.toUpperCase() }}
               </span>
             </td>
             <td>{{ formatFileSize(f.size) }}</td>
             <td>
-              <span v-if="f.source_url" :title="f.source_url" style="cursor: help">🔗 远程</span>
-              <span v-else-if="f.file_type === 'text'" style="color: var(--text-muted)">📝 文本</span>
-              <span v-else style="color: var(--text-muted)">📁 本地</span>
+              <span v-if="f.source_url" :title="f.source_url" style="cursor: help">🔗 {{ t('files.sourceRemote') }}</span>
+              <span v-else-if="f.file_type === 'text'" style="color: var(--text-muted)">📝 {{ t('files.sourceText') }}</span>
+              <span v-else style="color: var(--text-muted)">📁 {{ t('files.sourceLocal') }}</span>
             </td>
             <td>{{ f.file_type === 'zip' ? f.template_name || '-' : '-' }}</td>
             <td>
-              <span v-if="f.is_active" style="color: var(--accent-emerald)">🟢 启用</span>
-              <span v-else style="color: var(--accent-rose)">🔴 停用</span>
+              <span v-if="f.is_active" style="color: var(--accent-emerald)">{{ t('files.statusActive') }}</span>
+              <span v-else style="color: var(--accent-rose)">{{ t('files.statusInactive') }}</span>
             </td>
             <td>
               <template v-if="f.file_type === 'zip'">
-                <span style="font-size: 0.75rem; color: var(--text-muted)">📦 用户列表右键复制下载链接（按用户个性化）</span>
+                <span style="font-size: 0.75rem; color: var(--text-muted)">{{ t('files.zipPersonalHint') }}</span>
               </template>
               <template v-else>
-                <button class="btn btn-secondary btn-sm" @click="copySharedLink(f)">复制共享链接</button>
+                <button class="btn btn-secondary btn-sm" @click="copySharedLink(f)">{{ t('files.copySharedLink') }}</button>
               </template>
             </td>
             <td>
               <div style="display: flex; gap: 6px">
-                <button v-if="f.file_type === 'text'" class="btn btn-secondary btn-sm" @click="openTextEdit(f)">编辑</button>
-                <button v-if="f.source_url" class="btn btn-secondary btn-sm" @click="refreshRemote(f, $event.currentTarget as HTMLButtonElement)">🔄 刷新</button>
-                <button class="btn btn-secondary btn-sm" @click="toggleActive(f)">{{ f.is_active ? '停用' : '启用' }}</button>
-                <button class="btn btn-danger btn-sm" @click="popover.show($event.currentTarget as Element, '⚠️ 确定删除该分发文件？(磁盘文件一并删除)', () => removeFile(f))">删除</button>
+                <button v-if="f.file_type === 'text'" class="btn btn-secondary btn-sm" @click="openTextEdit(f)">{{ t('common.edit') }}</button>
+                <button v-if="f.source_url" class="btn btn-secondary btn-sm" @click="refreshRemote(f, $event.currentTarget as HTMLButtonElement)">{{ t('files.refreshRemote') }}</button>
+                <button class="btn btn-secondary btn-sm" @click="toggleActive(f)">{{ f.is_active ? t('files.toggleInactive') : t('files.toggleActive') }}</button>
+                <button class="btn btn-danger btn-sm" @click="popover.show($event.currentTarget as Element, t('files.deleteConfirm'), () => removeFile(f))">{{ t('common.delete') }}</button>
               </div>
             </td>
           </tr>
@@ -399,9 +401,9 @@ onMounted(fetchData)
       </table>
     </div>
 
-    <div v-pre style="margin-top: 14px; background: var(--bg-card); padding: 14px; border-radius: var(--radius-lg); border: 1px solid var(--border-glass); font-size: 0.82rem; color: var(--text-muted)">
-      <b>📄 ZIP 模板占位符：</b><code>{{uuid}}</code> <code>{{password}}</code> <code>{{token}}</code> <code>{{name}}</code> <code>{{node_list_yaml}}</code> <code>{{node_list_json}}</code> <code>{{outbounds_yaml}}</code> <code>{{outbounds_json}}</code> <code>{{mihomo_proxies_yaml}}</code> —
-      下载时按用户凭证实时渲染；其余文件原样分发。硬编码 token/uuid 也会自动按用户替换。未指定模板文件名时自动取 ZIP 内第一个 .yaml/.yml 文件。文本类型为死字符原样分发。
+    <div style="margin-top: 14px; background: var(--bg-card); padding: 14px; border-radius: var(--radius-lg); border: 1px solid var(--border-glass); font-size: 0.82rem; color: var(--text-muted)">
+      <b>{{ t('files.templateHintTitle') }}</b><code>&#123;&#123;uuid&#125;&#125;</code> <code>&#123;&#123;password&#125;&#125;</code> <code>&#123;&#123;token&#125;&#125;</code> <code>&#123;&#123;name&#125;&#125;</code> <code>&#123;&#123;node_list_yaml&#125;&#125;</code> <code>&#123;&#123;node_list_json&#125;&#125;</code> <code>&#123;&#123;outbounds_yaml&#125;&#125;</code> <code>&#123;&#123;outbounds_json&#125;&#125;</code> <code>&#123;&#123;mihomo_proxies_yaml&#125;&#125;</code> —
+      {{ t('files.templateHintDesc') }}
     </div>
   </section>
 
@@ -417,8 +419,8 @@ onMounted(fetchData)
             </svg>
           </div>
           <div>
-            <div class="modal-title">Upload & Distribute</div>
-            <div class="modal-subtitle">Push a file to your connected nodes</div>
+            <div class="modal-title">{{ t('files.modal.title') }}</div>
+            <div class="modal-subtitle">{{ t('files.modal.subtitle') }}</div>
           </div>
         </div>
         <button type="button" class="modal-close" :disabled="isUploading" @click="showModal = false">&times;</button>
@@ -428,23 +430,23 @@ onMounted(fetchData)
       <div class="step-indicator">
         <div class="step-item" :class="{ active: currentStep >= 1 }">
           <span class="step-num">1</span>
-          <span class="step-label">Select Type</span>
+          <span class="step-label">{{ t('files.modal.step1') }}</span>
         </div>
         <div class="step-line" :class="{ filled: currentStep >= 2 }"></div>
         <div class="step-item" :class="{ active: currentStep >= 2 }">
           <span class="step-num">2</span>
-          <span class="step-label">Add Details</span>
+          <span class="step-label">{{ t('files.modal.step2') }}</span>
         </div>
         <div class="step-line" :class="{ filled: currentStep >= 3 }"></div>
         <div class="step-item" :class="{ active: currentStep >= 3 }">
           <span class="step-num">3</span>
-          <span class="step-label">Review</span>
+          <span class="step-label">{{ t('files.modal.step3') }}</span>
         </div>
       </div>
 
       <form @submit.prevent="submitUpload" class="upload-flow-form">
         <!-- CHOOSE FILE TYPE -->
-        <div class="section-label">CHOOSE FILE TYPE</div>
+        <div class="section-label">{{ t('files.modal.chooseType') }}</div>
         <div class="type-cards-grid">
           <!-- Regular File -->
           <div
@@ -457,8 +459,8 @@ onMounted(fetchData)
                 <path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
               </svg>
             </div>
-            <div class="card-title">Regular File</div>
-            <div class="card-desc">APK / Binary file</div>
+            <div class="card-title">{{ t('files.modal.typeRegular') }}</div>
+            <div class="card-desc">{{ t('files.modal.typeRegularDesc') }}</div>
           </div>
 
           <!-- ZIP Config -->
@@ -472,8 +474,8 @@ onMounted(fetchData)
                 <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
               </svg>
             </div>
-            <div class="card-title">ZIP Config</div>
-            <div class="card-desc">Dynamic template pack</div>
+            <div class="card-title">{{ t('files.modal.typeZip') }}</div>
+            <div class="card-desc">{{ t('files.modal.typeZipDesc') }}</div>
           </div>
 
           <!-- Raw Text -->
@@ -487,13 +489,13 @@ onMounted(fetchData)
                 <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h10" />
               </svg>
             </div>
-            <div class="card-title">Raw Text</div>
-            <div class="card-desc">Plain text string</div>
+            <div class="card-title">{{ t('files.modal.typeText') }}</div>
+            <div class="card-desc">{{ t('files.modal.typeTextDesc') }}</div>
           </div>
         </div>
 
         <!-- ADD DETAILS -->
-        <div class="section-label" style="margin-top: 20px;">ADD DETAILS</div>
+        <div class="section-label" style="margin-top: 20px;">{{ t('files.modal.addDetails') }}</div>
         <div class="details-panel">
           <!-- Regular File (APK) Details -->
           <template v-if="form.type === 'apk'">
@@ -504,7 +506,7 @@ onMounted(fetchData)
                 :class="{ active: regularSourceTab === 'local' }"
                 @click="regularSourceTab = 'local'"
               >
-                Local Upload
+                {{ t('files.modal.tabLocal') }}
               </button>
               <button
                 type="button"
@@ -512,7 +514,7 @@ onMounted(fetchData)
                 :class="{ active: regularSourceTab === 'remote' }"
                 @click="regularSourceTab = 'remote'"
               >
-                Remote URL
+                {{ t('files.modal.tabRemote') }}
               </button>
             </div>
 
@@ -533,10 +535,10 @@ onMounted(fetchData)
                   </svg>
                 </div>
                 <div class="dropzone-text">
-                  Drag & drop or <span class="browse-link">browse</span>
+                  {{ t('files.modal.dropzoneText') }}
                 </div>
                 <div class="dropzone-sub">
-                  Up to 100 MB · any format (e.g. .apk, .bin)
+                  {{ t('files.modal.dropzoneSub') }}
                 </div>
                 <input
                   ref="fileInput"
@@ -556,22 +558,22 @@ onMounted(fetchData)
                   </div>
                 </div>
                 <div class="file-preview-right">
-                  <span class="ready-badge">就绪</span>
-                  <button type="button" class="btn-remove-file" title="重新选择" @click="clearSelectedFile">&times;</button>
+                  <span class="ready-badge">{{ t('files.modal.readyBadge') }}</span>
+                  <button type="button" class="btn-remove-file" :title="t('files.modal.removeFile')" @click="clearSelectedFile">&times;</button>
                 </div>
               </div>
             </div>
 
             <!-- Remote URL input -->
             <div v-else class="form-group" style="margin-top: 12px;">
-              <label>远程 URL (每天自动刷新缓存)</label>
+              <label>{{ t('files.modal.remoteUrlLabel') }}</label>
               <input
                 v-model="form.sourceUrl"
                 type="url"
                 class="form-control"
-                placeholder="https://example.com/app.apk"
+                :placeholder="t('files.modal.remoteUrlPlaceholder')"
               />
-              <div class="input-hint">首次提交即拉取并缓存一天，下载时自动回落</div>
+              <div class="input-hint">{{ t('files.modal.remoteUrlHint') }}</div>
             </div>
           </template>
 
@@ -592,10 +594,10 @@ onMounted(fetchData)
                 </svg>
               </div>
               <div class="dropzone-text">
-                Drag & drop or <span class="browse-link">browse</span>
+                {{ t('files.modal.dropzoneText') }}
               </div>
               <div class="dropzone-sub">
-                Up to 100 MB · .zip 格式
+                {{ t('files.modal.dropzoneZipSub') }}
               </div>
               <input
                 ref="fileInput"
@@ -615,17 +617,17 @@ onMounted(fetchData)
                 </div>
               </div>
               <div class="file-preview-right">
-                <span class="ready-badge">就绪</span>
-                <button type="button" class="btn-remove-file" title="重新选择" @click="clearSelectedFile">&times;</button>
+                <span class="ready-badge">{{ t('files.modal.readyBadge') }}</span>
+                <button type="button" class="btn-remove-file" :title="t('files.modal.removeFile')" @click="clearSelectedFile">&times;</button>
               </div>
             </div>
 
             <div class="form-group" style="margin-top: 14px;">
-              <label>模板文件名 (Template Filename, 留空自动识别第一个 .yaml/.yml)</label>
+              <label>{{ t('files.modal.templateNameLabel') }}</label>
               <input
                 v-model="form.templateName"
                 class="form-control"
-                placeholder="如 config.yaml"
+                :placeholder="t('files.modal.templateNamePlaceholder')"
               />
             </div>
           </template>
@@ -633,13 +635,13 @@ onMounted(fetchData)
           <!-- Raw Text Details -->
           <template v-else>
             <div class="form-group">
-              <label>文本内容（死字符原样分发，不做占位符替换）</label>
+              <label>{{ t('files.modal.rawTextLabel') }}</label>
               <textarea
                 v-model="form.contentText"
                 class="form-control"
                 rows="6"
                 style="font-family: var(--font-mono); font-size: 0.8rem"
-                placeholder="直接在此粘贴文本配置内容，所有用户下载到完全相同的内容..."
+                :placeholder="t('files.modal.rawTextPlaceholder')"
               ></textarea>
             </div>
           </template>
@@ -650,21 +652,21 @@ onMounted(fetchData)
           <!-- Target Filename & Remarks (2 Column Grid) -->
           <div class="details-bottom-grid">
             <div class="form-group">
-              <label>Target Filename (optional)</label>
+              <label>{{ t('files.modal.targetFilename') }}</label>
               <input
                 v-model="form.downloadName"
                 class="form-control"
-                placeholder="e.g., client-v2.apk / config.conf"
+                :placeholder="t('files.modal.targetFilenamePlaceholder')"
               />
-              <div class="input-hint">LEAVE EMPTY TO USE ORIGINAL NAME</div>
+              <div class="input-hint">{{ t('files.modal.targetFilenameHint') }}</div>
             </div>
 
             <div class="form-group">
-              <label>Remarks (Admin only)</label>
+              <label>{{ t('files.modal.remarks') }}</label>
               <input
                 v-model="form.remark"
                 class="form-control"
-                placeholder="Internal notes for this file..."
+                :placeholder="t('files.modal.remarksPlaceholder')"
               />
             </div>
           </div>
@@ -672,13 +674,13 @@ onMounted(fetchData)
           <!-- Duplicate Warning Badge -->
           <div v-if="duplicateWarning" class="duplicate-warning">
             <span class="warn-icon">⚠️</span>
-            <span>提示：已存在同名且大小一致的文件「{{ duplicateWarning.name }}」，继续提交将创建新的分发条目。</span>
+            <span>{{ t('files.modal.duplicateWarning', { name: duplicateWarning.name }) }}</span>
           </div>
 
           <!-- Upload Progress Bar -->
           <div v-if="isUploading && totalBytes > 0" class="upload-progress-container">
             <div class="progress-info-row">
-              <span class="progress-status-text">正在上传中...</span>
+              <span class="progress-status-text">{{ t('files.modal.uploading') }}</span>
               <span class="progress-percent-text">{{ uploadProgress }}%</span>
             </div>
             <div class="progress-bar-track">
@@ -693,14 +695,14 @@ onMounted(fetchData)
         <!-- Footer Actions -->
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary btn-cancel" :disabled="isUploading" @click="showModal = false">
-            Cancel
+            {{ t('files.modal.cancelBtn') }}
           </button>
           <button type="submit" class="btn btn-primary btn-distribute" :disabled="isUploading">
             <span v-if="isUploading" class="btn-spinner"></span>
             <svg v-else class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
             </svg>
-            <span>{{ isUploading ? `上传中 (${uploadProgress}%)` : 'Distribute' }}</span>
+            <span>{{ isUploading ? t('files.modal.distributingBtn', { pct: uploadProgress }) : t('files.modal.distributeBtn') }}</span>
           </button>
         </div>
       </form>
@@ -711,26 +713,26 @@ onMounted(fetchData)
   <div class="modal-overlay" :class="{ active: showTextModal }" @click.self="showTextModal = false">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title">编辑文本文件{{ textEdit ? `：${textEdit.download_name || textEdit.original_name || textEdit.name}` : '' }}</div>
+        <div class="modal-title">{{ t('files.textModal.title') }}{{ textEdit ? `：${textEdit.download_name || textEdit.original_name || textEdit.name}` : '' }}</div>
         <button class="modal-close" @click="showTextModal = false">&times;</button>
       </div>
       <form @submit.prevent="saveTextEdit" class="modal-form">
         <div class="form-group form-span">
-          <label>文件名 (含后缀)</label>
-          <input v-model="textForm.downloadName" class="form-control" placeholder="如 client.conf / 留空用原始名" />
+          <label>{{ t('files.textModal.fileName') }}</label>
+          <input v-model="textForm.downloadName" class="form-control" :placeholder="t('files.textModal.fileNamePlaceholder')" />
         </div>
         <div class="form-group form-span">
-          <label>文本内容（原样分发，不做渲染）</label>
+          <label>{{ t('files.textModal.content') }}</label>
           <textarea v-model="textForm.content" class="form-control" rows="10" style="font-family: var(--font-mono); font-size: 0.78rem"
-            placeholder="正在加载..." :disabled="textLoading"></textarea>
+            :placeholder="t('common.loading')" :disabled="textLoading"></textarea>
         </div>
         <div class="form-group form-span">
-          <label>备注 (仅管理员可见)</label>
-          <input v-model="textForm.remark" class="form-control" placeholder="如 仅供付费用户下载" />
+          <label>{{ t('files.textModal.remark') }}</label>
+          <input v-model="textForm.remark" class="form-control" :placeholder="t('files.textModal.remarkPlaceholder')" />
         </div>
         <div class="modal-footer" style="justify-content: flex-end; gap: 8px;">
-          <button type="button" class="btn btn-secondary" @click="showTextModal = false">取消</button>
-          <button type="submit" class="btn btn-primary" :disabled="textLoading">保存</button>
+          <button type="button" class="btn btn-secondary" @click="showTextModal = false">{{ t('common.cancel') }}</button>
+          <button type="submit" class="btn btn-primary" :disabled="textLoading">{{ t('common.save') }}</button>
         </div>
       </form>
     </div>
