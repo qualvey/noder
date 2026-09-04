@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 用户管理：表格 / 全选批量删除 / 右键复制订阅链接 + 下载配置包（新增/编辑表单在 UserFormModal 组件）
 import { inject, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { DistFile, Node, User } from '../types'
 import { buildDownloadLink, buildMihomoLink, buildSubLink, copyText } from '../utils'
@@ -8,6 +9,7 @@ import UserFormModal from '../components/UserFormModal.vue'
 import ContextMenu, { type ContextMenuItem } from '../components/ContextMenu.vue'
 import { ToastType } from '@/App.vue'
 
+const { t } = useI18n()
 const toast = inject('toast') as (msg: string, type?: ToastType) => void
 const popover = inject('popover') as { show: (el: Element, title: string, cb: () => void) => void }
 const updateMetrics = inject('metrics') as (nodes: number, users: number) => void
@@ -37,16 +39,16 @@ function copySubLink() {
   const user = ctxMenu.value?.user
   if (!user) return
   copyText(buildSubLink(user.token)).then((ok) => {
-    toast(ok ? 'Sing-Box 订阅链接已复制' : '复制失败', ok ? 'info' : 'error')
+    toast(ok ? t('users.subLinkCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
   })
   closeCtxMenu()
 }
-//TODO: 复制节点列表（标准格式）
+
 function copyMihomoLink() {
   const user = ctxMenu.value?.user
   if (!user) return
   copyText(buildMihomoLink(user.token)).then((ok) => {
-    toast(ok ? 'Mihomo 订阅链接已复制' : '复制失败', ok ? 'info' : 'error')
+    toast(ok ? t('users.mihomoLinkCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
   })
   closeCtxMenu()
 }
@@ -59,7 +61,7 @@ async function copyNodes() {
     const nodes = await api.userNodes(user.token)
     const formattedText = nodes.map(node => JSON.stringify(node, null, 2)).join(',\n')
     const ok = await copyText(formattedText)
-    toast(ok ? '节点列表（JSON）已经复制到剪贴板' : '复制失败', ok ? 'info' : 'error')
+    toast(ok ? t('users.nodesJsonCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
   } catch (e) {
     toast((e as Error).message, 'error')
   }
@@ -71,27 +73,25 @@ async function copyUser() {
   closeCtxMenu()
   try {
     const payload = {
-          name: user.name,
-          uuid: user.uuid ?? "",
-          password: user.password ?? ""
-        }
+      name: user.name,
+      uuid: user.uuid ?? "",
+      password: user.password ?? ""
+    }
     const textToCopy = JSON.stringify(payload, null, 2)
     await navigator.clipboard.writeText(textToCopy)
-
-    toast("User copied to clipboard", "success")
+    toast(t('users.userCopied'), "success")
   } catch(e) {
-    toast((e as Error).message,
-    "error"
-  )
+    toast((e as Error).message, "error")
   }
 }
 
 function copyValue(val: string | undefined | null, label: string) {
   if (!val || val === '-') return
   copyText(val).then((ok) => {
-    toast(ok ? `${label} 已复制到剪贴板` : '复制失败', ok ? 'info' : 'error')
+    toast(ok ? t('users.copiedToClipboard', { label }) : t('common.copyFailed'), ok ? 'info' : 'error')
   })
 }
+
 // 复制 ZIP 配置包下载链接
 function copyZipLink(f: DistFile) {
   const user = ctxMenu.value?.user
@@ -99,25 +99,26 @@ function copyZipLink(f: DistFile) {
   closeCtxMenu()
   const url = buildDownloadLink(f.id, user.token)
   copyText(url).then((ok) => {
-    toast(ok ? `${f.name} 下载链接已复制到剪贴板` : '复制失败', ok ? 'info' : 'error')
+    toast(ok ? t('users.downloadLinkCopied', { name: f.name }) : t('common.copyFailed'), ok ? 'info' : 'error')
   })
 }
 
 const ctxMenuItems = (): ContextMenuItem[] => {
   const items: ContextMenuItem[] = [
-    { label: '复制 Sing-Box 链接', icon: '📋', onClick: copySubLink },
-    { label: '复制 Mihomo (Clash) 链接', icon: '🔄', onClick: copyMihomoLink },
-    { label: '复制 节点列表', icon: '11', onClick: copyNodes },
-    { label: '复制sing-box user', icon: 'none', onClick: copyUser }
+    { label: t('users.menu.copySingbox'), icon: '📋', onClick: copySubLink },
+    { label: t('users.menu.copyMihomo'), icon: '🔄', onClick: copyMihomoLink },
+    { label: t('users.menu.copyNodes'), icon: '📄', onClick: copyNodes },
+    { label: t('users.menu.copyUser'), icon: '👤', onClick: copyUser }
   ]
   if (zipFiles.value.length) {
-    items.push({ label: '配置文件下载', icon: '📦', divider: true, onClick: () => { } })
+    items.push({ label: t('users.menu.configDlHeader'), icon: '📦', divider: true, onClick: () => { } })
     for (const z of zipFiles.value) {
-      items.push({ label: `复制 ${z.name} 下载链接`, icon: '🔗', onClick: () => copyZipLink(z) })
+      items.push({ label: t('users.menu.copyDl', { name: z.name }), icon: '🔗', onClick: () => copyZipLink(z) })
     }
   }
   return items
 }
+
 async function fetchData() {
   loading.value = true
   try {
@@ -145,7 +146,7 @@ function openEdit(u: User) {
 
 function removeUser(id: number) {
   api.users.remove(id).then(() => {
-    toast('用户已删除')
+    toast(t('users.deleted'))
     fetchData()
   }).catch((e) => toast(e.message, 'error'))
 }
@@ -165,7 +166,7 @@ function toggleSelectAll() {
 function bulkDelete(e: MouseEvent) {
   const count = selected.value.size
   if (!count) return
-  popover.show(e.currentTarget as Element, `⚠️ 确定批量删除已选中的 ${count} 个用户？`, async () => {
+  popover.show(e.currentTarget as Element, t('users.bulkDeleteConfirm', { count }), async () => {
     for (const id of selected.value) {
       try {
         await api.users.remove(id)
@@ -174,7 +175,7 @@ function bulkDelete(e: MouseEvent) {
       }
     }
     selected.value = new Set()
-    toast(`已批量删除 ${count} 个用户`)
+    toast(t('users.bulkDeleteSuccess', { count }))
     fetchData()
   })
 }
@@ -185,11 +186,10 @@ onMounted(fetchData)
 <template>
   <section class="tab-content" style="display: block">
     <div class="section-header">
-      <div class="section-title">订阅用户列表 (支持多节点绑定)</div>
+      <div class="section-title">{{ t('users.headerTitle') }}</div>
       <div style="display: flex; gap: 10px; align-items: center">
-        <button v-if="selected.size" class="btn btn-danger btn-sm" @click="bulkDelete">🗑️ 批量删除 ({{ selected.size
-        }})</button>
-        <button class="btn btn-primary" @click="openCreate"><span>+</span> 新增用户</button>
+        <button v-if="selected.size" class="btn btn-danger btn-sm" @click="bulkDelete">🗑️ {{ t('users.bulkDelete', { count: selected.size }) }}</button>
+        <button class="btn btn-primary" @click="openCreate"><span>+</span> {{ t('users.addUser') }}</button>
       </div>
     </div>
 
@@ -201,13 +201,13 @@ onMounted(fetchData)
               <input type="checkbox" :checked="selected.size === users.length && users.length > 0"
                 @change="toggleSelectAll" />
             </th>
-            <th>ID</th>
-            <th>用户备注</th>
-            <th>鉴权 Token</th>
-            <th>专属 UUID / 密码</th>
-            <th>状态</th>
-            <th>绑定节点</th>
-            <th>操作</th>
+            <th>{{ t('users.colId') }}</th>
+            <th>{{ t('users.colName') }}</th>
+            <th>{{ t('users.colToken') }}</th>
+            <th>{{ t('users.colCredentials') }}</th>
+            <th>{{ t('users.colStatus') }}</th>
+            <th>{{ t('users.colBoundNodes') }}</th>
+            <th>{{ t('users.colActions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -219,12 +219,12 @@ onMounted(fetchData)
                   <circle class="spinner-track" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                   <path class="spinner-head" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
                 </svg>
-                <span class="loading-text">正在加载用户数据...</span>
+                <span class="loading-text">{{ t('users.loadingData') }}</span>
               </div>
             </td>
           </tr>
           <tr v-else-if="!users.length">
-            <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px">暂无订阅用户，点击右上角新增</td>
+            <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px">{{ t('users.emptyText') }}</td>
           </tr>
           <tr v-for="user in users" :key="user.id" @contextmenu.prevent="onRowContextMenu($event, user)">
             <td style="text-align: center">
@@ -239,7 +239,7 @@ onMounted(fetchData)
               <div
                 v-if="user.uuid"
                 class="copyable-cell"
-                title="点击复制 UUID"
+                :title="t('users.copyUuidTitle')"
                 @click.stop="copyValue(user.uuid, 'UUID')"
               >
                 UUID: <code class="clickable-code">{{ user.uuid }}</code>
@@ -249,7 +249,7 @@ onMounted(fetchData)
               <div
                 v-if="user.password"
                 class="copyable-cell"
-                title="点击复制 PWD"
+                :title="t('users.copyPwdTitle')"
                 @click.stop="copyValue(user.password, 'PWD')"
               >
                 PWD: <code class="clickable-code">{{ user.password }}</code>
@@ -257,21 +257,21 @@ onMounted(fetchData)
               <div v-else style="color: var(--text-dim)">PWD: <code>-</code></div>
             </td>
             <td>
-              <span v-if="user.is_active" style="color: var(--accent-emerald)">🟢 启用</span>
-              <span v-else style="color: var(--accent-rose)">🔴 停用</span>
+              <span v-if="user.is_active" style="color: var(--accent-emerald)">{{ t('users.statusActive') }}</span>
+              <span v-else style="color: var(--accent-rose)">{{ t('users.statusInactive') }}</span>
             </td>
             <td style="font-size: 0.72rem; max-width: 180px">
               <template v-if="user.node_ids.length">
                 <span v-for="nid in user.node_ids" :key="nid" class="badge" style="margin: 2px">{{nodes.find((n) =>
                   n.id === nid)?.node_name || `#${nid}`}}</span>
               </template>
-              <span v-else style="color: var(--text-muted)">未绑定</span>
+              <span v-else style="color: var(--text-muted)">{{ t('users.unbound') }}</span>
             </td>
             <td>
               <div style="display: flex; gap: 6px">
-                <button class="btn btn-secondary btn-sm" @click="openEdit(user)">编辑</button>
+                <button class="btn btn-secondary btn-sm" @click="openEdit(user)">{{ t('common.edit') }}</button>
                 <button class="btn btn-danger btn-sm"
-                  @click="popover.show($event.currentTarget as Element, '⚠️ 确定删除该用户？', () => removeUser(user.id))">删除</button>
+                  @click="popover.show($event.currentTarget as Element, t('users.deleteConfirm'), () => removeUser(user.id))">{{ t('common.delete') }}</button>
               </div>
             </td>
           </tr>

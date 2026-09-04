@@ -3,9 +3,12 @@
 // 自包含：凭证生成 / 快捷提取 / 节点多选 / config_override
 // 契约：props { open, editing, nodes }，emits { close, saved }
 import { inject, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { Node, User } from '../types'
 import { parseCredentials, randomPassword, randomUUID } from '../utils'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   open: boolean
@@ -92,7 +95,7 @@ function applyExtract() {
   const { uuid, password } = parseCredentials(extractInput.value)
   if (uuid) form.uuid = uuid
   if (password) form.password = password
-  toast(uuid || password ? '凭证已提取' : '未识别到 uuid/password', uuid || password ? 'info' : 'error')
+  toast(uuid || password ? t('users.form.extractSuccess') : t('users.form.extractFail'), uuid || password ? 'info' : 'error')
 }
 
 async function saveUser() {
@@ -109,10 +112,10 @@ async function saveUser() {
   try {
     if (props.editing) {
       await api.users.update(props.editing.id, payload)
-      toast('用户信息更新成功')
+      toast(t('users.updated'))
     } else {
       await api.users.create(payload)
-      toast('新用户添加成功')
+      toast(t('users.created'))
     }
     localStorage.removeItem(draftKey())
     emit('close')
@@ -127,70 +130,70 @@ async function saveUser() {
   <div class="modal-overlay" :class="{ active: open }" @click.self="closeModal()">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title">{{ editing ? '编辑订阅用户' : '新增订阅用户' }}</div>
+        <div class="modal-title">{{ editing ? t('users.form.editTitle') : t('users.form.addTitle') }}</div>
         <button class="modal-close" @click="closeModal(true)">&times;</button>
       </div>
       <form @submit.prevent="saveUser" class="modal-form">
         <div class="form-span" style="margin-bottom: 14px; background: rgba(59,130,246,0.1); padding: 10px; border-radius: 8px; border: 1px dashed rgba(59,130,246,0.4)">
           <div style="display: flex; justify-content: space-between; align-items: center">
-            <span style="font-size: 0.8rem; color: var(--primary); font-weight: 600">📋 快捷提取凭证</span>
-            <button type="button" class="btn btn-secondary btn-sm" @click="showExtract = !showExtract">展开/折叠提取</button>
+            <span style="font-size: 0.8rem; color: var(--primary); font-weight: 600">{{ t('users.form.extractTitle') }}</span>
+            <button type="button" class="btn btn-secondary btn-sm" @click="showExtract = !showExtract">{{ t('users.form.toggleExtract') }}</button>
           </div>
           <div v-if="showExtract" style="margin-top: 10px">
             <textarea v-model="extractInput" class="form-control" rows="3" style="font-family: var(--font-mono); font-size: 0.78rem"
-              placeholder='粘贴配置文本/JSON 片段，如：&#10;"uuid": "ef66463c-4bcb-4b20-bd42-9249758611ba",&#10;"password": "1bttcp…jjfw"'></textarea>
-            <button type="button" class="btn btn-primary btn-sm" style="margin-top: 8px; width: 100%" @click="applyExtract">解析提取 UUID & Password</button>
+              :placeholder="t('users.form.extractPlaceholder')"></textarea>
+            <button type="button" class="btn btn-primary btn-sm" style="margin-top: 8px; width: 100%" @click="applyExtract">{{ t('users.form.extractBtn') }}</button>
           </div>
         </div>
 
         <div class="form-group">
-          <label>用户姓名 / 简称</label>
-          <input v-model="form.name" class="form-control" placeholder="如：张三" required />
+          <label>{{ t('users.form.name') }}</label>
+          <input v-model="form.name" class="form-control" :placeholder="t('users.form.namePlaceholder')" required />
         </div>
         <div class="form-group">
-          <label>管理员内部备注 (仅管理员可见)</label>
-          <input v-model="form.remark" class="form-control" placeholder="如：测试客户，2026年到期" />
+          <label>{{ t('users.form.remark') }}</label>
+          <input v-model="form.remark" class="form-control" :placeholder="t('users.form.remarkPlaceholder')" />
         </div>
         <div class="form-group">
-          <label>鉴权 Token (留空自动生成)</label>
+          <label>{{ t('users.form.token') }}</label>
           <div class="credential-row">
-            <input v-model="form.token" class="form-control" placeholder="自动生成 Token" />
-            <button type="button" class="btn btn-secondary" @click="form.token = randomUUID()">随机生成</button>
+            <input v-model="form.token" class="form-control" :placeholder="t('users.form.tokenPlaceholder')" />
+            <button type="button" class="btn btn-secondary" @click="form.token = randomUUID()">{{ t('users.form.randomGenerate') }}</button>
           </div>
         </div>
         <div class="form-group">
-          <label>专属 UUID (用于 VLESS / TUIC / AnyTLS)</label>
+          <label>{{ t('users.form.uuid') }}</label>
           <div class="credential-row">
-            <input v-model="form.uuid" class="form-control" placeholder="专属 UUID" />
-            <button type="button" class="btn btn-secondary" @click="form.uuid = randomUUID()">随机 UUID</button>
+            <input v-model="form.uuid" class="form-control" :placeholder="t('users.form.uuidPlaceholder')" />
+            <button type="button" class="btn btn-secondary" @click="form.uuid = randomUUID()">{{ t('users.form.randomUuid') }}</button>
           </div>
         </div>
         <div class="form-group">
-          <label>专属 Password (用于 TUIC / AnyTLS)</label>
+          <label>{{ t('users.form.password') }}</label>
           <div class="credential-row">
-            <input v-model="form.password" class="form-control" placeholder="专属密码" />
-            <button type="button" class="btn btn-secondary" @click="form.password = randomPassword()">随机密码</button>
+            <input v-model="form.password" class="form-control" :placeholder="t('users.form.passwordPlaceholder')" />
+            <button type="button" class="btn btn-secondary" @click="form.password = randomPassword()">{{ t('users.form.randomPassword') }}</button>
           </div>
         </div>
         <div class="form-group form-span">
-          <label>config_override (JSON，可选，目前支持 route / dns 整体覆盖)</label>
+          <label>{{ t('users.form.configOverride') }}</label>
           <textarea v-model="form.config_override" class="form-control" rows="4" style="font-family: var(--font-mono); font-size: 0.78rem"
-            placeholder='{"route": {...}, "dns": {...}}'></textarea>
-          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px">每用户独立覆盖 sing-box 配置的 route / dns 整段，其他字段不可覆盖。留空则使用默认模板。</div>
+            :placeholder="t('users.form.configOverridePlaceholder')"></textarea>
+          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px">{{ t('users.form.configOverrideTip') }}</div>
         </div>
         <div class="form-group form-span">
-          <label>绑定上游节点 (支持多选)</label>
+          <label>{{ t('users.form.boundNodes') }}</label>
           <div class="checkboxes-group">
             <label v-for="node in nodes" :key="node.id" class="checkbox-label">
               <input type="checkbox" :checked="form.node_ids.includes(node.id)" @change="toggleNode(node.id)" />
               {{ node.node_name }} <span style="color: var(--text-muted); font-size: 0.72rem">({{ node.protocol }})</span>
             </label>
-            <div v-if="!nodes.length" style="color: var(--text-muted); font-size: 0.8rem">暂无节点，请先在节点管理创建</div>
+            <div v-if="!nodes.length" style="color: var(--text-muted); font-size: 0.8rem">{{ t('users.form.noNodes') }}</div>
           </div>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" @click="closeModal()">取消</button>
-          <button type="submit" class="btn btn-primary">保存用户</button>
+          <button type="button" class="btn btn-secondary" @click="closeModal()">{{ t('common.cancel') }}</button>
+          <button type="submit" class="btn btn-primary">{{ t('users.form.saveUser') }}</button>
         </div>
       </form>
     </div>
