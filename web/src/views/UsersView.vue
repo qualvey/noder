@@ -260,10 +260,18 @@ onMounted(fetchData)
               <span v-if="user.is_active" style="color: var(--accent-emerald)">{{ t('users.statusActive') }}</span>
               <span v-else style="color: var(--accent-rose)">{{ t('users.statusInactive') }}</span>
             </td>
-            <td style="font-size: 0.72rem; max-width: 180px">
+            <td style="font-size: 0.72rem; max-width: 220px">
               <template v-if="user.node_ids.length">
-                <span v-for="nid in user.node_ids" :key="nid" class="badge" style="margin: 2px">{{nodes.find((n) =>
-                  n.id === nid)?.node_name || `#${nid}`}}</span>
+                <span
+                  v-for="(nid, nIdx) in user.node_ids"
+                  :key="nid"
+                  class="badge"
+                  :style="nIdx === 0 ? 'margin: 2px; border-color: rgba(59, 130, 246, 0.6); background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-weight: 600;' : 'margin: 2px'"
+                  :title="nIdx === 0 ? t('users.form.primaryNodeBadge') : ''"
+                >
+                  <template v-if="nIdx === 0">★ </template>{{nodes.find((n) =>
+                  n.id === nid)?.node_name || `#${nid}`}}
+                </span>
               </template>
               <span v-else style="color: var(--text-muted)">{{ t('users.unbound') }}</span>
             </td>

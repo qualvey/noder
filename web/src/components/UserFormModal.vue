@@ -85,10 +85,42 @@ watch(form, (value) => {
 }, { deep: true })
 
 function toggleNode(id: number) {
-  const s = new Set(form.node_ids)
-  if (s.has(id)) s.delete(id)
-  else s.add(id)
-  form.node_ids = [...s]
+  const idx = form.node_ids.indexOf(id)
+  if (idx >= 0) {
+    form.node_ids.splice(idx, 1)
+  } else {
+    form.node_ids.push(id)
+  }
+}
+
+function moveNodeToTop(index: number) {
+  if (index <= 0 || index >= form.node_ids.length) return
+  const [target] = form.node_ids.splice(index, 1)
+  form.node_ids.unshift(target)
+}
+
+function moveNodeUp(index: number) {
+  if (index <= 0) return
+  const temp = form.node_ids[index]
+  form.node_ids[index] = form.node_ids[index - 1]
+  form.node_ids[index - 1] = temp
+}
+
+function moveNodeDown(index: number) {
+  if (index >= form.node_ids.length - 1) return
+  const temp = form.node_ids[index]
+  form.node_ids[index] = form.node_ids[index + 1]
+  form.node_ids[index + 1] = temp
+}
+
+function getNodeDisplayName(id: number) {
+  const node = props.nodes.find((n) => n.id === id)
+  return node?.node_name || node?.tag || `#${id}`
+}
+
+function getNodeProtocol(id: number) {
+  const node = props.nodes.find((n) => n.id === id)
+  return node?.protocol?.toUpperCase() || ''
 }
 
 function applyExtract() {
@@ -191,6 +223,67 @@ async function saveUser() {
             <div v-if="!nodes.length" style="color: var(--text-muted); font-size: 0.8rem">{{ t('users.form.noNodes') }}</div>
           </div>
         </div>
+
+        <!-- 节点排序与置顶编排面板 (当选定节点时展示) -->
+        <div v-if="form.node_ids.length" class="form-group form-span ordered-nodes-container">
+          <div class="ordered-nodes-header">
+            <span class="ordered-nodes-title">{{ t('users.form.nodeOrdering') }}</span>
+            <span class="ordered-nodes-count">{{ form.node_ids.length }}</span>
+          </div>
+          <div class="ordered-nodes-list">
+            <div
+              v-for="(nid, idx) in form.node_ids"
+              :key="nid"
+              class="ordered-node-item"
+              :class="{ 'is-primary': idx === 0 }"
+            >
+              <div class="node-info">
+                <span class="node-rank" :class="{ 'rank-first': idx === 0 }">#{{ idx + 1 }}</span>
+                <span v-if="idx === 0" class="primary-badge">{{ t('users.form.primaryNodeBadge') }}</span>
+                <span class="node-name">{{ getNodeDisplayName(nid) }}</span>
+                <span class="node-protocol">{{ getNodeProtocol(nid) }}</span>
+              </div>
+              <div class="node-actions">
+                <button
+                  v-if="idx > 0"
+                  type="button"
+                  class="btn-sort-action btn-pin"
+                  :title="t('users.form.pinToTop')"
+                  @click="moveNodeToTop(idx)"
+                >
+                  📌 {{ t('users.form.pinToTop') }}
+                </button>
+                <button
+                  type="button"
+                  class="btn-sort-action"
+                  :disabled="idx === 0"
+                  :title="t('users.form.moveUp')"
+                  @click="moveNodeUp(idx)"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  class="btn-sort-action"
+                  :disabled="idx === form.node_ids.length - 1"
+                  :title="t('users.form.moveDown')"
+                  @click="moveNodeDown(idx)"
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  class="btn-sort-action btn-remove"
+                  :title="t('users.form.removeNode')"
+                  @click="toggleNode(nid)"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" @click="closeModal()">{{ t('common.cancel') }}</button>
           <button type="submit" class="btn btn-primary">{{ t('users.form.saveUser') }}</button>
@@ -223,10 +316,171 @@ async function saveUser() {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 6px 10px;
   border: 1px solid var(--border-glass);
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.82rem;
+  background: rgba(255, 255, 255, 0.02);
+  transition: all 0.2s ease;
+}
+
+.checkbox-label:hover {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+/* 节点排序面板 */
+.ordered-nodes-container {
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 4px;
+}
+
+.ordered-nodes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.ordered-nodes-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.ordered-nodes-count {
+  font-size: 0.72rem;
+  background: rgba(59, 130, 246, 0.2);
+  color: var(--primary);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.ordered-nodes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.ordered-node-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: all 0.2s ease;
+}
+
+.ordered-node-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ordered-node-item.is-primary {
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.node-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.node-rank {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  width: 22px;
+}
+
+.node-rank.rank-first {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.primary-badge {
+  font-size: 0.68rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.node-name {
+  font-size: 0.82rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-protocol {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.node-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.btn-sort-action {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-base);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-sort-action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.btn-sort-action:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.btn-pin {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+.btn-pin:hover {
+  background: rgba(59, 130, 246, 0.35) !important;
+  color: #fff !important;
+}
+
+.btn-remove {
+  color: var(--accent-rose);
+}
+
+.btn-remove:hover {
+  background: rgba(239, 68, 68, 0.2) !important;
+  border-color: rgba(239, 68, 68, 0.4) !important;
 }
 </style>
