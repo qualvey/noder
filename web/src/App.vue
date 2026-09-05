@@ -167,6 +167,15 @@ function saveToken() {
   window.location.reload()
 }
 
+import Sidebar from './components/Sidebar.vue'
+
+const isSidebarCollapsed = ref(localStorage.getItem('noder_sidebar_collapsed') === 'true')
+
+function handleSidebarSaveToken(val: string) {
+  adminTokenInput.value = val
+  saveToken()
+}
+
 function updateMetrics(n: number, u: number) {
   metrics.value = { nodes: n, users: u }
 }
@@ -174,89 +183,112 @@ provide('metrics', updateMetrics)
 </script>
 
 <template>
-  <header class="header">
-    <div class="container header-wrapper">
-      <div class="brand">
-        <div class="brand-icon">⚡</div>
-        <div>
-          <div class="brand-title">Sing-Box Sub Middleman</div>
-          <div class="brand-subtitle"><span class="status-indicator"></span>{{ t('nav.systemOnline') }}</div>
-        </div>
-      </div>
-      <div class="header-controls">
-        <button class="btn btn-secondary btn-sm lang-toggle" :title="t('nav.switchLang')" @click="toggleLocale">
-          🌐 {{ locale === 'zh' ? 'EN' : '中文' }}
-        </button>
-        <button class="btn btn-secondary btn-sm theme-toggle" :title="theme === 'light' ? t('nav.themeDark') : t('nav.themeLight')" @click="toggleTheme">
-          {{ theme === 'light' ? '☀️' : '🌙' }}
-        </button>
-        <div class="admin-token-box">
-          <label for="adminTokenInput">{{ t('nav.adminToken') }}:</label>
-          <input :type="showToken ? 'text' : 'password'" id="adminTokenInput" v-model="adminTokenInput" :placeholder="t('nav.adminTokenPlaceholder')" />
-          <button type="button" class="token-eye-btn" :title="showToken ? '隐藏' : '显示'" @click="showToken = !showToken">
-            {{ showToken ? '👁️' : '🔒' }}
-          </button>
-          <button class="btn btn-primary btn-sm" @click="saveToken">{{ t('common.save') }}</button>
-        </div>
-      </div>
-    </div>
-  </header>
-
-  <main class="container">
-    <div class="metrics-grid">
-      <div class="metric-card">
-        <div class="metric-info">
-          <h4>{{ t('nav.nodesOnline') }}</h4>
-          <div class="value">{{ metrics.nodes }}</div>
-        </div>
-        <div class="metric-icon icon-node">🌐</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-info">
-          <h4>{{ t('nav.usersActive') }}</h4>
-          <div class="value">{{ metrics.users }}</div>
-        </div>
-        <div class="metric-icon icon-user">👤</div>
-      </div>
-
+  <div class="app-layout" :class="{ 'sidebar-collapsed': isSidebarCollapsed }">
+    <!-- 桌面/中屏 (>= 768px) 现代化侧边栏 -->
+    <div class="desktop-sidebar-container">
+      <Sidebar
+        v-model:activeTab="activeTab"
+        v-model:collapsed="isSidebarCollapsed"
+        :metrics="metrics"
+        :adminToken="adminTokenInput"
+        :theme="theme"
+        @toggleTheme="toggleTheme"
+        @toggleLocale="toggleLocale"
+        @saveToken="handleSidebarSaveToken"
+      />
     </div>
 
-    <!-- 锚点：在正常文档流中精准标定 tab-navigation 的起始位置 -->
-    <div ref="stickyAnchorRef" class="tab-sticky-anchor"></div>
+    <div class="app-viewport">
+      <!-- 仅移动端 (< 768px) 顶栏 Header -->
+      <header class="header mobile-only-header">
+        <div class="container header-wrapper">
+          <div class="brand">
+            <div class="brand-icon">⚡</div>
+            <div>
+              <div class="brand-title">Sing-Box Sub Middleman</div>
+              <div class="brand-subtitle"><span class="status-indicator"></span>{{ t('nav.systemOnline') }}</div>
+            </div>
+          </div>
+          <div class="header-controls">
+            <button class="btn btn-secondary btn-sm lang-toggle" :title="t('nav.switchLang')" @click="toggleLocale">
+              🌐 {{ locale === 'zh' ? 'EN' : '中文' }}
+            </button>
+            <button class="btn btn-secondary btn-sm theme-toggle" :title="theme === 'light' ? t('nav.themeDark') : t('nav.themeLight')" @click="toggleTheme">
+              {{ theme === 'light' ? '☀️' : '🌙' }}
+            </button>
+            <div class="admin-token-box">
+              <label for="adminTokenInput">{{ t('nav.adminToken') }}:</label>
+              <input :type="showToken ? 'text' : 'password'" id="adminTokenInput" v-model="adminTokenInput" :placeholder="t('nav.adminTokenPlaceholder')" />
+              <button type="button" class="token-eye-btn" :title="showToken ? '隐藏' : '显示'" @click="showToken = !showToken">
+                {{ showToken ? '👁️' : '🔒' }}
+              </button>
+              <button class="btn btn-primary btn-sm" @click="saveToken">{{ t('common.save') }}</button>
+            </div>
+          </div>
+        </div>
+      </header>
 
-    <div class="tab-navigation" :class="{ pinned: tabNavPinned }">
-      <div
-        class="tab-slider"
-        :style="{
-          width: 'calc((100% - 12px) / 4)',
-          transform: `translateX(calc(${tabIndex} * 100%))`,
-        }"
-      >
-        <div
-          class="tab-slider-inner"
-          :style="{
-            transform: `translateX(calc(-${tabIndex} * 25%))`,
-          }"
-        ></div>
-      </div>
-      <button
-        v-for="t in tabs"
-        :key="t.key"
-        class="tab-btn"
-        :class="{ active: activeTab === t.key }"
-        @click="activeTab = t.key"
-      >
-        {{ t.label }}
-      </button>
-    </div>
+      <main class="container app-content-container">
+        <!-- 概览指标卡片 -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-info">
+              <h4>{{ t('nav.nodesOnline') }}</h4>
+              <div class="value">{{ metrics.nodes }}</div>
+            </div>
+            <div class="metric-icon icon-node">🌐</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-info">
+              <h4>{{ t('nav.usersActive') }}</h4>
+              <div class="value">{{ metrics.users }}</div>
+            </div>
+            <div class="metric-icon icon-user">👤</div>
+          </div>
+        </div>
 
-    <div class="tab-view-container" :class="{ 'sticky-expanded': isHeightExpanded }">
-      <NodesView v-if="activeTab === 'nodes'" />
-      <UsersView v-else-if="activeTab === 'users'" />
-      <FilesView v-else-if="activeTab === 'files'" />
-      <HelpView v-else />
+        <!-- 仅移动端 (< 768px) 展示触顶吸附 Tab 导航条 -->
+        <div class="mobile-only-tabs">
+          <!-- 锚点：在正常文档流中精准标定 tab-navigation 的起始位置 -->
+          <div ref="stickyAnchorRef" class="tab-sticky-anchor"></div>
+
+          <div class="tab-navigation" :class="{ pinned: tabNavPinned }">
+            <div
+              class="tab-slider"
+              :style="{
+                width: 'calc((100% - 12px) / 4)',
+                transform: `translateX(calc(${tabIndex} * 100%))`,
+              }"
+            >
+              <div
+                class="tab-slider-inner"
+                :style="{
+                  transform: `translateX(calc(-${tabIndex} * 25%))`,
+                }"
+              ></div>
+            </div>
+            <button
+              v-for="t in tabs"
+              :key="t.key"
+              class="tab-btn"
+              :class="{ active: activeTab === t.key }"
+              @click="activeTab = t.key"
+            >
+              {{ t.label }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 页面视图容器 -->
+        <div class="tab-view-container" :class="{ 'sticky-expanded': isHeightExpanded }">
+          <NodesView v-if="activeTab === 'nodes'" />
+          <UsersView v-else-if="activeTab === 'users'" />
+          <FilesView v-else-if="activeTab === 'files'" />
+          <HelpView v-else />
+        </div>
+      </main>
     </div>
-  </main>
+  </div>
 
   <!-- Toast 容器 -->
   <div class="toast-container">
@@ -322,6 +354,55 @@ provide('metrics', updateMetrics)
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* 响应式骨架 */
+.app-layout {
+  min-height: 100vh;
+  position: relative;
+}
+
+.desktop-sidebar-container {
+  display: none;
+}
+
+.mobile-only-header,
+.mobile-only-tabs {
+  display: block;
+}
+
+@media (min-width: 768px) {
+  .desktop-sidebar-container {
+    display: block;
+  }
+  .mobile-only-header,
+  .mobile-only-tabs {
+    display: none !important;
+  }
+  .app-viewport {
+    margin-left: 68px; /* 中屏 Rail 紧凑窄条宽度 */
+    min-height: 100vh;
+    transition: margin-left 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .app-content-container {
+    padding-top: 24px;
+    padding-bottom: 48px;
+  }
+}
+
+@media (min-width: 1200px) {
+  /* 宽屏未折叠时 */
+  .app-layout:not(.sidebar-collapsed) .app-viewport {
+    margin-left: 240px;
+  }
+  .app-layout.sidebar-collapsed .app-viewport {
+    margin-left: 68px;
+  }
+  .app-content-container {
+    max-width: 1440px;
+    padding-left: 32px;
+    padding-right: 32px;
+  }
 }
 
 .tab-sticky-anchor {
