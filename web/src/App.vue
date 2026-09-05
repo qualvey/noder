@@ -38,11 +38,17 @@ async function showPopover(targetEl: Element, title: string, onConfirm: () => vo
   const rect = el.getBoundingClientRect()
   const targetCenterX = rect.left + rect.width / 2
 
-  // 初始预估定位（基于常规宽度与确认按钮相对位置，避免跳跃）
+  const gap = 4
   const estBtnOffset = 185
   const estWidth = 230
+  const estHeight = 82
+
   let initLeft = Math.round(targetCenterX - estBtnOffset)
-  let initTop = Math.round(rect.bottom + 8)
+  // 默认定位在原按钮上方，尽量贴近鼠标与原按钮
+  let initTop = Math.round(rect.top - estHeight - gap)
+  if (initTop < 10) {
+    initTop = Math.round(rect.bottom + gap)
+  }
   if (initLeft < 10) initLeft = 10
   if (initLeft + estWidth > window.innerWidth - 10) initLeft = window.innerWidth - estWidth - 10
 
@@ -63,23 +69,27 @@ async function showPopover(targetEl: Element, title: string, onConfirm: () => vo
   }
   const btnCenterInPopover = offsetLeft + bEl.offsetWidth / 2
 
-  // 精准对齐：使弹窗的删除按钮正好处在原触发按钮（鼠标点击处）正下方
+  // 水平精准对齐：使弹窗的删除按钮正好处在原触发按钮（鼠标点击处）的垂直线上
   let preciseLeft = Math.round(targetCenterX - btnCenterInPopover)
-  let preciseTop = Math.round(rect.bottom + 8)
   const pWidth = pEl.offsetWidth
   const pHeight = pEl.offsetHeight
 
-  // 视口边缘防溢出处理
+  // 垂直定位：优先紧贴显示在原按钮上方，离鼠标点击处最近
+  let preciseTop = Math.round(rect.top - pHeight - gap)
+  if (preciseTop < 10) {
+    // 若视口顶部空间不足，则降级翻转到原按钮下方
+    preciseTop = Math.round(rect.bottom + gap)
+  }
+  if (preciseTop + pHeight > window.innerHeight - 10) {
+    preciseTop = Math.max(10, window.innerHeight - pHeight - 10)
+  }
+
+  // 视口水平边缘防溢出处理
   if (preciseLeft < 10) {
     preciseLeft = 10
   } else if (preciseLeft + pWidth > window.innerWidth - 10) {
     preciseLeft = window.innerWidth - pWidth - 10
   }
-
-  if (preciseTop + pHeight > window.innerHeight - 10) {
-    preciseTop = Math.round(rect.top - pHeight - 8)
-  }
-  if (preciseTop < 10) preciseTop = 10
 
   popover.value.x = preciseLeft
   popover.value.y = preciseTop
