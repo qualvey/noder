@@ -112,8 +112,8 @@ export default {
   },
   users: {
     title: '用户管理',
-    headerTitle: '订阅用户列表 (支持多节点绑定)',
-    addUser: '+ 新增用户',
+    headerTitle: '订阅用户列表',
+    addUser: '新增用户',
     export: '导出配置',
     colId: 'ID',
     colName: '用户备注',

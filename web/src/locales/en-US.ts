@@ -109,8 +109,8 @@ export default {
   },
   users: {
     title: 'Users Management',
-    headerTitle: 'Subscriber Users List (Multi-node Binding)',
-    addUser: '+ Add User',
+    headerTitle: 'Subscriber Users List',
+    addUser: 'Add User',
     export: 'Export Configs',
     colId: 'ID',
     colName: 'Username / Remarks',
