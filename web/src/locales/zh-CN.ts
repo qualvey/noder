@@ -125,6 +125,8 @@ export default {
     statusActive: '🟢 启用',
     statusInactive: '🔴 停用',
     unbound: '未绑定',
+    tokenCopied: '鉴权 Token 已复制到剪贴板',
+    boundNodesCount: '{count} 个节点',
     copyUuidTitle: '点击复制 UUID',
     copyPwdTitle: '点击复制 PWD',
     copiedToClipboard: '{label} 已复制到剪贴板',
@@ -144,6 +146,7 @@ export default {
     loadingData: '正在加载用户数据...',
     emptyText: '暂无订阅用户，点击右上角新增',
     menu: {
+      copyToken: '复制 鉴权 Token',
       copyUniversal: '复制通用订阅链接',
       copyClash: '复制 Clash 订阅链接',
       copySingbox: '复制 Sing-Box 链接',

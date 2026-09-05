@@ -122,6 +122,8 @@ export default {
     statusActive: '🟢 Enabled',
     statusInactive: '🔴 Disabled',
     unbound: 'Unbound',
+    tokenCopied: 'Auth Token copied to clipboard',
+    boundNodesCount: '{count} Nodes',
     copyUuidTitle: 'Click to copy UUID',
     copyPwdTitle: 'Click to copy Password',
     copiedToClipboard: '{label} copied to clipboard',
@@ -141,6 +143,7 @@ export default {
     loadingData: 'Loading user data...',
     emptyText: 'No subscribers yet. Click above to add.',
     menu: {
+      copyToken: 'Copy Auth Token',
       copyUniversal: 'Copy Universal Sub Link',
       copyClash: 'Copy Clash Sub Link',
       copySingbox: 'Copy Sing-Box Link',
