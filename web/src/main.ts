@@ -11,5 +11,8 @@ const initialTheme = savedTheme === 'light' || savedTheme === 'dark'
 document.documentElement.dataset.theme = initialTheme
 
 import { i18n } from './i18n'
+import IconButton from './components/IconButton.vue'
 
-createApp(App).use(i18n).mount('#app')
+const app = createApp(App)
+app.component('IconButton', IconButton)
+app.use(i18n).mount('#app')
