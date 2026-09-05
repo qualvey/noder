@@ -139,15 +139,9 @@ build_single_deb() {
     if command -v dpkg-deb &>/dev/null; then
         dpkg-deb -Zxz --build "${STAGING_DIR}" "${DEB_FILE}"
     else
-        # 兼容无 dpkg-deb 工具的环境 (如通过 ar + tar 组装标准 deb 格式)
-        log_warn "宿主环境未找到 dpkg-deb 工具，使用 ar + tar 兼容模式打包..."
-        (
-            cd "${STAGING_DIR}"
-            echo "2.0" > debian-binary
-            tar -czf control.tar.gz -C DEBIAN .
-            tar -czf data.tar.gz --exclude='./DEBIAN' --exclude='./debian-binary' --exclude='./control.tar.gz' .
-            ar rcs "${DEB_FILE}" debian-binary control.tar.gz data.tar.gz
-        )
+        # 兼容无 dpkg-deb 工具的环境 (如在 Windows/macOS 通过内置纯 Go debpack 打包)
+        log_info "宿主环境无 dpkg-deb，调用内置纯 Go 打包工具生成符合规范的 .deb..."
+        go run "${ROOT_DIR}/cmd/debpack" -staging "${STAGING_DIR}" -output "${DEB_FILE}"
     fi
 
     # 清理临时 staging 目录
