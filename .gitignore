@@ -28,5 +28,6 @@ TODO.md
 # Go binaries & build outputs
 /noder
 /noder.exe
+*.exe~
 dist/
 *.log

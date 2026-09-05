@@ -837,6 +837,13 @@ body {
 }
 
 /* 鼠标位置浮层二次确认弹窗 Popover */
+.delete-confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 2999;
+  background: transparent;
+}
+
 .delete-confirm-popover {
   position: fixed;
   z-index: 3000;
@@ -849,7 +856,14 @@ body {
   flex-direction: column;
   gap: 10px;
   min-width: 230px;
+  max-width: 320px;
   animation: popoverFadeIn 0.15s ease-out forwards;
+}
+
+[data-theme='light'] .delete-confirm-popover {
+  background: #ffffff;
+  border-color: rgba(244, 63, 94, 0.35);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 0 16px rgba(244, 63, 94, 0.15);
 }
 
 .delete-confirm-popover.active {
@@ -857,17 +871,19 @@ body {
 }
 
 @keyframes popoverFadeIn {
-  from { opacity: 0; transform: scale(0.92) translateY(-4px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .delete-confirm-title {
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: var(--accent-rose);
   display: flex;
   align-items: center;
   gap: 6px;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 .delete-confirm-actions {

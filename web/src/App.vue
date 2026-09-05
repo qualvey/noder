@@ -17,6 +17,8 @@ export interface PopoverState {
 
 const toasts = ref<ToastItem[]>([])
 const popover = ref<PopoverState | null>(null)
+const popoverElRef = ref<HTMLElement | null>(null)
+const confirmBtnRef = ref<HTMLElement | null>(null)
 let toastId = 0
 
 function showToast(message: string, type: ToastType = 'info') {
@@ -31,16 +33,56 @@ function removeToast(id: number) {
   toasts.value = toasts.value.filter((t) => t.id !== id)
 }
 
-function showPopover(targetEl: Element, title: string, onConfirm: () => void) {
-  const rect = targetEl.getBoundingClientRect()
-  const width = 230
-  const height = 80
-  let left = rect.left + rect.width / 2 - width / 2
-  let top = rect.bottom + 8
-  if (left < 10) left = 10
-  if (left + width > window.innerWidth - 10) left = window.innerWidth - width - 10
-  if (top + height > window.innerHeight - 10) top = rect.top - height - 8
-  popover.value = { title, x: left, y: top, onConfirm }
+async function showPopover(targetEl: Element, title: string, onConfirm: () => void) {
+  const el = (targetEl as HTMLElement).closest?.('button, .btn, .icon-btn') || targetEl
+  const rect = el.getBoundingClientRect()
+  const targetCenterX = rect.left + rect.width / 2
+
+  // 初始预估定位（基于常规宽度与确认按钮相对位置，避免跳跃）
+  const estBtnOffset = 185
+  const estWidth = 230
+  let initLeft = Math.round(targetCenterX - estBtnOffset)
+  let initTop = Math.round(rect.bottom + 8)
+  if (initLeft < 10) initLeft = 10
+  if (initLeft + estWidth > window.innerWidth - 10) initLeft = window.innerWidth - estWidth - 10
+
+  popover.value = { title, x: initLeft, y: initTop, onConfirm }
+
+  await nextTick()
+  if (!popover.value || !popoverElRef.value || !confirmBtnRef.value) return
+
+  const pEl = popoverElRef.value
+  const bEl = confirmBtnRef.value
+
+  // 计算弹窗内确认/删除按钮中心点相对于弹窗左边缘的精确偏移
+  let offsetLeft = 0
+  let curr: HTMLElement | null = bEl
+  while (curr && curr !== pEl) {
+    offsetLeft += curr.offsetLeft
+    curr = curr.offsetParent as HTMLElement | null
+  }
+  const btnCenterInPopover = offsetLeft + bEl.offsetWidth / 2
+
+  // 精准对齐：使弹窗的删除按钮正好处在原触发按钮（鼠标点击处）正下方
+  let preciseLeft = Math.round(targetCenterX - btnCenterInPopover)
+  let preciseTop = Math.round(rect.bottom + 8)
+  const pWidth = pEl.offsetWidth
+  const pHeight = pEl.offsetHeight
+
+  // 视口边缘防溢出处理
+  if (preciseLeft < 10) {
+    preciseLeft = 10
+  } else if (preciseLeft + pWidth > window.innerWidth - 10) {
+    preciseLeft = window.innerWidth - pWidth - 10
+  }
+
+  if (preciseTop + pHeight > window.innerHeight - 10) {
+    preciseTop = Math.round(rect.top - pHeight - 8)
+  }
+  if (preciseTop < 10) preciseTop = 10
+
+  popover.value.x = preciseLeft
+  popover.value.y = preciseTop
 }
 
 function hidePopover() {
@@ -52,6 +94,30 @@ function confirmPopover() {
   hidePopover()
   if (p) p.onConfirm()
 }
+
+function handleGlobalKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && popover.value) {
+    hidePopover()
+  }
+}
+
+function handleGlobalScrollOrResize() {
+  if (popover.value) {
+    hidePopover()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('scroll', handleGlobalScrollOrResize, { passive: true })
+  window.addEventListener('resize', handleGlobalScrollOrResize, { passive: true })
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('scroll', handleGlobalScrollOrResize)
+  window.removeEventListener('resize', handleGlobalScrollOrResize)
+})
 
 // 暴露给子视图
 provide('toast', showToast)
@@ -375,11 +441,17 @@ provide('metrics', updateMetrics)
   </div>
 
   <!-- 鼠标位置删除确认弹窗 -->
-  <div v-if="popover" class="delete-confirm-popover active" :style="{ left: popover.x + 'px', top: popover.y + 'px' }">
+  <div v-if="popover" class="delete-confirm-mask" @click="hidePopover" />
+  <div
+    v-if="popover"
+    ref="popoverElRef"
+    class="delete-confirm-popover active"
+    :style="{ left: popover.x + 'px', top: popover.y + 'px' }"
+  >
     <div class="delete-confirm-title">{{ popover.title }}</div>
     <div class="delete-confirm-actions">
       <button type="button" class="btn btn-secondary btn-sm" @click="hidePopover">{{ t('common.cancel') }}</button>
-      <button type="button" class="btn btn-danger btn-sm" @click="confirmPopover">{{ t('common.confirm') }}</button>
+      <button ref="confirmBtnRef" type="button" class="btn btn-danger btn-sm" @click="confirmPopover">{{ t('common.confirm') }}</button>
     </div>
   </div>
 </template>
@@ -402,26 +474,6 @@ provide('metrics', updateMetrics)
   pointer-events: auto;
   cursor: pointer;
   user-select: none;
-}
-.delete-confirm-popover {
-  position: fixed;
-  z-index: 1500;
-  background: var(--bg-card);
-  border: 1px solid var(--border-glass);
-  border-radius: 10px;
-  padding: 12px 14px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
-  width: 230px;
-}
-.delete-confirm-title {
-  font-size: 0.85rem;
-  margin-bottom: 10px;
-  color: var(--text);
-}
-.delete-confirm-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
 }
 
 /* 响应式骨架 */
