@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - Dev-go
+      - dev
     tags:
       - 'v*'
   workflow_dispatch:
