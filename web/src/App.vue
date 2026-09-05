@@ -344,11 +344,11 @@ provide('metrics', updateMetrics)
   grid-template-columns: repeat(4, 1fr);
   margin: 18px 0 20px;
   padding: 6px;
-  border: 1px solid var(--border-glass);
+  border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 16px;
-  background: var(--bg-card);
-  backdrop-filter: blur(18px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  background: rgba(255, 255, 255, 0.025);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
   isolation: isolate;
   position: relative;
   transition:
@@ -359,10 +359,23 @@ provide('metrics', updateMetrics)
 }
 
 .tab-navigation.pinned {
-  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
-  border-color: rgba(99, 102, 241, 0.35);
-  background: var(--bg-card-hover);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  border-color: rgba(99, 102, 241, 0.25);
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(16px);
   transform: translateY(-2px);
+}
+
+:global([data-theme='light']) .tab-navigation {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.06);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+:global([data-theme='light']) .tab-navigation.pinned {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(37, 99, 235, 0.2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
 }
 
 .tab-slider {
