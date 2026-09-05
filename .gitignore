@@ -30,3 +30,7 @@ Thumbs.db
 smoke*.log
 smoke*.err
 TODO.md
+
+# Go binaries
+noder
+noder.exe
