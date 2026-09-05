@@ -27,6 +27,10 @@ function showToast(message: string, type: ToastType = 'info') {
   }, 3000)
 }
 
+function removeToast(id: number) {
+  toasts.value = toasts.value.filter((t) => t.id !== id)
+}
+
 function showPopover(targetEl: Element, title: string, onConfirm: () => void) {
   const rect = targetEl.getBoundingClientRect()
   const width = 230
@@ -247,8 +251,15 @@ provide('metrics', updateMetrics)
   <!-- Toast 容器 -->
   <div class="toast-container">
     <TransitionGroup name="toast">
-      <div v-for="t in toasts" :key="t.id" class="toast" :style="{ borderColor: t.type === 'error' ? 'var(--accent-rose)' : 'var(--primary)' }">
-        <span>{{ t.type === 'error' ? '⚠️' : '✨' }}</span><span>{{ t.message }}</span>
+      <div
+        v-for="item in toasts"
+        :key="item.id"
+        class="toast"
+        :style="{ borderColor: item.type === 'error' ? 'var(--accent-rose)' : 'var(--primary)' }"
+        :title="t('common.close') || '点击关闭'"
+        @click="removeToast(item.id)"
+      >
+        <span>{{ item.type === 'error' ? '⚠️' : '✨' }}</span><span>{{ item.message }}</span>
       </div>
     </TransitionGroup>
   </div>
@@ -266,12 +277,21 @@ provide('metrics', updateMetrics)
 <style scoped>
 .toast-container {
   position: fixed;
-  top: 16px;
-  right: 16px;
-  z-index: 2000;
+  top: 20px;
+  right: 20px;
+  bottom: auto;
+  left: auto;
+  z-index: 9999;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  pointer-events: none;
+  max-width: calc(100vw - 40px);
+}
+.toast {
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
 }
 .delete-confirm-popover {
   position: fixed;

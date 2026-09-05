@@ -27,9 +27,9 @@ export default {
     networkError: 'Network error, please try again',
   },
   nav: {
-    nodes: 'Nodes Management',
-    users: 'Users Management',
-    files: 'File Distribution',
+    nodes: 'Nodes',
+    users: 'Users',
+    files: 'Files',
     help: 'Guides & API',
     nodesOnline: 'Online Nodes',
     usersActive: 'Active Users',

@@ -639,12 +639,16 @@ body {
 
 .toast-container {
   position: fixed;
-  bottom: 24px;
-  right: 24px;
+  top: 20px;
+  right: 20px;
+  bottom: auto;
+  left: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  z-index: 2000;
+  z-index: 9999;
+  pointer-events: none; /* 关键：容器穿透点击，绝不拦截主页面按钮 */
+  max-width: calc(100vw - 40px);
 }
 
 .toast {
@@ -658,6 +662,9 @@ body {
   align-items: center;
   gap: 8px;
   transition: all 0.3s ease;
+  pointer-events: auto; /* 仅 toast 卡片本体响应事件 */
+  cursor: pointer;      /* 点击提示可提前关闭 */
+  user-select: none;
 }
 
 /* 鼠标位置浮层二次确认弹窗 Popover */
