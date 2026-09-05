@@ -80,6 +80,8 @@ jobs:
   release:
     name: Release .deb Packages
     needs: build
+    permissions:
+      contents: write
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
