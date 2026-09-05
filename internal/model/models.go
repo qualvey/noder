@@ -114,6 +114,7 @@ type DistFile struct {
 	FileType     string  `bun:"file_type,notnull" json:"file_type"` // apk | zip | text
 	TemplateName *string `bun:"template_name" json:"template_name,omitempty"`
 	OriginalName string  `bun:"original_name" json:"original_name"`
+	StoredName   string  `bun:"stored_name,notnull" json:"stored_name"`
 	DownloadName *string `bun:"download_name" json:"download_name,omitempty"`
 	Size         int64   `bun:"size,notnull" json:"size"`
 	IsActive     bool    `bun:"is_active,notnull,default:true" json:"is_active"`

@@ -19,6 +19,7 @@ func RegisterFileRoutes(r chi.Router) {
 	r.Route("/api/files", func(r chi.Router) {
 		r.Use(AdminAuth)
 		r.Get("/", ListFiles)
+		r.Post("/", UploadFile)
 		r.Post("/upload", UploadFile)
 		r.Post("/remote", CreateRemoteFile)
 		r.Post("/{id}/refresh", RefreshRemoteFile)
@@ -119,6 +120,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		Name:         name,
 		FileType:     fileType,
 		OriginalName: originalName,
+		StoredName:   file.GenerateStoredName(originalName),
 		Size:         int64(len(content)),
 		IsActive:     true,
 		CreatedAt:    time.Now().Format("2006-01-02 15:04:05"),
@@ -185,6 +187,7 @@ func CreateRemoteFile(w http.ResponseWriter, r *http.Request) {
 		Name:         name,
 		FileType:     ft,
 		OriginalName: origName,
+		StoredName:   file.GenerateStoredName(origName),
 		Size:         int64(len(content)),
 		IsActive:     true,
 		SourceURL:    &body.URL,
@@ -261,6 +264,7 @@ func CreateTextFile(w http.ResponseWriter, r *http.Request) {
 		Name:         body.Name,
 		FileType:     "text",
 		OriginalName: origName,
+		StoredName:   file.GenerateStoredName(origName),
 		Size:         int64(len(contentBytes)),
 		IsActive:     true,
 		Remark:       body.Remark,

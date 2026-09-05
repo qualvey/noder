@@ -97,6 +97,9 @@ func SeedDefaultData(ctx context.Context) error {
 		_, _ = DB.NewInsert().Model(&model.AppSetting{Key: "shared_download_token", Value: token}).Exec(ctx)
 	}
 
+	// 确保默认模板存在
+	seedTemplates(ctx)
+
 	// 检查是否有节点
 	count, _ := DB.NewSelect().Model((*model.Node)(nil)).Count(ctx)
 	if count > 0 {
@@ -202,14 +205,14 @@ func seedTemplates(ctx context.Context) {
 				UpdatedAt:     time.Now(),
 			}
 			if _, err := DB.NewInsert().Model(newTpl).Exec(ctx); err == nil {
-				_ = DB.NewInsert().Model(&model.TemplateHistory{
+				_, _ = DB.NewInsert().Model(&model.TemplateHistory{
 					TemplateID: newTpl.ID,
 					Target:     newTpl.Target,
 					Version:    1,
 					Content:    newTpl.Content,
 					Remark:     "系统初始内置版本",
 					CreatedAt:  time.Now(),
-				}).Scan(ctx)
+				}).Exec(ctx)
 			}
 		}
 	}

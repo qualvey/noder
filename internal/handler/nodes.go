@@ -40,6 +40,21 @@ func CreateNode(w http.ResponseWriter, r *http.Request) {
 	if nodeName == "" && tag != "" {
 		body["node_name"] = tag
 	}
+	if _, ok := body["security"]; !ok {
+		body["security"] = "tls"
+	}
+	if _, ok := body["transport_type"]; !ok {
+		body["transport_type"] = "direct"
+	}
+	if _, ok := body["is_active"]; !ok {
+		body["is_active"] = true
+	}
+	if fp, _ := body["fingerprint"].(string); fp == "" {
+		body["fingerprint"] = "chrome"
+	}
+	if _, ok := body["flow"]; !ok {
+		body["flow"] = "xtls-rprx-vision"
+	}
 
 	if err := contract.ValidateNodeContract(body, proto, true); err != nil {
 		HandleAPIError(w, err)

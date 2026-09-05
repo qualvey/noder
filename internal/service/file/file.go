@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"noder/internal/config"
 	"noder/internal/contract"
 	"noder/internal/model"
@@ -26,7 +27,18 @@ func EnsureFilesDir() error {
 	return os.MkdirAll(config.FilesDir, 0o755)
 }
 
+func GenerateStoredName(origName string) string {
+	u := strings.ReplaceAll(uuid.New().String(), "-", "")
+	if origName == "" {
+		origName = "file.bin"
+	}
+	return fmt.Sprintf("%s_%s", u, origName)
+}
+
 func StoredFilePath(dist *model.DistFile) string {
+	if dist.StoredName != "" {
+		return filepath.Join(config.FilesDir, dist.StoredName)
+	}
 	ext := filepath.Ext(dist.OriginalName)
 	if ext == "" {
 		if dist.FileType == "apk" {
