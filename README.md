@@ -1,109 +1,77 @@
-# Sing-Box Subscription Middleman (订阅中间件管理服务)
+# Sing-Box Subscription Middleman (订阅中间件管理服务 - Noder)
 
-基于 FastAPI + SQLModel 打造的 Sing-Box 节点与订阅动态生成中间件系统。
+基于 Go + Gin + SQLite + Vue 3 打造的高性能 Sing-Box 与 Mihomo 节点与订阅动态生成中间件系统。
 
 采用 **方案 3：独立凭证与动态拼接** 架构设计：
 - **`Node` 表**：仅存储服务器基础设施属性（IP、端口、协议类型、TLS SNI、传输方式等），**不存储任何用户鉴权信息（如 UUID 或密码）**。
 - **`User` 表**：存储用户个人标识、鉴权 Token、**专属 UUID / Password** 以及绑定的节点 ID。
-- **动态拼接引擎**：当用户请求订阅链接或验证接口时，服务端从 `Node` 表提取服务器信息，并结合 `User` 表该用户的专属 UUID 和密码，在内存中动态组装为完整的 Sing-Box 节点配置。
+- **动态拼接引擎**：当用户请求订阅链接或验证接口时，服务端从 `Node` 表提取服务器信息，并结合 `User` 表该用户的专属 UUID 和密码，在内存中动态组装为完整的 Sing-Box / Mihomo 节点配置。
+- **单二进制自包含**：Go 内嵌前端静态页面（`//go:embed`），开箱即用，无 Python 运行时与虚拟环境依赖，秒级冷启动与极低内存开销。
 
 ---
 
-## 📦 Linux Systemd 一键安装部署
+## 📦 Debian / Ubuntu 安装部署 (.deb)
 
-在 Linux 服务器 (Ubuntu / Debian / CentOS / AlmaLinux 等) 上运行以下一键部署命令即可自动完成安装：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/qualvey/noder/main/install.sh | sudo bash
-```
-
-或者使用 `wget`：
+项目提供原生的 Debian 打包方案，支持 `amd64` 与 `arm64` 架构：
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/qualvey/noder/main/install.sh | sudo bash
+# 1. 构建 Debian 安装包 (或从 GitHub Releases 下载)
+make deb        # amd64
+make deb-arm64  # arm64
+
+# 2. 安装软件包
+sudo dpkg -i dist/noder_*_amd64.deb
+
+# 3. 启停与状态管理
+sudo systemctl status noder
+sudo systemctl restart noder
+sudo journalctl -u noder -f
 ```
 
-脚本会自动为您：
-1. 检查并安装必要环境及 `uv` 包管理器
-2. 将代码部署到 `/opt/sub-server`
-3. 交互设置 `ADMIN_SECRET_TOKEN` 与监听端口
-4. 注册并启动 Systemd 服务 `sub-server.service`（支持开机自启与失败重启）
-
-### ⚡ 单独热更新前端资源（无需重启后端）
-
-如果您仅对 Web 前端界面（HTML/JS/CSS）进行了修改升级，无需重新安装 Python 依赖或重启后端 Systemd 服务，直接运行以下一键脚本即可秒级完成静态资源的独立热更新：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/qualvey/noder/main/update-frontend.sh | sudo bash
-```
-
-或者本地运行：
-```bash
-sudo ./install.sh --frontend
-```
-
-### ⚡ 单独热更新后端代码与依赖 (保全数据库)
-
-如果修改了 Python 后端 API 代码或增加了依赖包，需要更新后端且**保全当前数据库 `data.db` 不受破坏**，运行以下一键更新脚本即可自动同步代码、更新 `uv` 依赖并重启 Systemd 服务：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/qualvey/noder/main/update-backend.sh | sudo bash
-```
-
-或者本地运行：
-```bash
-sudo ./install.sh --backend
-```
+安装后服务会自动注册为 `noder.service`，监听 `0.0.0.0:8000`，工作目录位于 `/var/lib/noder`，配置文件位于 `/etc/noder/noder.env`。
 
 ---
 
-## 🚀 本地开发运行方式
+## 🚀 本地开发与运行方式
 
-### 前端 (Vue 3 + TypeScript + Vite)
+### 1. 前端开发 (Vue 3 + TypeScript + Vite)
 
-前端源码位于 `web/`，构建产物输出到 `static/`（后端直接挂载服务）。
+前端源码位于 `web/`：
 
 ```bash
 cd web
 pnpm install        # 安装依赖
 pnpm dev            # 开发模式 (http://127.0.0.1:5273，API 代理到后端 8000)
-pnpm build          # 构建 -> ../static/ (vue-tsc 类型检查 + vite build)
+pnpm build          # 构建产物输出至 static/ (供 Go 内嵌)
 ```
 
-兼容根路径与子路径反代部署（vite base `./`，所有资源相对路径）。
-
-### 方式 1：使用 `uv` 运行（推荐）
-
-### 方式 1：使用 `uv` 运行（推荐）
-
-项目根目录已包含 `pyproject.toml`，可直接使用 [uv](https://github.com/astral-sh/uv) 一键启动：
+### 2. 后端开发 (Go 1.22+)
 
 ```bash
-# 启动 Web 管理端服务 (默认监听 0.0.0.0:8000)
-uv run python main.py
+# 运行单元测试
+go test ./...
 
-# 或者使用 uvicorn 热加载模式
-uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
+# 编译并运行服务端 (默认监听 0.0.0.0:8000)
+go run ./cmd/server
+
+# 或者编译二进制可执行文件
+go build -ldflags "-s -w" -o noder ./cmd/server
+./noder
 ```
 
-### 方式 2：使用传统 Python 虚拟环境
+### 3. 全量构建与快捷脚本
+
+项目提供快捷 Makefile 与跨平台构建脚本：
 
 ```bash
-# 1. 创建并激活虚拟环境
-python -m venv .venv
-# Windows PowerShell:
-.\.venv\Scripts\Activate.ps1
-
-# 2. 安装依赖
-pip install fastapi uvicorn sqlmodel pydantic
-
-# 3. 运行服务
-python main.py
+make build          # 全量构建前端与后端
+make release        # 交叉编译全平台二进制 (Linux / macOS / Windows)
+make deb-all        # 构建 amd64 与 arm64 架构 deb 包
 ```
 
 服务启动后：
 - **网页管理面板**：[http://127.0.0.1:8000](http://127.0.0.1:8000)
-- **API Swagger 文档**：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- **静态前端与 API**：单一二进制一体化托管提供服务
 
 ---
 
@@ -152,8 +120,8 @@ python main.py
 
 ## 🧪 运行自动化验证测试
 
-运行内置的集成测试脚本校验数据库模型与动态拼接逻辑：
+运行内置的 Go 单元与集成测试校验数据库模型与动态拼接逻辑：
 
 ```bash
-uv run python test_verification.py
+go test -v ./...
 ```

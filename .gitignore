@@ -1,11 +1,3 @@
-# Python & Virtual environment
-.venv/
-env/
-venv/
-__pycache__/
-*.py[cod]
-*$py.class
-
 # Database & runtime files
 data.db
 *.sqlite
