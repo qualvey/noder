@@ -34,7 +34,7 @@ smoke*.err
 TODO.md
 
 # Go binaries & build outputs
-noder
-noder.exe
+/noder
+/noder.exe
 dist/
 *.log
