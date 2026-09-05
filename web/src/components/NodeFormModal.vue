@@ -133,6 +133,10 @@ function onProtocolChange() {
 }
 
 async function saveNode() {
+  const isTuic = form.protocol === 'tuic'
+  const isReality = form.security === 'reality'
+  const isVless = form.protocol === 'vless'
+
   const payload: Partial<Node> = {
     tag: form.tag.trim(),
     node_name: form.node_name.trim() || null,
@@ -141,13 +145,13 @@ async function saveNode() {
     server_port: Number(form.server_port),
     security: form.security,
     sni: form.sni.trim() || null,
-    transport_type: form.transport_type,
-    path: form.path.trim() || null,
-    public_key: form.public_key.trim() || null,
-    short_id: form.short_id.trim() || null,
-    fingerprint: form.fingerprint.trim() || null,
-    flow: form.flow.trim() || null,
-    congestion_control: form.protocol === 'tuic' ? (form.congestion_control || 'bbr') : null,
+    transport_type: isTuic ? null : form.transport_type,
+    path: isTuic ? null : (form.path.trim() || null),
+    public_key: isReality ? (form.public_key.trim() || null) : null,
+    short_id: isReality ? (form.short_id.trim() || null) : null,
+    fingerprint: isReality ? (form.fingerprint.trim() || null) : null,
+    flow: isVless ? (form.flow.trim() || null) : null,
+    congestion_control: isTuic ? (form.congestion_control || 'bbr') : null,
     remark: form.remark.trim() || null,
     is_active: true,
   }
