@@ -94,3 +94,5 @@ jobs:
         with:
           files: release-artifacts/*.deb
           generate_release_notes: true
+          # 检测 tag 是否包含 beta / alpha / rc，若包含则自动设为预发布
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-rc') }}
