@@ -82,6 +82,26 @@ class UserBase(SQLModel):
     password: Optional[str] = Field(default=None)  # 用户专属密码 (用于 TUIC / AnyTLS 等)
     remark: Optional[str] = Field(default=None)    # 管理员备注 (仅管理员可见)
     config_override: Optional[str] = Field(default=None)  # JSON 文本：该用户专属配置覆盖 (目前支持 route/dns)
+    node_order: Optional[str] = Field(default=None)       # JSON 文本：该用户定制的节点排序 [id1, id2, ...]
+
+
+def get_sorted_node_ids(user: "User") -> List[int]:
+    """返回该用户实际关联的、按 user.node_order 优先排定的节点 ID 列表。"""
+    actual_ids = {n.id for n in user.nodes if n.id is not None}
+    order_list: List[int] = []
+    if user.node_order:
+        try:
+            parsed = json.loads(user.node_order)
+            if isinstance(parsed, list):
+                order_list = [int(x) for x in parsed if isinstance(x, (int, str)) and str(x).isdigit()]
+        except Exception:
+            order_list = []
+
+    sorted_ids = [nid for nid in order_list if nid in actual_ids]
+    for n in user.nodes:
+        if n.id is not None and n.id in actual_ids and n.id not in sorted_ids:
+            sorted_ids.append(n.id)
+    return sorted_ids
 
 
 class User(UserBase, table=True):

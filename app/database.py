@@ -55,7 +55,7 @@ def create_db_and_tables():
             conn.commit()
         except Exception:
             pass
-        for col in ["remark", "config_override"]:
+        for col in ["remark", "config_override", "node_order"]:
             try:
                 conn.execute(text(f"ALTER TABLE user ADD COLUMN {col} VARCHAR"))
                 conn.commit()
