@@ -167,14 +167,33 @@ body {
 }
 
 .brand-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.75rem;
   color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.status-indicator {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.7);
+  animation: pulse-dot 2.5s infinite ease-in-out;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.8; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.15); box-shadow: 0 0 8px rgba(16, 185, 129, 0.9); }
 }
 
 .header-controls {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .admin-token-box {
@@ -182,14 +201,16 @@ body {
   align-items: center;
   gap: 8px;
   background: var(--bg-soft);
-  padding: 6px 12px;
+  padding: 3px 6px 3px 10px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-glass);
+  min-height: 32px;
 }
 
 .admin-token-box label {
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .admin-token-box input {
@@ -198,8 +219,27 @@ body {
   color: var(--text-main);
   font-family: var(--font-mono);
   font-size: 0.85rem;
-  width: 130px;
+  width: 120px;
   outline: none;
+}
+
+.token-eye-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 0.82rem;
+  line-height: 1;
+  opacity: 0.65;
+  transition: opacity 0.2s, transform 0.1s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.token-eye-btn:hover {
+  opacity: 1;
+  transform: scale(1.08);
 }
 
 /* 窄屏：顶栏换行铺满，token 输入框弹性伸缩，避免横向溢出 */

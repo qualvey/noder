@@ -70,6 +70,7 @@ function toggleLocale() {
 // 页面状态
 const activeTab = ref<'nodes' | 'users' | 'files' | 'help'>('nodes')
 const adminTokenInput = ref(localStorage.getItem('admin_token') || 'admin-secret')
+const showToken = ref(false)
 const metrics = ref({ nodes: 0, users: 0 })
 
 // 明暗模式（初始值由 main.ts mount 前设置，此处读取实际生效值）
@@ -179,7 +180,7 @@ provide('metrics', updateMetrics)
         <div class="brand-icon">⚡</div>
         <div>
           <div class="brand-title">Sing-Box Sub Middleman</div>
-          <div class="brand-subtitle">{{ t('nav.systemOnline') }} (TUIC / VLESS REALITY / AnyTLS)</div>
+          <div class="brand-subtitle"><span class="status-indicator"></span>{{ t('nav.systemOnline') }}</div>
         </div>
       </div>
       <div class="header-controls">
@@ -191,8 +192,11 @@ provide('metrics', updateMetrics)
         </button>
         <div class="admin-token-box">
           <label for="adminTokenInput">{{ t('nav.adminToken') }}:</label>
-          <input type="password" id="adminTokenInput" v-model="adminTokenInput" :placeholder="t('nav.adminTokenPlaceholder')" />
-          <button class="btn btn-secondary btn-sm" @click="saveToken">{{ t('common.save') }}</button>
+          <input :type="showToken ? 'text' : 'password'" id="adminTokenInput" v-model="adminTokenInput" :placeholder="t('nav.adminTokenPlaceholder')" />
+          <button type="button" class="token-eye-btn" :title="showToken ? '隐藏' : '显示'" @click="showToken = !showToken">
+            {{ showToken ? '👁️' : '🔒' }}
+          </button>
+          <button class="btn btn-primary btn-sm" @click="saveToken">{{ t('common.save') }}</button>
         </div>
       </div>
     </div>
