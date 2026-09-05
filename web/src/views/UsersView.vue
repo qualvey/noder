@@ -187,9 +187,13 @@ onMounted(fetchData)
   <section class="tab-content" style="display: block">
     <div class="section-header">
       <div class="section-title">{{ t('users.headerTitle') }}</div>
-      <div style="display: flex; gap: 10px; align-items: center">
-        <button v-if="selected.size" class="btn btn-danger btn-sm" @click="bulkDelete">🗑️ {{ t('users.bulkDelete', { count: selected.size }) }}</button>
-        <button class="btn btn-primary" @click="openCreate"><span>+</span> {{ t('users.addUser') }}</button>
+      <div style="display: flex; gap: 12px; align-items: center">
+        <button v-if="selected.size" class="btn btn-danger btn-sm" @click="bulkDelete">
+          🗑️ {{ t('users.bulkDelete', { count: selected.size }) }}
+        </button>
+        <button class="btn btn-primary" @click="openCreate">
+          <span style="font-size: 1.1rem; line-height: 1">+</span> {{ t('users.addUser') }}
+        </button>
       </div>
     </div>
 
@@ -197,17 +201,17 @@ onMounted(fetchData)
       <table class="data-table">
         <thead>
           <tr>
-            <th style="width: 40px; text-align: center">
+            <th style="width: 44px; text-align: center">
               <input type="checkbox" :checked="selected.size === users.length && users.length > 0"
                 @change="toggleSelectAll" />
             </th>
-            <th>{{ t('users.colId') }}</th>
-            <th>{{ t('users.colName') }}</th>
-            <th>{{ t('users.colToken') }}</th>
-            <th>{{ t('users.colCredentials') }}</th>
-            <th>{{ t('users.colStatus') }}</th>
-            <th>{{ t('users.colBoundNodes') }}</th>
-            <th>{{ t('users.colActions') }}</th>
+            <th style="width: 60px; text-align: center">{{ t('users.colId') }}</th>
+            <th style="min-width: 130px">{{ t('users.colName') }}</th>
+            <th style="min-width: 150px">{{ t('users.colToken') }}</th>
+            <th style="min-width: 260px">{{ t('users.colCredentials') }}</th>
+            <th style="width: 100px; text-align: center">{{ t('users.colStatus') }}</th>
+            <th style="min-width: 140px">{{ t('users.colBoundNodes') }}</th>
+            <th style="width: 140px; text-align: center">{{ t('users.colActions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -230,35 +234,49 @@ onMounted(fetchData)
             <td style="text-align: center">
               <input type="checkbox" :checked="selected.has(user.id)" @change="toggleSelect(user.id)" />
             </td>
-            <td>{{ user.id }}</td>
-            <td>{{ user.name }}<div v-if="user.remark" style="font-size: 0.72rem; color: var(--text-muted)">{{
-              user.remark }}</div>
+            <td style="text-align: center; font-weight: 500">{{ user.id }}</td>
+            <td>
+              <div style="font-weight: 600">{{ user.name }}</div>
+              <div v-if="user.remark" style="font-size: 0.72rem; color: var(--text-muted)">{{ user.remark }}</div>
             </td>
-            <td><code style="font-size: 0.72rem">{{ user.token }}</code></td>
-            <td style="font-size: 0.75rem">
+            <td>
+              <div class="copyable-cell" :title="t('common.copy')" @click="copyValue(user.token, 'Token')">
+                <code class="clickable-code">{{ user.token }}</code>
+              </div>
+            </td>
+            <td>
               <div
                 v-if="user.uuid"
                 class="copyable-cell"
                 :title="t('users.copyUuidTitle')"
                 @click.stop="copyValue(user.uuid, 'UUID')"
               >
-                UUID: <code class="clickable-code">{{ user.uuid }}</code>
+                <span class="cred-label">UUID</span>
+                <code class="clickable-code">{{ user.uuid }}</code>
               </div>
-              <div v-else style="color: var(--text-dim)">UUID: <code>-</code></div>
+              <div v-else class="copyable-cell" style="color: var(--text-dim)">
+                <span class="cred-label">UUID</span><code>-</code>
+              </div>
 
               <div
                 v-if="user.password"
                 class="copyable-cell"
                 :title="t('users.copyPwdTitle')"
                 @click.stop="copyValue(user.password, 'PWD')"
+                style="margin-top: 4px;"
               >
-                PWD: <code class="clickable-code">{{ user.password }}</code>
+                <span class="cred-label">PWD</span>
+                <code class="clickable-code">{{ user.password }}</code>
               </div>
-              <div v-else style="color: var(--text-dim)">PWD: <code>-</code></div>
+              <div v-else class="copyable-cell" style="color: var(--text-dim); margin-top: 4px;">
+                <span class="cred-label">PWD</span><code>-</code>
+              </div>
             </td>
-            <td>
-              <span v-if="user.is_active" style="color: var(--accent-emerald)">{{ t('users.statusActive') }}</span>
-              <span v-else style="color: var(--accent-rose)">{{ t('users.statusInactive') }}</span>
+            <td style="text-align: center">
+              <span class="status-badge" :class="user.is_active ? 'active' : 'inactive'">
+                <span class="status-dot"></span>
+                {{ user.is_active ? (t('common.enabled') || '启用') : (t('common.disabled') || '停用') }}
+              </span>
             </td>
             <td style="font-size: 0.72rem; max-width: 220px">
               <template v-if="user.node_ids.length">
@@ -275,11 +293,11 @@ onMounted(fetchData)
               </template>
               <span v-else style="color: var(--text-muted)">{{ t('users.unbound') }}</span>
             </td>
-            <td>
-              <div style="display: flex; gap: 6px">
-                <button class="btn btn-secondary btn-sm" @click="openEdit(user)">{{ t('common.edit') }}</button>
+            <td style="text-align: center">
+              <div style="display: flex; gap: 8px; justify-content: center; align-items: center; white-space: nowrap">
+                <button class="btn btn-secondary btn-sm" @click="openEdit(user)">✏️ {{ t('common.edit') }}</button>
                 <button class="btn btn-danger btn-sm"
-                  @click="popover.show($event.currentTarget as Element, t('users.deleteConfirm'), () => removeUser(user.id))">{{ t('common.delete') }}</button>
+                  @click="popover.show($event.currentTarget as Element, t('users.deleteConfirm'), () => removeUser(user.id))">🗑️ {{ t('common.delete') }}</button>
               </div>
             </td>
           </tr>
@@ -310,16 +328,36 @@ onMounted(fetchData)
   padding: 1px 0;
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 6px;
   user-select: none;
+  white-space: nowrap;
+}
+.cred-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  width: 32px;
+  flex-shrink: 0;
+}
+.clickable-code {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  word-break: keep-all;
+  white-space: nowrap;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.15s ease;
+  color: var(--text-main);
+}
+:global([data-theme='light']) .clickable-code {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
 }
 .copyable-cell:hover .clickable-code {
   color: var(--primary);
   border-color: var(--primary);
   background: var(--bg-hover);
-}
-.clickable-code {
-  transition: all 0.15s ease;
-  cursor: pointer;
 }
 </style>
