@@ -14,6 +14,8 @@ func RegisterSettingsRoutes(r chi.Router) {
 		r.Use(AdminAuth)
 		r.Get("/", GetAllSettings)
 		r.Put("/", UpdateSettings)
+		r.Get("/shared-token", GetSharedToken)
+		r.Post("/shared-token/reset", ResetSharedToken)
 	})
 }
 

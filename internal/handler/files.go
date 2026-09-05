@@ -1,11 +1,15 @@
 package handler
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -68,7 +72,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		name = originalName
 	}
 	fileType := r.FormValue("file_type")
-	if fileType == "" {
+	if fileType == "auto" || fileType == "" {
 		fileType = file.DetectFileType(originalName)
 	}
 	remark := r.FormValue("remark")
@@ -76,6 +80,44 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 	downloadName := r.FormValue("download_name")
 	forceStr := r.FormValue("force")
 	force := forceStr == "true" || forceStr == "1"
+
+	if fileType == "zip" {
+		zr, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
+		if err != nil {
+			RespondError(w, http.StatusBadRequest, "无效的 ZIP 文件")
+			return
+		}
+		var names []string
+		for _, f := range zr.File {
+			names = append(names, f.Name)
+		}
+		if templateName == "" {
+			for _, n := range names {
+				lower := strings.ToLower(n)
+				if strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml") || strings.HasSuffix(lower, ".json") {
+					templateName = n
+					break
+				}
+			}
+			if templateName == "" {
+				RespondError(w, http.StatusBadRequest, "ZIP 内未找到 .yaml/.yml 模板，请指定模板文件名")
+				return
+			}
+		} else {
+			matched := false
+			baseTpl := filepath.Base(templateName)
+			for _, n := range names {
+				if filepath.Base(n) == baseTpl || n == templateName {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				RespondError(w, http.StatusBadRequest, fmt.Sprintf("ZIP 中不存在模板文件: %s", templateName))
+				return
+			}
+		}
+	}
 
 	sha := file.ComputeSHA256(content)
 

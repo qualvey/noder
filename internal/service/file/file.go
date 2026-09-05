@@ -134,3 +134,19 @@ func DetectFileType(name string) string {
 	}
 	return "text"
 }
+
+const RemoteCacheTTL = 24 * time.Hour
+
+func IsRemoteCacheExpired(dist *model.DistFile) bool {
+	if dist.CachedAt == nil || *dist.CachedAt == "" {
+		return true
+	}
+	t, err := time.ParseInLocation("2006-01-02 15:04:05", *dist.CachedAt, time.Local)
+	if err != nil {
+		t, err = time.Parse(time.RFC3339, *dist.CachedAt)
+		if err != nil {
+			return true
+		}
+	}
+	return time.Since(t) >= RemoteCacheTTL
+}
