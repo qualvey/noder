@@ -92,6 +92,25 @@ function copyValue(val: string | undefined | null, label: string) {
   })
 }
 
+function copyToken() {
+  const user = ctxMenu.value?.user
+  if (!user) return
+  closeCtxMenu()
+  copyText(user.token).then((ok) => {
+    toast(ok ? t('users.tokenCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
+  })
+}
+
+function getNodeName(id: number) {
+  const node = nodes.value.find((n) => n.id === id)
+  return node?.node_name || node?.tag || `#${id}`
+}
+
+function getNodeProtocol(id: number) {
+  const node = nodes.value.find((n) => n.id === id)
+  return node?.protocol || ''
+}
+
 // 复制 ZIP 配置包下载链接
 function copyZipLink(f: DistFile) {
   const user = ctxMenu.value?.user
@@ -105,6 +124,7 @@ function copyZipLink(f: DistFile) {
 
 const ctxMenuItems = (): ContextMenuItem[] => {
   const items: ContextMenuItem[] = [
+    { label: t('users.menu.copyToken'), icon: '🔑', onClick: copyToken },
     { label: t('users.menu.copySingbox'), icon: '📋', onClick: copySubLink },
     { label: t('users.menu.copyMihomo'), icon: '🔄', onClick: copyMihomoLink },
     { label: t('users.menu.copyNodes'), icon: '📄', onClick: copyNodes },
@@ -205,18 +225,16 @@ onMounted(fetchData)
               <input type="checkbox" :checked="selected.size === users.length && users.length > 0"
                 @change="toggleSelectAll" />
             </th>
-            <th style="width: 60px; text-align: center">{{ t('users.colId') }}</th>
-            <th style="min-width: 130px">{{ t('users.colName') }}</th>
-            <th style="min-width: 150px">{{ t('users.colToken') }}</th>
+            <th style="min-width: 140px">{{ t('users.colName') }}</th>
             <th style="min-width: 260px">{{ t('users.colCredentials') }}</th>
+            <th style="width: 120px; text-align: center">{{ t('users.colBoundNodes') }}</th>
             <th style="width: 100px; text-align: center">{{ t('users.colStatus') }}</th>
-            <th style="min-width: 140px">{{ t('users.colBoundNodes') }}</th>
             <th style="width: 140px; text-align: center">{{ t('users.colActions') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td :colspan="8" style="text-align: center; padding: 40px 0;">
+            <td :colspan="6" style="text-align: center; padding: 40px 0;">
               <div class="table-loading-container">
                 <!-- SVG 转圈 -->
                 <svg class="spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -228,21 +246,15 @@ onMounted(fetchData)
             </td>
           </tr>
           <tr v-else-if="!users.length">
-            <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px">{{ t('users.emptyText') }}</td>
+            <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px">{{ t('users.emptyText') }}</td>
           </tr>
           <tr v-for="user in users" :key="user.id" @contextmenu.prevent="onRowContextMenu($event, user)">
             <td style="text-align: center">
               <input type="checkbox" :checked="selected.has(user.id)" @change="toggleSelect(user.id)" />
             </td>
-            <td style="text-align: center; font-weight: 500">{{ user.id }}</td>
             <td>
-              <div style="font-weight: 600">{{ user.name }}</div>
-              <div v-if="user.remark" style="font-size: 0.72rem; color: var(--text-muted)">{{ user.remark }}</div>
-            </td>
-            <td>
-              <div class="copyable-cell" :title="t('common.copy')" @click="copyValue(user.token, 'Token')">
-                <code class="clickable-code">{{ user.token }}</code>
-              </div>
+              <div style="font-weight: 600; color: var(--text-main)">{{ user.name }}</div>
+              <div v-if="user.remark" style="font-size: 0.75rem; color: var(--text-muted)">{{ user.remark }}</div>
             </td>
             <td>
               <div
@@ -273,25 +285,33 @@ onMounted(fetchData)
               </div>
             </td>
             <td style="text-align: center">
+              <div v-if="user.node_ids.length" class="nodes-hover-trigger">
+                <span class="badge badge-nodes">
+                  {{ t('users.boundNodesCount', { count: user.node_ids.length }) }} ▾
+                </span>
+                <!-- 悬浮弹出的节点列表 -->
+                <div class="nodes-popover-menu">
+                  <div class="nodes-popover-title">{{ t('users.colBoundNodes') }} ({{ user.node_ids.length }})</div>
+                  <div class="nodes-popover-list">
+                    <div
+                      v-for="(nid, nIdx) in user.node_ids"
+                      :key="nid"
+                      class="nodes-popover-item"
+                    >
+                      <span v-if="nIdx === 0" class="primary-star" :title="t('users.form.primaryNodeBadge')">★</span>
+                      <span class="node-name-text">{{ getNodeName(nid) }}</span>
+                      <span v-if="getNodeProtocol(nid)" class="badge-protocol">{{ getNodeProtocol(nid).toUpperCase() }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <span v-else style="color: var(--text-dim); font-size: 0.8rem">{{ t('users.unbound') }}</span>
+            </td>
+            <td style="text-align: center">
               <span class="status-badge" :class="user.is_active ? 'active' : 'inactive'">
                 <span class="status-dot"></span>
                 {{ user.is_active ? (t('common.enabled') || '启用') : (t('common.disabled') || '停用') }}
               </span>
-            </td>
-            <td style="font-size: 0.72rem; max-width: 220px">
-              <template v-if="user.node_ids.length">
-                <span
-                  v-for="(nid, nIdx) in user.node_ids"
-                  :key="nid"
-                  class="badge"
-                  :style="nIdx === 0 ? 'margin: 2px; border-color: rgba(59, 130, 246, 0.6); background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-weight: 600;' : 'margin: 2px'"
-                  :title="nIdx === 0 ? t('users.form.primaryNodeBadge') : ''"
-                >
-                  <template v-if="nIdx === 0">★ </template>{{nodes.find((n) =>
-                  n.id === nid)?.node_name || `#${nid}`}}
-                </span>
-              </template>
-              <span v-else style="color: var(--text-muted)">{{ t('users.unbound') }}</span>
             </td>
             <td style="text-align: center">
               <div style="display: flex; gap: 8px; justify-content: center; align-items: center; white-space: nowrap">
@@ -359,5 +379,98 @@ onMounted(fetchData)
   color: var(--primary);
   border-color: var(--primary);
   background: var(--bg-hover);
+}
+
+/* 节点悬浮气泡 */
+.nodes-hover-trigger {
+  position: relative;
+  display: inline-block;
+}
+.badge-nodes {
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.nodes-hover-trigger:hover .badge-nodes {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #fff;
+}
+.nodes-popover-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  padding: 10px;
+  min-width: 190px;
+  max-width: 280px;
+  z-index: 1000;
+  text-align: left;
+  backdrop-filter: blur(12px);
+}
+.nodes-hover-trigger:hover .nodes-popover-menu {
+  display: block;
+}
+.nodes-popover-title {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-glass);
+}
+.nodes-popover-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.nodes-popover-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.75rem;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+}
+:global([data-theme='light']) .nodes-popover-item {
+  background: rgba(0, 0, 0, 0.03);
+}
+.node-name-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-main);
+}
+.primary-star {
+  color: #fbbf24;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+.badge-protocol {
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  flex-shrink: 0;
 }
 </style>
