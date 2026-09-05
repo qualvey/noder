@@ -33,13 +33,13 @@ case "$1" in
 
         # 3. 重新加载 Systemd 并配置自启
         if command -v systemctl &>/dev/null && [[ -d /run/systemd/system ]]; then
-            systemctl daemon-reload
-            
-            # 兼容旧版本可能存在的 sub-server 服务
-            if systemctl is-active --quiet sub-server 2>/dev/null && ! systemctl is-active --quiet "${SERVICE_NAME}"; then
+            # 兼容并清理旧版本可能残留的 sub-server 服务
+            if [[ -f /etc/systemd/system/sub-server.service ]]; then
                 systemctl stop sub-server 2>/dev/null || true
                 systemctl disable sub-server 2>/dev/null || true
+                mv /etc/systemd/system/sub-server.service /etc/systemd/system/sub-server.service.bak-old 2>/dev/null || true
             fi
+            systemctl daemon-reload
 
             if systemctl is-active --quiet "${SERVICE_NAME}"; then
                 # 升级场景：平滑重启

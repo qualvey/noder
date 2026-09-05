@@ -20,4 +20,4 @@ EnvironmentFile=-/etc/noder/noder.env
 
 [Install]
 WantedBy=multi-user.target
-Alias=sub-server.service
+
