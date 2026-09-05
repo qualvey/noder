@@ -33,6 +33,8 @@ smoke*.log
 smoke*.err
 TODO.md
 
-# Go binaries
+# Go binaries & build outputs
 noder
 noder.exe
+dist/
+*.log
