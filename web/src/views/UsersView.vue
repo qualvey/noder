@@ -139,8 +139,10 @@ const ctxMenuItems = (): ContextMenuItem[] => {
   return items
 }
 
-async function fetchData() {
-  loading.value = true
+async function fetchData(silent = false) {
+  if (!silent && !users.value.length) {
+    loading.value = true
+  }
   try {
     const [u, n, f] = await Promise.all([api.users.list(), api.nodes.list(), api.files.list()])
     users.value = u
@@ -164,11 +166,28 @@ function openEdit(u: User) {
   showModal.value = true
 }
 
-function removeUser(id: number) {
-  api.users.remove(id).then(() => {
+async function removeUser(id: number) {
+  const prevUsers = [...users.value]
+  // 乐观更新：直接从视图列表中剔除，触发 FLIP 平滑过渡与位移动画
+  users.value = users.value.filter((u) => u.id !== id)
+  if (selected.value.has(id)) {
+    const s = new Set(selected.value)
+    s.delete(id)
+    selected.value = s
+  }
+  updateMetrics(nodes.value.length, users.value.length)
+
+  try {
+    await api.users.remove(id)
     toast(t('users.deleted'))
-    fetchData()
-  }).catch((e) => toast(e.message, 'error'))
+    // 静默对齐后端最新数据，不触发全屏 loading 闪烁
+    await fetchData(true)
+  } catch (e) {
+    // 异常时优雅回滚
+    users.value = prevUsers
+    updateMetrics(nodes.value.length, prevUsers.length)
+    toast((e as Error).message, 'error')
+  }
 }
 
 function toggleSelect(id: number) {
@@ -187,20 +206,45 @@ function bulkDelete(e: MouseEvent) {
   const count = selected.value.size
   if (!count) return
   popover.show(e.currentTarget as Element, t('users.bulkDeleteConfirm', { count }), async () => {
-    for (const id of selected.value) {
-      try {
-        await api.users.remove(id)
-      } catch {
-        /* 继续 */
-      }
-    }
+    const idsToDelete = Array.from(selected.value)
+    const prevUsers = [...users.value]
+
+    // 乐观更新：批量从视图平滑移除
+    users.value = users.value.filter((u) => !selected.value.has(u.id))
     selected.value = new Set()
-    toast(t('users.bulkDeleteSuccess', { count }))
-    fetchData()
+    updateMetrics(nodes.value.length, users.value.length)
+
+    try {
+      for (const id of idsToDelete) {
+        try {
+          await api.users.remove(id)
+        } catch {
+          /* 继续 */
+        }
+      }
+      toast(t('users.bulkDeleteSuccess', { count }))
+      await fetchData(true)
+    } catch {
+      users.value = prevUsers
+      updateMetrics(nodes.value.length, prevUsers.length)
+    }
   })
 }
 
-onMounted(fetchData)
+// 离开动画钩子：记录元素离开瞬间的几何尺寸与相对容器位移，保证表格其余行平滑滑向新位置 (FLIP)
+function onBeforeLeave(el: Element) {
+  const htmlEl = el as HTMLElement
+  const rect = htmlEl.getBoundingClientRect()
+  const parentRect = htmlEl.parentElement?.getBoundingClientRect()
+  if (parentRect) {
+    htmlEl.style.left = `${rect.left - parentRect.left}px`
+    htmlEl.style.top = `${rect.top - parentRect.top}px`
+    htmlEl.style.width = `${rect.width}px`
+    htmlEl.style.height = `${rect.height}px`
+  }
+}
+
+onMounted(() => fetchData())
 </script>
 
 <template>
@@ -232,8 +276,8 @@ onMounted(fetchData)
             <th style="width: 90px; text-align: center">{{ t('users.colActions') }}</th>
           </tr>
         </thead>
-        <tbody>
-          <tr v-if="loading">
+        <tbody v-if="loading && !users.length">
+          <tr>
             <td :colspan="6" style="text-align: center; padding: 40px 0;">
               <div class="table-loading-container">
                 <!-- SVG 转圈 -->
@@ -245,9 +289,18 @@ onMounted(fetchData)
               </div>
             </td>
           </tr>
-          <tr v-else-if="!users.length">
+        </tbody>
+        <tbody v-else-if="!users.length">
+          <tr>
             <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px">{{ t('users.emptyText') }}</td>
           </tr>
+        </tbody>
+        <TransitionGroup
+          v-else
+          tag="tbody"
+          name="user-row"
+          @before-leave="onBeforeLeave"
+        >
           <tr v-for="user in users" :key="user.id" @contextmenu.prevent="onRowContextMenu($event, user)">
             <td style="text-align: center">
               <input type="checkbox" :checked="selected.has(user.id)" @change="toggleSelect(user.id)" />
@@ -321,13 +374,13 @@ onMounted(fetchData)
               </div>
             </td>
           </tr>
-        </tbody>
+        </TransitionGroup>
       </table>
     </div>
   </section>
 
   <UserFormModal :open="showModal" :editing="editingUser" :nodes="nodes" @close="showModal = false"
-    @saved="fetchData" />
+    @saved="() => fetchData(true)" />
 
   <ContextMenu v-if="ctxMenu" :x="ctxMenu.x" :y="ctxMenu.y" :title="ctxMenu.user.name" :items="ctxMenuItems()"
     @close="closeCtxMenu" />
