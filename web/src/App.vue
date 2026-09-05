@@ -223,10 +223,9 @@ provide('metrics', updateMetrics)
     <div class="tab-navigation" :class="{ pinned: tabNavPinned }">
       <div
         class="tab-slider"
-        :data-index="tabIndex"
         :style="{
-          transform: `translateX(${tabIndex * 100}%)`,
-          width: `${100 / tabs.length}%`,
+          width: 'calc((100% - 12px) / 4)',
+          transform: `translateX(calc(${tabIndex} * 100%))`,
         }"
       ></div>
       <button
@@ -334,18 +333,17 @@ provide('metrics', updateMetrics)
   position: sticky;
   top: 0;
   z-index: 110;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   margin: 18px 0 20px;
-  padding: 8px;
+  padding: 6px;
   border: 1px solid var(--border-glass);
-  border-radius: 18px;
+  border-radius: 16px;
   background: var(--bg-card);
   backdrop-filter: blur(18px);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
   isolation: isolate;
+  position: relative;
   transition:
     box-shadow 0.24s ease,
     border-color 0.24s ease,
@@ -362,30 +360,33 @@ provide('metrics', updateMetrics)
 
 .tab-slider {
   position: absolute;
-  inset: 8px auto 8px 8px;
-  width: 25%;
+  top: 6px;
+  bottom: 6px;
+  left: 6px;
   border-radius: 12px;
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.95), rgba(56, 189, 248, 0.9));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    0 8px 20px rgba(79, 70, 229, 0.35);
-  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), width 0.28s ease;
+    0 4px 16px rgba(79, 70, 229, 0.35);
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+  z-index: 0;
 }
 
 .tab-btn {
   position: relative;
   z-index: 1;
-  flex: 1 1 0;
   border: none;
   background: transparent;
   color: var(--text-muted);
   font-weight: 600;
   font-size: 0.93rem;
   letter-spacing: 0.01em;
-  padding: 12px 14px;
+  padding: 10px 14px;
   border-radius: 12px;
+  text-align: center;
   cursor: pointer;
-  transition: color 0.2s ease, transform 0.2s ease;
+  transition: color 0.2s ease;
 }
 
 .tab-btn:hover {
