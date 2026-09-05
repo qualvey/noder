@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# ===================================================================
+# Noder Debian Package - Pre-Removal Script
+# ===================================================================
+
+set -e
+
+SERVICE_NAME="noder.service"
+
+case "$1" in
+    remove|deconfigure)
+        if command -v systemctl &>/dev/null && [[ -d /run/systemd/system ]]; then
+            systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+            systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
+        fi
+        ;;
+    upgrade)
+        if command -v systemctl &>/dev/null && [[ -d /run/systemd/system ]]; then
+            systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+        fi
+        ;;
+    failed-upgrade)
+        ;;
+    *)
+        ;;
+esac
+
+exit 0

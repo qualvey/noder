@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# ===================================================================
+# Noder Debian Package - Post-Removal Script
+# ===================================================================
+
+set -e
+
+SERVICE_NAME="noder.service"
+DATA_DIR="/var/lib/noder"
+
+case "$1" in
+    purge)
+        if command -v systemctl &>/dev/null && [[ -d /run/systemd/system ]]; then
+            systemctl daemon-reload
+        fi
+        rm -rf /etc/noder
+        echo "[INFO] Noder 配置文件已彻底清除。"
+        if [[ -f "${DATA_DIR}/data.db" ]]; then
+            echo "[INFO] 为保障数据安全，用户数据库已保留在: ${DATA_DIR}/data.db"
+            echo "[INFO] 如确需彻底清除数据，可手动执行: rm -rf ${DATA_DIR}"
+        fi
+        ;;
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        if command -v systemctl &>/dev/null && [[ -d /run/systemd/system ]]; then
+            systemctl daemon-reload
+        fi
+        ;;
+    *)
+        ;;
+esac
+
+exit 0
