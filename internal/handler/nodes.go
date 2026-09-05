@@ -40,20 +40,34 @@ func CreateNode(w http.ResponseWriter, r *http.Request) {
 	if nodeName == "" && tag != "" {
 		body["node_name"] = tag
 	}
-	if _, ok := body["security"]; !ok {
+	if proto == "tuic" {
 		body["security"] = "tls"
-	}
-	if _, ok := body["transport_type"]; !ok {
-		body["transport_type"] = "direct"
+		delete(body, "transport_type")
+		delete(body, "path")
+		delete(body, "public_key")
+		delete(body, "short_id")
+		delete(body, "fingerprint")
+		delete(body, "flow")
+		if _, ok := body["congestion_control"]; !ok {
+			body["congestion_control"] = "bbr"
+		}
+	} else {
+		delete(body, "congestion_control")
+		if _, ok := body["transport_type"]; !ok {
+			body["transport_type"] = "direct"
+		}
+		if _, ok := body["security"]; !ok {
+			body["security"] = "tls"
+		}
+		if fp, _ := body["fingerprint"].(string); fp == "" {
+			body["fingerprint"] = "chrome"
+		}
+		if _, ok := body["flow"]; !ok {
+			body["flow"] = "xtls-rprx-vision"
+		}
 	}
 	if _, ok := body["is_active"]; !ok {
 		body["is_active"] = true
-	}
-	if fp, _ := body["fingerprint"].(string); fp == "" {
-		body["fingerprint"] = "chrome"
-	}
-	if _, ok := body["flow"]; !ok {
-		body["flow"] = "xtls-rprx-vision"
 	}
 
 	if err := contract.ValidateNodeContract(body, proto, true); err != nil {
@@ -143,6 +157,21 @@ func UpdateNode(w http.ResponseWriter, r *http.Request) {
 	proto, _ := merged["protocol"].(string)
 	if proto == "" {
 		proto = existing.Protocol
+	}
+
+	if proto == "tuic" {
+		merged["security"] = "tls"
+		merged["transport_type"] = ""
+		merged["path"] = nil
+		merged["public_key"] = nil
+		merged["short_id"] = nil
+		merged["fingerprint"] = nil
+		merged["flow"] = nil
+	} else {
+		merged["congestion_control"] = nil
+		if t, ok := merged["transport_type"].(string); !ok || t == "" {
+			merged["transport_type"] = "direct"
+		}
 	}
 
 	if err := contract.ValidateNodeContract(merged, proto, true); err != nil {
