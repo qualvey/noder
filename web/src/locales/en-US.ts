@@ -102,7 +102,7 @@ export default {
       fingerprint: 'uTLS Fingerprint',
       flow: 'Flow Control',
       noFlow: 'No Flow (Empty)',
-      transport: 'Transport Protocol',
+      transport: 'Transport Type',
       path: 'Path',
       saveNode: 'Save Node',
     },

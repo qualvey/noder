@@ -128,9 +128,13 @@ onMounted(fetchNodes)
             <span>{{ t('nodes.form.security') }}</span>
             <span class="value">{{ node.security }}<template v-if="node.sni"> / {{ node.sni }}</template></span>
           </div>
-          <div class="detail-row">
+          <div v-if="node.protocol !== 'tuic' && node.transport_type" class="detail-row">
             <span>{{ t('nodes.form.transport') }}</span>
             <span class="value">{{ node.transport_type }}<template v-if="node.path"> / {{ node.path }}</template></span>
+          </div>
+          <div v-if="node.protocol === 'tuic' && node.congestion_control" class="detail-row">
+            <span>{{ t('nodes.form.congestionControl') }}</span>
+            <span class="value">{{ node.congestion_control }}</span>
           </div>
           <div v-if="node.remark" class="detail-row">
             <span>{{ t('nodes.form.remark') }}</span>
