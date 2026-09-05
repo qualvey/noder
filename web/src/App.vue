@@ -354,20 +354,18 @@ provide('metrics', updateMetrics)
   backdrop-filter: blur(12px);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
   isolation: isolate;
-  position: relative;
   transition:
     box-shadow 0.24s ease,
     border-color 0.24s ease,
-    background 0.24s ease,
-    transform 0.24s ease;
+    background 0.24s ease;
 }
 
 .tab-navigation.pinned {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-  border-color: rgba(99, 102, 241, 0.25);
-  background: rgba(15, 23, 42, 0.8);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  border-color: rgba(99, 102, 241, 0.3);
+  background: rgba(15, 23, 42, 0.92);
   backdrop-filter: blur(16px);
-  transform: translateY(-2px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 :global([data-theme='light']) .tab-navigation {
