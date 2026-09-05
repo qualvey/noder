@@ -10,13 +10,22 @@ from sqlmodel import Session, select
 
 from app.database import get_session
 from app.deps import verify_admin_token
-from app.models import Node, User, UserCreate, UserRead, UserUpdate, parse_config_override
+from app.models import (
+    Node,
+    User,
+    UserCreate,
+    UserRead,
+    UserUpdate,
+    parse_config_override,
+    get_sorted_node_ids,
+)
 
 router = APIRouter(
     prefix="/api/users",
     tags=["admin-users"],
     dependencies=[Depends(verify_admin_token)],
 )
+
 
 def _to_read(user: User) -> UserRead:
     assert user.id is not None, "User has not been committed to the database."
@@ -27,8 +36,9 @@ def _to_read(user: User) -> UserRead:
         token=user.token,
         uuid=user.uuid,
         password=user.password,
-        node_ids=[n.id for n in user.nodes if n.id is not None],
+        node_ids=get_sorted_node_ids(user),
         config_override=user.config_override,
+        node_order=user.node_order,
     )
 
 
@@ -43,8 +53,10 @@ def create_user(user_data: UserCreate, session: Session = Depends(get_session)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token already exists")
 
     bound_nodes = []
+    node_order_json = None
     if user_data.node_ids:
         bound_nodes = session.exec(select(Node).where(Node.id.in_(user_data.node_ids))).all()
+        node_order_json = json.dumps(user_data.node_ids)
 
     # 校验并规范化 config_override (合法 JSON 且仅含白名单键)
     override_json = None
@@ -58,6 +70,7 @@ def create_user(user_data: UserCreate, session: Session = Depends(get_session)):
         password=user_pwd,
         is_active=user_data.is_active,
         config_override=override_json,
+        node_order=node_order_json,
         nodes=bound_nodes,
     )
     session.add(user)
@@ -97,6 +110,10 @@ def update_user(user_id: int, user_data: UserUpdate, session: Session = Depends(
         if node_ids is not None:
             bound_nodes = session.exec(select(Node).where(Node.id.in_(node_ids))).all()
             user.nodes = bound_nodes
+            user.node_order = json.dumps(node_ids)
+        else:
+            user.nodes = []
+            user.node_order = None
 
     # 校验并规范化 config_override；传空字符串/None 表示清除覆盖
     if "config_override" in update_dict:
