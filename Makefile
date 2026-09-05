@@ -1,4 +1,4 @@
-.PHONY: all build clean frontend backend run dev release help
+.PHONY: all build clean frontend backend run dev release deb deb-arm64 deb-all help
 
 # 默认目标：全量构建
 all: build
@@ -11,6 +11,9 @@ help:
 	@echo "  make dev        - 启动前端开发调试服务器"
 	@echo "  make run        - 构建并启动后端服务"
 	@echo "  make release    - 交叉编译各平台二进制 (Linux/macOS/Windows)"
+	@echo "  make deb        - 自动化构建 Debian 安装包 (amd64)"
+	@echo "  make deb-arm64  - 自动化构建 Debian 安装包 (arm64)"
+	@echo "  make deb-all    - 自动化构建全架构 Debian 安装包 (amd64 + arm64)"
 	@echo "  make clean      - 清理构建产物与缓存"
 
 # 前端构建
@@ -45,6 +48,16 @@ release:
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "-s -w" -o dist/noder-darwin-arm64 ./cmd/server
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w" -o dist/noder-windows-amd64.exe ./cmd/server
 	@echo "===> 交叉编译完成，产物位于 dist/"
+
+# Debian 安装包构建
+deb:
+	@bash ./scripts/build-deb.sh --arch amd64
+
+deb-arm64:
+	@bash ./scripts/build-deb.sh --arch arm64
+
+deb-all:
+	@bash ./scripts/build-deb.sh --arch all
 
 # 清理缓存
 clean:
