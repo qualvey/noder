@@ -128,9 +128,8 @@ body {
   border-bottom: 1px solid var(--border-glass);
   background: var(--bg-header);
   backdrop-filter: blur(12px);
-  position: sticky;
-  top: 0;
-  z-index: 100;
+  position: relative;
+  z-index: 1;
   padding: 16px 0;
 }
 
@@ -168,14 +167,33 @@ body {
 }
 
 .brand-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.75rem;
   color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.status-indicator {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.7);
+  animation: pulse-dot 2.5s infinite ease-in-out;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.8; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.15); box-shadow: 0 0 8px rgba(16, 185, 129, 0.9); }
 }
 
 .header-controls {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .admin-token-box {
@@ -183,14 +201,16 @@ body {
   align-items: center;
   gap: 8px;
   background: var(--bg-soft);
-  padding: 6px 12px;
+  padding: 3px 6px 3px 10px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-glass);
+  min-height: 32px;
 }
 
 .admin-token-box label {
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .admin-token-box input {
@@ -199,8 +219,27 @@ body {
   color: var(--text-main);
   font-family: var(--font-mono);
   font-size: 0.85rem;
-  width: 130px;
+  width: 120px;
   outline: none;
+}
+
+.token-eye-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 0.82rem;
+  line-height: 1;
+  opacity: 0.65;
+  transition: opacity 0.2s, transform 0.1s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.token-eye-btn:hover {
+  opacity: 1;
+  transform: scale(1.08);
 }
 
 /* 窄屏：顶栏换行铺满，token 输入框弹性伸缩，避免横向溢出 */
@@ -262,21 +301,33 @@ body {
 
 .btn-secondary:hover {
   background: var(--bg-hover);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .btn-danger {
-  background: rgba(244, 63, 94, 0.15);
-  color: var(--accent-rose);
-  border: 1px solid rgba(244, 63, 94, 0.3);
+  background: rgba(244, 63, 94, 0.16);
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  font-weight: 500;
 }
 
 .btn-danger:hover {
   background: rgba(244, 63, 94, 0.3);
+  color: #ffffff;
+  border-color: rgba(244, 63, 94, 0.5);
+}
+
+:global([data-theme='light']) .btn-danger {
+  color: #e11d48;
+  background: rgba(244, 63, 94, 0.12);
+  border-color: rgba(244, 63, 94, 0.3);
 }
 
 .btn-sm {
-  padding: 4px 10px;
-  font-size: 0.75rem;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  border-radius: var(--radius-sm);
+  min-height: 28px;
 }
 
 /* 概览指标 Metrics Bar */
@@ -320,73 +371,14 @@ body {
   font-size: 1.4rem;
 }
 
-.icon-node { background: rgba(59, 130, 246, 0.15); color: var(--primary); }
-.icon-user { background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); }
-.icon-protocol { background: rgba(139, 92, 246, 0.15); color: var(--accent-purple); }
-.icon-status { background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); }
+.icon-node { background: rgba(59, 130, 246, 0.15); color: var(--primary); border: 1px solid rgba(59, 130, 246, 0.25); }
+.icon-user { background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.25); }
+.icon-protocol { background: rgba(139, 92, 246, 0.15); color: var(--accent-purple); border: 1px solid rgba(139, 92, 246, 0.25); }
+.icon-status { background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); border: 1px solid rgba(6, 182, 212, 0.25); }
 
-/* 标签页 Tab Controls —— 滑块分段控件（参考 zashboard 风格） */
-.tab-navigation {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  background: var(--bg-soft);
-  border: 1px solid var(--border-glass);
-  border-radius: 14px;
-  padding: 4px;
-  margin-bottom: 24px;
-  overflow-x: auto;
-}
-
-/* 滑块背景：宽度 = 单列宽（(100% - 8px padding) / 4），translateX 按自身宽度平移 */
-.tab-slider {
-  position: absolute;
-  top: 4px;
-  bottom: 4px;
-  left: 4px;
-  width: calc(25% - 2px);
-  background: var(--bg-elevated);
-  border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.03);
-  transition: transform 0.2s ease-out;
-}
-
-.tab-slider[data-index='1'] { transform: translateX(100%); }
-.tab-slider[data-index='2'] { transform: translateX(200%); }
-.tab-slider[data-index='3'] { transform: translateX(300%); }
-
-.tab-btn {
-  position: relative;
-  z-index: 1;
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  font-size: 0.9rem;
-  font-weight: 500;
-  padding: 10px 8px;
-  cursor: pointer;
-  border-radius: 10px;
-  white-space: nowrap;
-  transition: color 0.2s ease;
-}
-
-.tab-btn:hover {
-  color: var(--text-main);
-}
-
-.tab-btn.active {
-  color: var(--text-main);
-  font-weight: 600;
-}
-
-@media (max-width: 640px) {
-  .tab-navigation {
-    grid-template-columns: repeat(4, minmax(110px, 1fr));
-  }
-  .tab-btn {
-    font-size: 0.82rem;
-    padding: 9px 6px;
-  }
+/* 标签页容器：默认保持内容原始高度，吸顶时的支撑高度由 App.vue 动态控制 */
+.tab-content {
+  min-height: auto;
 }
 
 /* 节点/用户 Cards Container */
@@ -454,29 +446,50 @@ body {
 .node-details {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   font-size: 0.85rem;
   color: var(--text-muted);
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .node-details .detail-row {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.node-details .detail-row > span:first-child {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  flex-shrink: 0;
 }
 
 .node-details .value {
   color: var(--text-main);
   font-family: var(--font-mono);
   font-size: 0.8rem;
+  text-align: right;
+  word-break: break-all;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.card-actions {
+:global([data-theme='light']) .node-details .value {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.06);
+}
+
+.card-actions,
+.node-card-actions {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
   border-top: 1px solid var(--border-glass);
   padding-top: 12px;
+  margin-top: auto;
 }
 
 /* 表格 Data Table Style */
@@ -484,31 +497,69 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border-glass);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   backdrop-filter: blur(8px);
 }
 
 .data-table {
   width: 100%;
+  min-width: 680px;
   border-collapse: collapse;
   text-align: left;
   font-size: 0.875rem;
 }
 
 .data-table th, .data-table td {
-  padding: 14px 18px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border-glass);
+  vertical-align: middle;
 }
 
 .data-table th {
   background: var(--bg-soft);
   color: var(--text-muted);
-  font-weight: 500;
+  font-weight: 600;
   font-size: 0.8rem;
+  white-space: nowrap;
 }
 
-.data-table tr:hover {
+.data-table td {
+  color: var(--text-main);
+}
+
+.data-table tr:hover td {
   background: var(--bg-hover-weak);
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-badge.active {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.status-badge.inactive {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.25);
+}
+
+.status-badge .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .checkboxes-group {
@@ -699,12 +750,16 @@ body {
 
 .toast-container {
   position: fixed;
-  bottom: 24px;
-  right: 24px;
+  top: 20px;
+  right: 20px;
+  bottom: auto;
+  left: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  z-index: 2000;
+  z-index: 9999;
+  pointer-events: none; /* 关键：容器穿透点击，绝不拦截主页面按钮 */
+  max-width: calc(100vw - 40px);
 }
 
 .toast {
@@ -718,6 +773,9 @@ body {
   align-items: center;
   gap: 8px;
   transition: all 0.3s ease;
+  pointer-events: auto; /* 仅 toast 卡片本体响应事件 */
+  cursor: pointer;      /* 点击提示可提前关闭 */
+  user-select: none;
 }
 
 /* 鼠标位置浮层二次确认弹窗 Popover */

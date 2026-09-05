@@ -1,0 +1,23 @@
+[Unit]
+Description=Sing-Box Subscription Middleman (Noder)
+Documentation=https://github.com/qualvey/noder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/lib/noder
+ExecStart=/usr/bin/noder
+Restart=always
+RestartSec=3s
+LimitNOFILE=65535
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+# 加载外部环境配置文件（若存在）
+EnvironmentFile=-/etc/noder/noder.env
+
+[Install]
+WantedBy=multi-user.target
+Alias=sub-server.service

@@ -3,10 +3,13 @@
 // 自包含：表单状态 / JSON 导入 / 协议联动 / Ctrl+V 快捷提取
 // 契约：props { open, editing }，emits { close, saved }
 import { inject, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { Node } from '../types'
 import { parseNodeJson } from '../utils'
 import { TUIC_CONGESTION_CONTROLS, UTLS_FINGERPRINTS, VLESS_FLOWS, isEnumValue } from '../constants'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   open: boolean
@@ -130,6 +133,10 @@ function onProtocolChange() {
 }
 
 async function saveNode() {
+  const isTuic = form.protocol === 'tuic'
+  const isReality = form.security === 'reality'
+  const isVless = form.protocol === 'vless'
+
   const payload: Partial<Node> = {
     tag: form.tag.trim(),
     node_name: form.node_name.trim() || null,
@@ -138,23 +145,23 @@ async function saveNode() {
     server_port: Number(form.server_port),
     security: form.security,
     sni: form.sni.trim() || null,
-    transport_type: form.transport_type,
-    path: form.path.trim() || null,
-    public_key: form.public_key.trim() || null,
-    short_id: form.short_id.trim() || null,
-    fingerprint: form.fingerprint.trim() || null,
-    flow: form.flow.trim() || null,
-    congestion_control: form.protocol === 'tuic' ? (form.congestion_control || 'bbr') : null,
+    transport_type: isTuic ? null : form.transport_type,
+    path: isTuic ? null : (form.path.trim() || null),
+    public_key: isReality ? (form.public_key.trim() || null) : null,
+    short_id: isReality ? (form.short_id.trim() || null) : null,
+    fingerprint: isReality ? (form.fingerprint.trim() || null) : null,
+    flow: isVless ? (form.flow.trim() || null) : null,
+    congestion_control: isTuic ? (form.congestion_control || 'bbr') : null,
     remark: form.remark.trim() || null,
     is_active: true,
   }
   try {
     if (props.editing) {
       await api.nodes.update(props.editing.id, payload)
-      toast('节点更新成功')
+      toast(t('nodes.updated'))
     } else {
       await api.nodes.create(payload)
-      toast('新节点添加成功')
+      toast(t('nodes.created'))
     }
     localStorage.removeItem(draftKey())
     emit('close')
@@ -168,7 +175,7 @@ async function saveNode() {
 function applyJsonImport() {
   const obj = parseNodeJson(jsonInput.value)
   if (!obj) {
-    toast('JSON 解析失败', 'error')
+    toast(t('nodes.jsonError'), 'error')
     return
   }
   const tls = (obj.tls as Record<string, unknown>) || {}
@@ -196,7 +203,7 @@ function applyJsonImport() {
   form.transport_type = String(transport.type || 'direct')
   form.path = String(transport.path || '')
   onProtocolChange()
-  toast('JSON 解析并填充完成')
+  toast(t('nodes.jsonSuccess'))
 }
 
 // 全局 Ctrl+V 快捷提取（弹窗打开且无输入框聚焦时）
@@ -221,36 +228,36 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
   <div class="modal-overlay" :class="{ active: open }" @click.self="closeModal()">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title">{{ editing ? '编辑节点' : '新增代理节点' }}</div>
+        <div class="modal-title">{{ editing ? t('nodes.form.editTitle') : t('nodes.form.addTitle') }}</div>
         <button class="modal-close" @click="closeModal(true)">&times;</button>
       </div>
       <form @submit.prevent="saveNode" class="modal-form">
         <div class="form-span" style="margin-bottom: 14px; background: rgba(59,130,246,0.1); padding: 10px; border-radius: 8px; border: 1px dashed rgba(59,130,246,0.4)">
           <div style="display: flex; justify-content: space-between; align-items: center">
-            <span style="font-size: 0.8rem; color: var(--primary); font-weight: 600">📋 从 JSON 导入 <span style="font-weight: normal; font-size: 0.75rem; color: var(--text-muted)">(按 Ctrl+V 快捷提取)</span></span>
-            <button type="button" class="btn btn-secondary btn-sm" @click="showJsonImport = !showJsonImport">展开/折叠导入</button>
+            <span style="font-size: 0.8rem; color: var(--primary); font-weight: 600">{{ t('nodes.jsonImport') }} <span style="font-weight: normal; font-size: 0.75rem; color: var(--text-muted)">{{ t('nodes.jsonShortcut') }}</span></span>
+            <button type="button" class="btn btn-secondary btn-sm" @click="showJsonImport = !showJsonImport">{{ t('nodes.toggleJson') }}</button>
           </div>
           <div v-if="showJsonImport" style="margin-top: 10px">
             <textarea v-model="jsonInput" class="form-control" rows="4" style="font-family: var(--font-mono); font-size: 0.78rem"
-              placeholder='粘贴 Outbound JSON 文本，如：&#10;{ "type": "vless", "tag": "my-node", "server": "1.2.3.4", "server_port": 443, "tls": { ... } }'></textarea>
-            <button type="button" class="btn btn-primary btn-sm" style="margin-top: 8px; width: 100%" @click="applyJsonImport">解析并一键填充</button>
+              :placeholder="t('nodes.jsonPlaceholder')"></textarea>
+            <button type="button" class="btn btn-primary btn-sm" style="margin-top: 8px; width: 100%" @click="applyJsonImport">{{ t('nodes.jsonApply') }}</button>
           </div>
         </div>
 
         <div class="form-group">
-          <label>节点标识 Tag <span style="color: var(--accent-rose)">*</span></label>
-          <input v-model="form.tag" class="form-control" placeholder="如 hk-hkt-01（配置内唯一标识）" required />
+          <label>{{ t('nodes.form.tag') }} <span style="color: var(--accent-rose)">*</span></label>
+          <input v-model="form.tag" class="form-control" :placeholder="t('nodes.form.tagPlaceholder')" required />
         </div>
         <div class="form-group">
-          <label>展示名称 (可选)</label>
-          <input v-model="form.node_name" class="form-control" placeholder="如：香港 HKT 专线 01" />
+          <label>{{ t('nodes.form.nodeName') }}</label>
+          <input v-model="form.node_name" class="form-control" :placeholder="t('nodes.form.nodeNamePlaceholder')" />
         </div>
         <div class="form-group">
-          <label>管理员备注 (仅管理员可见)</label>
-          <input v-model="form.remark" class="form-control" placeholder="如：香港 HKT 物理机 2026到期" />
+          <label>{{ t('nodes.form.remark') }}</label>
+          <input v-model="form.remark" class="form-control" :placeholder="t('nodes.form.remarkPlaceholder')" />
         </div>
         <div class="form-group">
-          <label>协议类型 (仅限 3 种)</label>
+          <label>{{ t('nodes.form.protocol') }}</label>
           <select v-model="form.protocol" class="form-control" @change="onProtocolChange">
             <option value="tuic">TUIC</option>
             <option value="vless">VLESS</option>
@@ -258,26 +265,26 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
           </select>
         </div>
         <div class="form-group">
-          <label>端口</label>
+          <label>{{ t('nodes.form.serverPort') }}</label>
           <input v-model.number="form.server_port" type="number" class="form-control" placeholder="8443" required />
         </div>
         <div class="form-group">
-          <label>服务器地址 (IP / 域名)</label>
-          <input v-model="form.server_address" class="form-control" placeholder="1.2.3.4 或 hk.example.com" required />
+          <label>{{ t('nodes.form.serverAddress') }}</label>
+          <input v-model="form.server_address" class="form-control" :placeholder="t('nodes.form.serverAddressPlaceholder')" required />
         </div>
         <div class="form-group">
-          <label>传输安全 (Security)</label>
+          <label>{{ t('nodes.form.security') }}</label>
           <select v-model="form.security" class="form-control">
             <option v-for="opt in securityOptions[form.protocol] || ['tls']" :key="opt" :value="opt">{{ opt.toUpperCase() }}</option>
           </select>
         </div>
         <div class="form-group">
-          <label>TLS SNI / ServerName</label>
+          <label>{{ t('nodes.form.sni') }}</label>
           <input v-model="form.sni" class="form-control" placeholder="aws.amazon.com" />
         </div>
 
         <div v-if="form.protocol === 'tuic'" class="form-group">
-          <label>拥塞控制 (Congestion Control)</label>
+          <label>{{ t('nodes.form.congestionControl') }}</label>
           <select v-model="form.congestion_control" class="form-control">
             <option value="bbr">bbr</option>
             <option value="cubic">cubic</option>
@@ -287,29 +294,29 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
 
         <div v-if="form.security === 'reality'" class="form-span reality-panel">
           <div class="form-group">
-            <label>Public Key (REALITY 公钥 <span style="color: var(--accent-rose)">*</span>)</label>
+            <label>{{ t('nodes.form.publicKey') }} <span style="color: var(--accent-rose)">*</span></label>
             <input v-model="form.public_key" class="form-control" placeholder="如 99BZ0JCnaSB55YEQYOCV66GhKTiK2ZGMPR3b6D_Q3wo" />
           </div>
           <div class="form-group">
-            <label>Short ID (简短 ID <span style="color: var(--accent-rose)">*</span>)</label>
+            <label>{{ t('nodes.form.shortId') }} <span style="color: var(--accent-rose)">*</span></label>
             <input v-model="form.short_id" class="form-control" placeholder="如 1a91" />
           </div>
           <div class="form-group">
-            <label>uTLS 指纹 (Fingerprint)</label>
+            <label>{{ t('nodes.form.fingerprint') }}</label>
             <select v-model="form.fingerprint" class="form-control">
               <option v-for="fp in UTLS_FINGERPRINTS" :key="fp" :value="fp">{{ fp }}</option>
             </select>
           </div>
           <div class="form-group">
-            <label>Flow (流控方式)</label>
+            <label>{{ t('nodes.form.flow') }}</label>
             <select v-model="form.flow" class="form-control">
-              <option v-for="fl in VLESS_FLOWS" :key="fl" :value="fl">{{ fl === '' ? '无流控 (空)' : fl }}</option>
+              <option v-for="fl in VLESS_FLOWS" :key="fl" :value="fl">{{ fl === '' ? t('nodes.form.noFlow') : fl }}</option>
             </select>
           </div>
         </div>
 
         <div v-if="['vless', 'anytls'].includes(form.protocol)" class="form-group">
-          <label>传输层 (Transport)</label>
+          <label>{{ t('nodes.form.transport') }}</label>
           <select v-model="form.transport_type" class="form-control">
             <option value="direct">direct</option>
             <option value="ws">WebSocket (ws)</option>
@@ -318,13 +325,13 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
           </select>
         </div>
         <div v-if="['vless', 'anytls'].includes(form.protocol)" class="form-group">
-          <label>路径 (Path)</label>
+          <label>{{ t('nodes.form.path') }}</label>
           <input v-model="form.path" class="form-control" placeholder="/path" />
         </div>
 
         <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" @click="closeModal()">取消</button>
-          <button type="submit" class="btn btn-primary">保存节点</button>
+          <button type="button" class="btn btn-secondary" @click="closeModal()">{{ t('common.cancel') }}</button>
+          <button type="submit" class="btn btn-primary">{{ t('nodes.form.saveNode') }}</button>
         </div>
       </form>
     </div>

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 // 节点管理：卡片列表 / 全选批量删除（新增/编辑表单在 NodeFormModal 组件）
 import { inject, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { Node } from '../types'
 import NodeFormModal from '../components/NodeFormModal.vue'
 
+const { t } = useI18n()
 const toast = inject('toast') as (msg: string, type?: 'info' | 'error') => void
 const popover = inject('popover') as { show: (el: Element, title: string, cb: () => void) => void }
 const updateMetrics = inject('metrics') as (nodes: number, users: number) => void
@@ -39,7 +41,7 @@ function openEdit(n: Node) {
 
 function removeNode(id: number) {
   api.nodes.remove(id).then(() => {
-    toast('节点已删除')
+    toast(t('nodes.deleted'))
     fetchNodes()
   }).catch((e) => toast(e.message, 'error'))
 }
@@ -59,7 +61,7 @@ function toggleSelectAll() {
 function bulkDelete(e: MouseEvent) {
   const count = selected.value.size
   if (!count) return
-  popover.show(e.currentTarget as Element, `⚠️ 确定批量删除已选中的 ${count} 个节点？`, async () => {
+  popover.show(e.currentTarget as Element, t('nodes.bulkDeleteConfirm', { count }), async () => {
     for (const id of selected.value) {
       try {
         await api.nodes.remove(id)
@@ -68,7 +70,7 @@ function bulkDelete(e: MouseEvent) {
       }
     }
     selected.value = new Set()
-    toast(`已批量删除 ${count} 个节点`)
+    toast(t('nodes.bulkDeleteSuccess', { count }))
     fetchNodes()
   })
 }
@@ -79,17 +81,19 @@ onMounted(fetchNodes)
 <template>
   <section class="tab-content" style="display: block">
     <div class="section-header">
-      <div class="section-title">代理节点列表 (支持 TUIC / VLESS REALITY / AnyTLS)</div>
-      <div style="display: flex; gap: 10px; align-items: center">
+      <div class="section-title">{{ t('nodes.headerTitle') }}</div>
+      <div style="display: flex; gap: 12px; align-items: center">
         <label
-          style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--text-muted); cursor: pointer">
+          style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-muted); cursor: pointer; user-select: none">
           <input type="checkbox" :checked="selected.size === nodes.length && nodes.length > 0"
-            @change="toggleSelectAll" /> 全选节点
+            @change="toggleSelectAll" /> {{ t('nodes.selectAll') }}
         </label>
         <button v-if="selected.size" class="btn btn-danger btn-sm" @click="bulkDelete">
-          🗑️ 批量删除 ({{ selected.size }})
+          🗑️ {{ t('nodes.bulkDelete', { count: selected.size }) }}
         </button>
-        <button class="btn btn-primary" @click="openCreate"><span>+</span> 新增节点</button>
+        <button class="btn btn-primary" @click="openCreate">
+          <span style="font-size: 1.1rem; line-height: 1">+</span> {{ t('nodes.addNode') }}
+        </button>
       </div>
     </div>
 
@@ -100,11 +104,11 @@ onMounted(fetchNodes)
           <circle class="spinner-track" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
           <path class="spinner-head" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
         </svg>
-        <span class="loading-text">正在加载节点数据...</span>
+        <span class="loading-text">{{ t('nodes.loadingData') }}</span>
       </div>
       <div v-else-if="!nodes.length"
         style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-muted)">
-        暂无代理节点，请点击右上角新增节点
+        {{ t('nodes.emptyText') }}
       </div>
       <div v-for="node in nodes" :key="node.id" class="node-card" :class="{ selected: selected.has(node.id) }">
         <div class="node-card-header">
@@ -116,19 +120,31 @@ onMounted(fetchNodes)
           <span class="badge" :class="`badge-${node.protocol}`">{{ node.protocol.toUpperCase() }}</span>
         </div>
         <div class="node-details">
-          <div class="detail-row"><span>服务器地址:</span><span class="value">{{ node.server_address }}:{{ node.server_port
-              }}</span></div>
-          <div class="detail-row"><span>安全模式:</span><span class="value">{{ node.security }}<template v-if="node.sni"> /
-                {{ node.sni }}</template></span>
+          <div class="detail-row">
+            <span>{{ t('nodes.form.serverAddress') }}</span>
+            <span class="value">{{ node.server_address }}:{{ node.server_port }}</span>
           </div>
-          <div class="detail-row"><span>传输方式:</span><span class="value">{{ node.transport_type }}<template
-                v-if="node.path"> / {{ node.path }}</template></span></div>
-          <div v-if="node.remark" class="detail-row"><span>备注:</span><span class="value">{{ node.remark }}</span></div>
+          <div class="detail-row">
+            <span>{{ t('nodes.form.security') }}</span>
+            <span class="value">{{ node.security }}<template v-if="node.sni"> / {{ node.sni }}</template></span>
+          </div>
+          <div v-if="node.transport_type" class="detail-row">
+            <span>{{ t('nodes.form.transport') }}</span>
+            <span class="value">{{ node.transport_type }}<template v-if="node.path"> / {{ node.path }}</template></span>
+          </div>
+          <div v-if="node.congestion_control" class="detail-row">
+            <span>{{ t('nodes.form.congestionControl') }}</span>
+            <span class="value">{{ node.congestion_control }}</span>
+          </div>
+          <div v-if="node.remark" class="detail-row">
+            <span>{{ t('nodes.form.remark') }}</span>
+            <span class="value">{{ node.remark }}</span>
+          </div>
         </div>
         <div class="node-card-actions">
-          <button class="btn btn-secondary btn-sm" @click="openEdit(node)">编辑</button>
-          <button class="btn btn-danger btn-sm"
-            @click="popover.show($event.currentTarget as Element, '⚠️ 确定删除该节点？', () => removeNode(node.id))">删除</button>
+          <IconButton icon="edit" :tip="t('common.edit')" variant="secondary" @click="openEdit(node)" />
+          <IconButton icon="delete" :tip="t('common.delete')" variant="danger"
+            @click="popover.show($event.currentTarget as Element, t('nodes.deleteNodeConfirm'), () => removeNode(node.id))" />
         </div>
       </div>
     </div>

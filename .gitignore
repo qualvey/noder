@@ -11,6 +11,8 @@ data.db
 *.sqlite
 *.sqlite3
 *.db
+*.db-shm
+*.db-wal
 data/files/
 
 # IDE & Editor files
@@ -30,3 +32,9 @@ Thumbs.db
 smoke*.log
 smoke*.err
 TODO.md
+
+# Go binaries & build outputs
+/noder
+/noder.exe
+dist/
+*.log

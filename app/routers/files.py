@@ -34,6 +34,7 @@ async def create_dist_file(
     remark: Optional[str] = Form(None),
     source_url: Optional[str] = Form(None),
     content_text: Optional[str] = Form(None),
+    allow_duplicate: bool = Form(True),
     session: Session = Depends(get_session),
 ):
     # 数据来源：本地文件 / 远程链接 / 文本内容 (三选一)
@@ -58,6 +59,21 @@ async def create_dist_file(
         file_type = "text"
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请上传文件、填写远程链接或输入文本内容 (三选一)")
+
+    # 防重传机制：若客户端要求校验重复且库中已存在同名且大小一致的活跃文件
+    if not allow_duplicate:
+        dup = session.exec(
+            select(DistFile).where(
+                DistFile.is_active == True,
+                DistFile.original_name == original_name,
+                DistFile.size == len(content),
+            )
+        ).first()
+        if dup:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"已存在同名且大小一致的活跃分发文件 '{original_name}' (ID: {dup.id})",
+            )
 
     # 类型判定：auto 时按扩展名推断
     if file_type in ("auto", "", None):

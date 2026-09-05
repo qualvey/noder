@@ -183,6 +183,32 @@ sing_box_bin: "./sing-box.exe"
     check("用户乙 token 不再出现", token_b not in rendered2)
     check("公共字段未受影响", 'sing_box_bin: "./sing-box.exe"' in rendered2)
 
+    print("== 2.2 浏览器打开渲染链接展示 Loading 页 ==")
+    # 浏览器导航到 ZIP 下载链接 (Accept: text/html)：应返回 HTML Loading 页面
+    r = client.get(f"/dl/{zip_file['id']}", params={"token": token}, headers={"Accept": "text/html,application/xhtml+xml"})
+    check("浏览器打开 ZIP 返回 200", r.status_code == 200)
+    check("返回 HTML 页面", "text/html" in r.headers.get("content-type", ""))
+    check("包含 Loading 标题", "正在生成专属配置包" in r.text)
+    check("包含目标文件名", zip_file["name"] in r.text)
+    check("包含用户名", user["name"] in r.text)
+    check("脚本包含 download=1 异步拉取", "download" in r.text)
+
+    # 浏览器页面在后台请求 download=1：返回实际 ZIP 文件
+    r = client.get(f"/dl/{zip_file['id']}", params={"token": token, "download": "1"}, headers={"Accept": "text/html"})
+    check("带 download=1 返回 ZIP 200", r.status_code == 200)
+    check("返回 application/zip", "application/zip" in r.headers.get("content-type", ""))
+    with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+        check("download=1 返回正确渲染文件", f'uuid: {user["uuid"]}' in zf.read("config/template.yaml").decode("utf-8"))
+
+    # 带 raw=1：同样直接返回实际 ZIP 文件
+    r = client.get(f"/dl/{zip_file['id']}", params={"token": token, "raw": "1"}, headers={"Accept": "text/html"})
+    check("带 raw=1 返回 ZIP 200", r.status_code == 200)
+    check("raw=1 返回 application/zip", "application/zip" in r.headers.get("content-type", ""))
+
+    # 非渲染文件 (APK) 带 Accept: text/html：不展示 loading 页，直出文件
+    r = client.get(f"/dl/{apk_file['id']}", params={"token": shared}, headers={"Accept": "text/html"})
+    check("APK 打开直接返回原文件 (无 loading 页)", r.status_code == 200 and "text/html" not in r.headers.get("content-type", ""))
+
     print("== 3. 远程链接拉取与缓存 ==")
     # 用本地起的 HTTP 服务模拟远程源
     from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -297,6 +323,29 @@ sing_box_bin: "./sing-box.exe"
     r = client.delete(f"/api/files/{apk_file['id']}", headers=ADMIN)
     check("删除文件成功", r.status_code == 200)
     check("磁盘文件已清理", not (test_files_dir / apk_file["stored_name"]).exists())
+
+    print("== 6. 防重传机制测试 ==")
+    dup_content = b"anti-duplicate test content"
+    r = client.post("/api/files", headers=ADMIN, files={
+        "file": ("dup_check.apk", io.BytesIO(dup_content), "application/vnd.android.package-archive")
+    }, data={"file_type": "apk", "allow_duplicate": "true"})
+    check("首次上传 dup_check.apk 成功", r.status_code == 200, r.text)
+    dup_id = r.json()["id"]
+
+    r = client.post("/api/files", headers=ADMIN, files={
+        "file": ("dup_check.apk", io.BytesIO(dup_content), "application/vnd.android.package-archive")
+    }, data={"file_type": "apk", "allow_duplicate": "false"})
+    check("防重传生效拒绝重复上传 409", r.status_code == 409, r.text)
+
+    r = client.post("/api/files", headers=ADMIN, files={
+        "file": ("dup_check.apk", io.BytesIO(dup_content), "application/vnd.android.package-archive")
+    }, data={"file_type": "apk", "allow_duplicate": "true"})
+    check("允许重传时上传成功 200", r.status_code == 200, r.text)
+
+    # 清理测试文件
+    client.delete(f"/api/files/{dup_id}", headers=ADMIN)
+    client.delete(f"/api/files/{r.json()['id']}", headers=ADMIN)
+
 
     # 清理测试目录
     if test_files_dir.exists():

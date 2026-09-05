@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from app.database import get_session
 from app.services.mihomo import build_mihomo_config_yaml
-from app.models import User
+from app.models import Node, User, get_sorted_node_ids
 from app.services.singbox import build_singbox_outbound, generate_singbox_config
 
 router = APIRouter(tags=["subscription"])
@@ -21,10 +21,17 @@ def _get_active_user(session: Session, token: str) -> User:
     return user
 
 
+def _get_user_ordered_active_nodes(user: User) -> List[Node]:
+    """返回该用户激活的且按照该用户专属定制顺序排定的节点列表。"""
+    ordered_ids = get_sorted_node_ids(user)
+    active_map = {n.id: n for n in user.nodes if n.is_active and n.id is not None}
+    return [active_map[nid] for nid in ordered_ids if nid in active_map]
+
+
 @router.get("/sub", summary="获取 Sing-Box 订阅配置")
 def get_singbox_config(token: str = Query(..., description="用户鉴权 Token"), session: Session = Depends(get_session)):
     user = _get_active_user(session, token)
-    active_nodes = [n for n in user.nodes if n.is_active]
+    active_nodes = _get_user_ordered_active_nodes(user)
     if not active_nodes:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="No active nodes associated with this user")
@@ -34,7 +41,7 @@ def get_singbox_config(token: str = Query(..., description="用户鉴权 Token")
 @router.get("/node", summary="获取用户绑定的动态拼接节点")
 def get_user_nodes(token: str = Query(..., description="用户鉴权 Token"), session: Session = Depends(get_session)):
     user = _get_active_user(session, token)
-    active_nodes = [n for n in user.nodes if n.is_active]
+    active_nodes = _get_user_ordered_active_nodes(user)
     if not active_nodes:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="No active nodes associated with this user")
@@ -55,7 +62,7 @@ def get_user_nodes(token: str = Query(..., description="用户鉴权 Token"), se
 def get_mihomo_config(token: str = Query(..., description="用户鉴权 Token"), session: Session = Depends(get_session)):
     """返回完整 mihomo 配置 YAML：data/mihomo.yml 模板 + 节点注入 + 策略组接线。"""
     user = _get_active_user(session, token)
-    active_nodes = [n for n in user.nodes if n.is_active]
+    active_nodes = _get_user_ordered_active_nodes(user)
     if not active_nodes:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="No active nodes associated with this user")
@@ -69,7 +76,7 @@ def get_mihomo_config(token: str = Query(..., description="用户鉴权 Token"),
 def verify_user_token(token: str = Query(..., description="用户 Token"), session: Session = Depends(get_session)):
     """用户侧 API：验证 Token、查库验证有效性，并返回所有绑定的节点字段与配置。"""
     user = _get_active_user(session, token)
-    active_nodes = [n for n in user.nodes if n.is_active]
+    active_nodes = _get_user_ordered_active_nodes(user)
     if not active_nodes:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="用户绑定的节点不存在或已被禁用")
@@ -90,7 +97,7 @@ def get_nodes_for_user(
     session: Session = Depends(get_session),
 ):
     user = _get_active_user(session, token)
-    active_nodes = [node for node in user.nodes if node.is_active]
+    active_nodes = _get_user_ordered_active_nodes(user)
 
     if not active_nodes:
         raise HTTPException(

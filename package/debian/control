@@ -1,0 +1,13 @@
+Package: noder
+Version: 1.0.0
+Section: net
+Priority: optional
+Architecture: ARCH_PLACEHOLDER
+Maintainer: Ryu <wel@ryugo.org>
+Depends: systemd, ca-certificates
+Provides: sub-server
+Replaces: sub-server
+Description: Fast, lightweight Sing-Box and Mihomo subscription aggregator and node manager.
+ Noder is a high-performance web dashboard and subscription middleman service
+ for managing Sing-Box nodes, routing rules, users and subscriptions.
+ Built with Go and Vue3 as a single-binary distribution.

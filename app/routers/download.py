@@ -3,8 +3,8 @@
 import secrets
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from sqlmodel import Session, select
 
 from app.config import FILES_DIR
@@ -12,6 +12,7 @@ from app.database import get_session
 from app.models import DistFile, User
 from app.routers.settings import get_or_create_shared_token
 from app.services.dist import is_remote_cache_expired, refresh_remote_file
+from app.services.loading_page import render_loading_page
 from app.services.template_render import render_zip_for_user
 
 router = APIRouter(tags=["download"])
@@ -37,7 +38,14 @@ def _download_filename(dist: DistFile) -> str:
 
 
 @router.get("/dl/{file_id}", summary="下载分发文件 (ZIP 按用户渲染 / 普通文件与文本走共享 token)")
-def download_dist_file(file_id: int, token: str = Query(..., description="鉴权 Token：ZIP 用用户 Token，普通文件/文本用共享 Token"), session: Session = Depends(get_session)):
+def download_dist_file(
+    file_id: int,
+    token: str = Query(..., description="鉴权 Token：ZIP 用用户 Token，普通文件/文本用共享 Token"),
+    download: bool = Query(False, description="是否直接下载，不展示 loading 页面"),
+    raw: bool = Query(False, description="是否直接下载，不展示 loading 页面"),
+    request: Request = None,
+    session: Session = Depends(get_session),
+):
     dist = session.get(DistFile, file_id)
     if not dist or not dist.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or disabled")
@@ -56,6 +64,12 @@ def download_dist_file(file_id: int, token: str = Query(..., description="鉴权
     stored_path = FILES_DIR / dist.stored_name
     if not stored_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File data missing on disk")
+
+    # 浏览器打开需要渲染的 ZIP 配置包：先展示 Loading 页面并在前端后台拉取下载
+    if dist.file_type == "zip":
+        accept = request.headers.get("accept", "") if request else ""
+        if "text/html" in accept and not download and not raw:
+            return HTMLResponse(content=render_loading_page(dist, user))
 
     # 远程模式：缓存过期则自动刷新，失败时保留旧缓存继续服务
     if dist.source_url and is_remote_cache_expired(dist):

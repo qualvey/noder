@@ -1,13 +1,15 @@
 <script setup lang="ts">
 // 用户管理：表格 / 全选批量删除 / 右键复制订阅链接 + 下载配置包（新增/编辑表单在 UserFormModal 组件）
 import { inject, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { DistFile, Node, User } from '../types'
-import { buildMihomoLink, buildSubLink, copyText } from '../utils'
+import { buildDownloadLink, buildMihomoLink, buildSubLink, copyText } from '../utils'
 import UserFormModal from '../components/UserFormModal.vue'
 import ContextMenu, { type ContextMenuItem } from '../components/ContextMenu.vue'
 import { ToastType } from '@/App.vue'
 
+const { t } = useI18n()
 const toast = inject('toast') as (msg: string, type?: ToastType) => void
 const popover = inject('popover') as { show: (el: Element, title: string, cb: () => void) => void }
 const updateMetrics = inject('metrics') as (nodes: number, users: number) => void
@@ -37,16 +39,16 @@ function copySubLink() {
   const user = ctxMenu.value?.user
   if (!user) return
   copyText(buildSubLink(user.token)).then((ok) => {
-    toast(ok ? 'Sing-Box 订阅链接已复制' : '复制失败', ok ? 'info' : 'error')
+    toast(ok ? t('users.subLinkCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
   })
   closeCtxMenu()
 }
-//TODO: 复制节点列表（标准格式）
+
 function copyMihomoLink() {
   const user = ctxMenu.value?.user
   if (!user) return
   copyText(buildMihomoLink(user.token)).then((ok) => {
-    toast(ok ? 'Mihomo 订阅链接已复制' : '复制失败', ok ? 'info' : 'error')
+    toast(ok ? t('users.mihomoLinkCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
   })
   closeCtxMenu()
 }
@@ -59,7 +61,7 @@ async function copyNodes() {
     const nodes = await api.userNodes(user.token)
     const formattedText = nodes.map(node => JSON.stringify(node, null, 2)).join(',\n')
     const ok = await copyText(formattedText)
-    toast(ok ? '节点列表（JSON）已经复制到剪贴板' : '复制失败', ok ? 'info' : 'error')
+    toast(ok ? t('users.nodesJsonCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
   } catch (e) {
     toast((e as Error).message, 'error')
   }
@@ -71,59 +73,72 @@ async function copyUser() {
   closeCtxMenu()
   try {
     const payload = {
-          name: user.name,
-          uuid: user.uuid ?? "",
-          password: user.password ?? ""
-        }
+      name: user.name,
+      uuid: user.uuid ?? "",
+      password: user.password ?? ""
+    }
     const textToCopy = JSON.stringify(payload, null, 2)
     await navigator.clipboard.writeText(textToCopy)
-
-    toast("User copied to clipboard", "success")
+    toast(t('users.userCopied'), "success")
   } catch(e) {
-    toast((e as Error).message,
-    "error"
-  )
+    toast((e as Error).message, "error")
   }
 }
-// 下载 ZIP 配置包：等待页 + blob 触发浏览器下载
-async function downloadZip(f: DistFile) {
+
+function copyValue(val: string | undefined | null, label: string) {
+  if (!val || val === '-') return
+  copyText(val).then((ok) => {
+    toast(ok ? t('users.copiedToClipboard', { label }) : t('common.copyFailed'), ok ? 'info' : 'error')
+  })
+}
+
+function copyToken() {
   const user = ctxMenu.value?.user
   if (!user) return
   closeCtxMenu()
-  downloading.value = `正在为「${user.name}」生成配置包 ${f.name} ...`
-  try {
-    const blob = await api.downloadZip(f.id, user.token)
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = f.download_name || f.original_name || f.name
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
-    toast('配置包已生成并下载')
-  } catch (e) {
-    toast((e as Error).message, 'error')
-  } finally {
-    downloading.value = null
-  }
+  copyText(user.token).then((ok) => {
+    toast(ok ? t('users.tokenCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
+  })
+}
+
+function getNodeName(id: number) {
+  const node = nodes.value.find((n) => n.id === id)
+  return node?.node_name || node?.tag || `#${id}`
+}
+
+function getNodeProtocol(id: number) {
+  const node = nodes.value.find((n) => n.id === id)
+  return node?.protocol || ''
+}
+
+// 复制 ZIP 配置包下载链接
+function copyZipLink(f: DistFile) {
+  const user = ctxMenu.value?.user
+  if (!user) return
+  closeCtxMenu()
+  const url = buildDownloadLink(f.id, user.token)
+  copyText(url).then((ok) => {
+    toast(ok ? t('users.downloadLinkCopied', { name: f.name }) : t('common.copyFailed'), ok ? 'info' : 'error')
+  })
 }
 
 const ctxMenuItems = (): ContextMenuItem[] => {
   const items: ContextMenuItem[] = [
-    { label: '复制 Sing-Box 链接', icon: '📋', onClick: copySubLink },
-    { label: '复制 Mihomo (Clash) 链接', icon: '🔄', onClick: copyMihomoLink },
-    { label: '复制 节点列表', icon: '11', onClick: copyNodes },
-    { label: '复制sing-box user', icon: 'none', onClick: copyUser}
+    { label: t('users.menu.copyToken'), icon: '🔑', onClick: copyToken },
+    { label: t('users.menu.copySingbox'), icon: '📋', onClick: copySubLink },
+    { label: t('users.menu.copyMihomo'), icon: '🔄', onClick: copyMihomoLink },
+    { label: t('users.menu.copyNodes'), icon: '📄', onClick: copyNodes },
+    { label: t('users.menu.copyUser'), icon: '👤', onClick: copyUser }
   ]
   if (zipFiles.value.length) {
-    items.push({ label: '配置文件下载', icon: '📦', divider: true, onClick: () => { } })
+    items.push({ label: t('users.menu.configDlHeader'), icon: '📦', divider: true, onClick: () => { } })
     for (const z of zipFiles.value) {
-      items.push({ label: `下载 ${z.name}`, icon: '📦', onClick: () => downloadZip(z) })
+      items.push({ label: t('users.menu.copyDl', { name: z.name }), icon: '🔗', onClick: () => copyZipLink(z) })
     }
   }
   return items
 }
+
 async function fetchData() {
   loading.value = true
   try {
@@ -151,7 +166,7 @@ function openEdit(u: User) {
 
 function removeUser(id: number) {
   api.users.remove(id).then(() => {
-    toast('用户已删除')
+    toast(t('users.deleted'))
     fetchData()
   }).catch((e) => toast(e.message, 'error'))
 }
@@ -171,7 +186,7 @@ function toggleSelectAll() {
 function bulkDelete(e: MouseEvent) {
   const count = selected.value.size
   if (!count) return
-  popover.show(e.currentTarget as Element, `⚠️ 确定批量删除已选中的 ${count} 个用户？`, async () => {
+  popover.show(e.currentTarget as Element, t('users.bulkDeleteConfirm', { count }), async () => {
     for (const id of selected.value) {
       try {
         await api.users.remove(id)
@@ -180,7 +195,7 @@ function bulkDelete(e: MouseEvent) {
       }
     }
     selected.value = new Set()
-    toast(`已批量删除 ${count} 个用户`)
+    toast(t('users.bulkDeleteSuccess', { count }))
     fetchData()
   })
 }
@@ -191,11 +206,14 @@ onMounted(fetchData)
 <template>
   <section class="tab-content" style="display: block">
     <div class="section-header">
-      <div class="section-title">订阅用户列表 (支持多节点绑定)</div>
-      <div style="display: flex; gap: 10px; align-items: center">
-        <button v-if="selected.size" class="btn btn-danger btn-sm" @click="bulkDelete">🗑️ 批量删除 ({{ selected.size
-        }})</button>
-        <button class="btn btn-primary" @click="openCreate"><span>+</span> 新增用户</button>
+      <div class="section-title">{{ t('users.headerTitle') }}</div>
+      <div style="display: flex; gap: 12px; align-items: center">
+        <button v-if="selected.size" class="btn btn-danger btn-sm" @click="bulkDelete">
+          🗑️ {{ t('users.bulkDelete', { count: selected.size }) }}
+        </button>
+        <button class="btn btn-primary" @click="openCreate">
+          <span style="font-size: 1.1rem; line-height: 1">+</span> {{ t('users.addUser') }}
+        </button>
       </div>
     </div>
 
@@ -203,64 +221,103 @@ onMounted(fetchData)
       <table class="data-table">
         <thead>
           <tr>
-            <th style="width: 40px; text-align: center">
+            <th style="width: 44px; text-align: center">
               <input type="checkbox" :checked="selected.size === users.length && users.length > 0"
                 @change="toggleSelectAll" />
             </th>
-            <th>ID</th>
-            <th>用户备注</th>
-            <th>鉴权 Token</th>
-            <th>专属 UUID / 密码</th>
-            <th>状态</th>
-            <th>绑定节点</th>
-            <th>操作</th>
+            <th style="min-width: 140px">{{ t('users.colName') }}</th>
+            <th style="min-width: 260px">{{ t('users.colCredentials') }}</th>
+            <th style="width: 120px; text-align: center">{{ t('users.colBoundNodes') }}</th>
+            <th style="width: 100px; text-align: center">{{ t('users.colStatus') }}</th>
+            <th style="width: 90px; text-align: center">{{ t('users.colActions') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td :colspan="8" style="text-align: center; padding: 40px 0;">
+            <td :colspan="6" style="text-align: center; padding: 40px 0;">
               <div class="table-loading-container">
                 <!-- SVG 转圈 -->
                 <svg class="spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle class="spinner-track" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                   <path class="spinner-head" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
                 </svg>
-                <span class="loading-text">正在加载用户数据...</span>
+                <span class="loading-text">{{ t('users.loadingData') }}</span>
               </div>
             </td>
           </tr>
           <tr v-else-if="!users.length">
-            <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px">暂无订阅用户，点击右上角新增</td>
+            <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px">{{ t('users.emptyText') }}</td>
           </tr>
           <tr v-for="user in users" :key="user.id" @contextmenu.prevent="onRowContextMenu($event, user)">
             <td style="text-align: center">
               <input type="checkbox" :checked="selected.has(user.id)" @change="toggleSelect(user.id)" />
             </td>
-            <td>{{ user.id }}</td>
-            <td>{{ user.name }}<div v-if="user.remark" style="font-size: 0.72rem; color: var(--text-muted)">{{
-              user.remark }}</div>
-            </td>
-            <td><code style="font-size: 0.72rem">{{ user.token }}</code></td>
-            <td style="font-size: 0.75rem">
-              <div>UUID: <code>{{ user.uuid || '-' }}</code></div>
-              <div>PWD: <code>{{ user.password || '-' }}</code></div>
+            <td>
+              <div style="font-weight: 600; color: var(--text-main)">{{ user.name }}</div>
+              <div v-if="user.remark" style="font-size: 0.75rem; color: var(--text-muted)">{{ user.remark }}</div>
             </td>
             <td>
-              <span v-if="user.is_active" style="color: var(--accent-emerald)">🟢 启用</span>
-              <span v-else style="color: var(--accent-rose)">🔴 停用</span>
+              <div
+                v-if="user.uuid"
+                class="copyable-cell"
+                :title="t('users.copyUuidTitle')"
+                @click.stop="copyValue(user.uuid, 'UUID')"
+              >
+                <span class="cred-label">UUID</span>
+                <code class="clickable-code">{{ user.uuid }}</code>
+              </div>
+              <div v-else class="copyable-cell" style="color: var(--text-dim)">
+                <span class="cred-label">UUID</span><code>-</code>
+              </div>
+
+              <div
+                v-if="user.password"
+                class="copyable-cell"
+                :title="t('users.copyPwdTitle')"
+                @click.stop="copyValue(user.password, 'PWD')"
+                style="margin-top: 4px;"
+              >
+                <span class="cred-label">PWD</span>
+                <code class="clickable-code">{{ user.password }}</code>
+              </div>
+              <div v-else class="copyable-cell" style="color: var(--text-dim); margin-top: 4px;">
+                <span class="cred-label">PWD</span><code>-</code>
+              </div>
             </td>
-            <td style="font-size: 0.72rem; max-width: 180px">
-              <template v-if="user.node_ids.length">
-                <span v-for="nid in user.node_ids" :key="nid" class="badge" style="margin: 2px">{{nodes.find((n) =>
-                  n.id === nid)?.node_name || `#${nid}`}}</span>
-              </template>
-              <span v-else style="color: var(--text-muted)">未绑定</span>
+            <td style="text-align: center">
+              <div v-if="user.node_ids.length" class="nodes-hover-trigger">
+                <span class="badge badge-nodes">
+                  {{ t('users.boundNodesCount', { count: user.node_ids.length }) }} ▾
+                </span>
+                <!-- 悬浮弹出的节点列表 -->
+                <div class="nodes-popover-menu">
+                  <div class="nodes-popover-title">{{ t('users.colBoundNodes') }} ({{ user.node_ids.length }})</div>
+                  <div class="nodes-popover-list">
+                    <div
+                      v-for="(nid, nIdx) in user.node_ids"
+                      :key="nid"
+                      class="nodes-popover-item"
+                    >
+                      <span v-if="nIdx === 0" class="primary-star" :title="t('users.form.primaryNodeBadge')">★</span>
+                      <span class="node-name-text">{{ getNodeName(nid) }}</span>
+                      <span v-if="getNodeProtocol(nid)" class="badge-protocol">{{ getNodeProtocol(nid).toUpperCase() }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <span v-else style="color: var(--text-dim); font-size: 0.8rem">{{ t('users.unbound') }}</span>
             </td>
-            <td>
-              <div style="display: flex; gap: 6px">
-                <button class="btn btn-secondary btn-sm" @click="openEdit(user)">编辑</button>
-                <button class="btn btn-danger btn-sm"
-                  @click="popover.show($event.currentTarget as Element, '⚠️ 确定删除该用户？', () => removeUser(user.id))">删除</button>
+            <td style="text-align: center">
+              <span class="status-badge" :class="user.is_active ? 'active' : 'inactive'">
+                <span class="status-dot"></span>
+                {{ user.is_active ? (t('common.enabled') || '启用') : (t('common.disabled') || '停用') }}
+              </span>
+            </td>
+            <td style="text-align: center">
+              <div style="display: flex; gap: 8px; justify-content: center; align-items: center; white-space: nowrap">
+                <IconButton icon="edit" :tip="t('common.edit')" variant="secondary" @click="openEdit(user)" />
+                <IconButton icon="delete" :tip="t('common.delete')" variant="danger"
+                  @click="popover.show($event.currentTarget as Element, t('users.deleteConfirm'), () => removeUser(user.id))" />
               </div>
             </td>
           </tr>
@@ -284,3 +341,136 @@ onMounted(fetchData)
     </div>
   </div>
 </template>
+
+<style scoped>
+.copyable-cell {
+  cursor: pointer;
+  padding: 1px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+  white-space: nowrap;
+}
+.cred-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  width: 32px;
+  flex-shrink: 0;
+}
+.clickable-code {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  word-break: keep-all;
+  white-space: nowrap;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.15s ease;
+  color: var(--text-main);
+}
+:global([data-theme='light']) .clickable-code {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+.copyable-cell:hover .clickable-code {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--bg-hover);
+}
+
+/* 节点悬浮气泡 */
+.nodes-hover-trigger {
+  position: relative;
+  display: inline-block;
+}
+.badge-nodes {
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.nodes-hover-trigger:hover .badge-nodes {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #fff;
+}
+.nodes-popover-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  padding: 10px;
+  min-width: 190px;
+  max-width: 280px;
+  z-index: 1000;
+  text-align: left;
+  backdrop-filter: blur(12px);
+}
+.nodes-hover-trigger:hover .nodes-popover-menu {
+  display: block;
+}
+.nodes-popover-title {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-glass);
+}
+.nodes-popover-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.nodes-popover-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.75rem;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+}
+:global([data-theme='light']) .nodes-popover-item {
+  background: rgba(0, 0, 0, 0.03);
+}
+.node-name-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-main);
+}
+.primary-star {
+  color: #fbbf24;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+.badge-protocol {
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+</style>

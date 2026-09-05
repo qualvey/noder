@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# ===================================================================
+# Noder Debian Package - Post-Installation Script
+# ===================================================================
+
+set -e
+
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
+PLAIN='\033[0m'
+
+DATA_DIR="/var/lib/noder"
+CONFIG_FILE="/etc/noder/noder.env"
+SERVICE_NAME="noder.service"
+
+case "$1" in
+    configure)
+        # 1. 保证持久化工作数据目录存在
+        mkdir -p "${DATA_DIR}" "${DATA_DIR}/data/files"
+        chmod 755 "${DATA_DIR}"
+
+        # 2. 检查并补全 /etc/noder/noder.env 中的随机 Token
+        if [[ -f "${CONFIG_FILE}" ]]; then
+            TOKEN_VAL=$(grep -E '^ADMIN_SECRET_TOKEN=' "${CONFIG_FILE}" | cut -d'=' -f2- | tr -d ' "\r\n' || true)
+            if [[ -z "${TOKEN_VAL}" ]]; then
+                # 生成 16 字节 (32 位十六进制) 安全随机密钥
+                RAND_TOKEN=$(openssl rand -hex 16 2>/dev/null || head -c 16 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 32 || echo "admin-secret-$(date +%s)")
+                sed -i "s|^ADMIN_SECRET_TOKEN=.*|ADMIN_SECRET_TOKEN=${RAND_TOKEN}|g" "${CONFIG_FILE}"
+            fi
+            chmod 600 "${CONFIG_FILE}"
+        fi
+
+        # 3. 重新加载 Systemd 并配置自启
+        if command -v systemctl &>/dev/null && [[ -d /run/systemd/system ]]; then
+            systemctl daemon-reload
+            
+            # 兼容旧版本可能存在的 sub-server 服务
+            if systemctl is-active --quiet sub-server 2>/dev/null && ! systemctl is-active --quiet "${SERVICE_NAME}"; then
+                systemctl stop sub-server 2>/dev/null || true
+                systemctl disable sub-server 2>/dev/null || true
+            fi
+
+            if systemctl is-active --quiet "${SERVICE_NAME}"; then
+                # 升级场景：平滑重启
+                systemctl restart "${SERVICE_NAME}"
+            else
+                # 全新安装：启用并拉起
+                systemctl enable "${SERVICE_NAME}"
+                systemctl start "${SERVICE_NAME}"
+            fi
+
+            # 4. 读取运行信息并打印欢迎 Banner
+            CURRENT_PORT=$(grep -E '^PORT=' "${CONFIG_FILE}" 2>/dev/null | cut -d'=' -f2- | tr -d ' "\r\n' || echo "8000")
+            CURRENT_TOKEN=$(grep -E '^ADMIN_SECRET_TOKEN=' "${CONFIG_FILE}" 2>/dev/null | cut -d'=' -f2- | tr -d ' "\r\n' || echo "admin-secret")
+            CURRENT_PORT=${CURRENT_PORT:-8000}
+
+            echo ""
+            echo -e "${GREEN}====================================================${PLAIN}"
+            echo -e "${GREEN} 🎉 Noder (Sing-Box Sub Middleman) 安装/升级成功！${PLAIN}"
+            echo -e "${GREEN}====================================================${PLAIN}"
+            echo -e " 🌐 控制台面板 : ${CYAN}http://localhost:${CURRENT_PORT}${PLAIN}"
+            echo -e " 🔑 管理 Token : ${YELLOW}${CURRENT_TOKEN}${PLAIN}"
+            echo -e " ⚙️ 配置文件   : ${CONFIG_FILE}"
+            echo -e " 💾 数据库路径 : ${DATA_DIR}/data.db"
+            echo -e " ⚡ 服务状态   : systemctl status ${SERVICE_NAME}"
+            echo -e "${GREEN}====================================================${PLAIN}"
+            echo ""
+        fi
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+    *)
+        ;;
+esac
+
+exit 0
