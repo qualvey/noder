@@ -82,16 +82,18 @@ onMounted(fetchNodes)
   <section class="tab-content" style="display: block">
     <div class="section-header">
       <div class="section-title">{{ t('nodes.headerTitle') }}</div>
-      <div style="display: flex; gap: 10px; align-items: center">
+      <div style="display: flex; gap: 12px; align-items: center">
         <label
-          style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--text-muted); cursor: pointer">
+          style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-muted); cursor: pointer; user-select: none">
           <input type="checkbox" :checked="selected.size === nodes.length && nodes.length > 0"
             @change="toggleSelectAll" /> {{ t('nodes.selectAll') }}
         </label>
         <button v-if="selected.size" class="btn btn-danger btn-sm" @click="bulkDelete">
           🗑️ {{ t('nodes.bulkDelete', { count: selected.size }) }}
         </button>
-        <button class="btn btn-primary" @click="openCreate"><span>+</span> {{ t('nodes.addNode') }}</button>
+        <button class="btn btn-primary" @click="openCreate">
+          <span style="font-size: 1.1rem; line-height: 1">+</span> {{ t('nodes.addNode') }}
+        </button>
       </div>
     </div>
 
@@ -118,19 +120,31 @@ onMounted(fetchNodes)
           <span class="badge" :class="`badge-${node.protocol}`">{{ node.protocol.toUpperCase() }}</span>
         </div>
         <div class="node-details">
-          <div class="detail-row"><span>{{ t('nodes.form.serverAddress') }}:</span><span class="value">{{ node.server_address }}:{{ node.server_port
-              }}</span></div>
-          <div class="detail-row"><span>{{ t('nodes.form.security') }}:</span><span class="value">{{ node.security }}<template v-if="node.sni"> /
-                {{ node.sni }}</template></span>
+          <div class="detail-row">
+            <span>{{ t('nodes.form.serverAddress') }}</span>
+            <span class="value">{{ node.server_address }}:{{ node.server_port }}</span>
           </div>
-          <div class="detail-row"><span>{{ t('nodes.form.transport') }}:</span><span class="value">{{ node.transport_type }}<template
-                v-if="node.path"> / {{ node.path }}</template></span></div>
-          <div v-if="node.remark" class="detail-row"><span>{{ t('nodes.form.remark') }}:</span><span class="value">{{ node.remark }}</span></div>
+          <div class="detail-row">
+            <span>{{ t('nodes.form.security') }}</span>
+            <span class="value">{{ node.security }}<template v-if="node.sni"> / {{ node.sni }}</template></span>
+          </div>
+          <div class="detail-row">
+            <span>{{ t('nodes.form.transport') }}</span>
+            <span class="value">{{ node.transport_type }}<template v-if="node.path"> / {{ node.path }}</template></span>
+          </div>
+          <div v-if="node.remark" class="detail-row">
+            <span>{{ t('nodes.form.remark') }}</span>
+            <span class="value">{{ node.remark }}</span>
+          </div>
         </div>
         <div class="node-card-actions">
-          <button class="btn btn-secondary btn-sm" @click="openEdit(node)">{{ t('common.edit') }}</button>
+          <button class="btn btn-secondary btn-sm" @click="openEdit(node)">
+            ✏️ {{ t('common.edit') }}
+          </button>
           <button class="btn btn-danger btn-sm"
-            @click="popover.show($event.currentTarget as Element, t('nodes.deleteNodeConfirm'), () => removeNode(node.id))">{{ t('common.delete') }}</button>
+            @click="popover.show($event.currentTarget as Element, t('nodes.deleteNodeConfirm'), () => removeNode(node.id))">
+            🗑️ {{ t('common.delete') }}
+          </button>
         </div>
       </div>
     </div>
