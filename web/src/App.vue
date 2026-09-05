@@ -227,7 +227,14 @@ provide('metrics', updateMetrics)
           width: 'calc((100% - 12px) / 4)',
           transform: `translateX(calc(${tabIndex} * 100%))`,
         }"
-      ></div>
+      >
+        <div
+          class="tab-slider-inner"
+          :style="{
+            transform: `translateX(calc(-${tabIndex} * 25%))`,
+          }"
+        ></div>
+      </div>
       <button
         v-for="t in tabs"
         :key="t.key"
@@ -364,13 +371,25 @@ provide('metrics', updateMetrics)
   bottom: 6px;
   left: 6px;
   border-radius: 12px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.95), rgba(56, 189, 248, 0.9));
+  overflow: hidden;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
     0 4px 16px rgba(79, 70, 229, 0.35);
   transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
   pointer-events: none;
   z-index: 0;
+}
+
+.tab-slider-inner {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 400%;
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 30%, #38bdf8 70%, #06b6d4 100%);
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
 .tab-btn {
