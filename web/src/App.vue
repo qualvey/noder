@@ -176,6 +176,21 @@ function handleSidebarSaveToken(val: string) {
   saveToken()
 }
 
+// 移动端专用 Token 弹窗
+const isMobileTokenModalOpen = ref(false)
+const mobileTokenInput = ref(adminTokenInput.value)
+
+function openMobileTokenModal() {
+  mobileTokenInput.value = adminTokenInput.value
+  isMobileTokenModalOpen.value = true
+}
+
+function saveMobileToken() {
+  adminTokenInput.value = mobileTokenInput.value.trim()
+  isMobileTokenModalOpen.value = false
+  saveToken()
+}
+
 function updateMetrics(n: number, u: number) {
   metrics.value = { nodes: n, users: u }
 }
@@ -199,38 +214,50 @@ provide('metrics', updateMetrics)
     </div>
 
     <div class="app-viewport">
-      <!-- 仅移动端 (< 768px) 顶栏 Header -->
-      <header class="header mobile-only-header">
-        <div class="container header-wrapper">
-          <div class="brand">
-            <div class="brand-icon">⚡</div>
-            <div>
-              <div class="brand-title">Sing-Box Sub Middleman</div>
-              <div class="brand-subtitle"><span class="status-indicator"></span>{{ t('nav.systemOnline') }}</div>
-            </div>
+      <!-- 移动端 (< 768px) 超轻量单行 Header (高度仅 48px，告别冗余) -->
+      <header class="mobile-topbar">
+        <div class="mobile-topbar-inner">
+          <div class="mobile-topbar-brand">
+            <div class="mobile-brand-icon">⚡</div>
+            <div class="mobile-brand-name">Sing-Box Sub</div>
+            <span class="mobile-status-dot" :title="t('nav.systemOnline')"></span>
           </div>
-          <div class="header-controls">
-            <button class="btn btn-secondary btn-sm lang-toggle" :title="t('nav.switchLang')" @click="toggleLocale">
-              🌐 {{ locale === 'zh' ? 'EN' : '中文' }}
+
+          <div class="mobile-topbar-actions">
+            <!-- 语言切换 -->
+            <button
+              type="button"
+              class="mobile-action-btn"
+              :title="t('nav.switchLang')"
+              @click="toggleLocale"
+            >
+              🌐
             </button>
-            <button class="btn btn-secondary btn-sm theme-toggle" :title="theme === 'light' ? t('nav.themeDark') : t('nav.themeLight')" @click="toggleTheme">
+            <!-- 主题切换 -->
+            <button
+              type="button"
+              class="mobile-action-btn"
+              :title="theme === 'light' ? t('nav.themeDark') : t('nav.themeLight')"
+              @click="toggleTheme"
+            >
               {{ theme === 'light' ? '☀️' : '🌙' }}
             </button>
-            <div class="admin-token-box">
-              <label for="adminTokenInput">{{ t('nav.adminToken') }}:</label>
-              <input :type="showToken ? 'text' : 'password'" id="adminTokenInput" v-model="adminTokenInput" :placeholder="t('nav.adminTokenPlaceholder')" />
-              <button type="button" class="token-eye-btn" :title="showToken ? '隐藏' : '显示'" @click="showToken = !showToken">
-                {{ showToken ? '👁️' : '🔒' }}
-              </button>
-              <button class="btn btn-primary btn-sm" @click="saveToken">{{ t('common.save') }}</button>
-            </div>
+            <!-- Token 弹窗快捷设置 -->
+            <button
+              type="button"
+              class="mobile-action-btn"
+              :title="t('nav.adminToken')"
+              @click="openMobileTokenModal"
+            >
+              🔑
+            </button>
           </div>
         </div>
       </header>
 
       <main class="container app-content-container">
-        <!-- 概览指标卡片 -->
-        <div class="metrics-grid">
+        <!-- 桌面端 (>= 768px) 宽幅卡片 -->
+        <div class="metrics-grid desktop-metrics">
           <div class="metric-card">
             <div class="metric-info">
               <h4>{{ t('nav.nodesOnline') }}</h4>
@@ -247,36 +274,47 @@ provide('metrics', updateMetrics)
           </div>
         </div>
 
-        <!-- 仅移动端 (< 768px) 展示触顶吸附 Tab 导航条 -->
-        <div class="mobile-only-tabs">
-          <!-- 锚点：在正常文档流中精准标定 tab-navigation 的起始位置 -->
-          <div ref="stickyAnchorRef" class="tab-sticky-anchor"></div>
-
-          <div class="tab-navigation" :class="{ pinned: tabNavPinned }">
-            <div
-              class="tab-slider"
-              :style="{
-                width: 'calc((100% - 12px) / 4)',
-                transform: `translateX(calc(${tabIndex} * 100%))`,
-              }"
-            >
-              <div
-                class="tab-slider-inner"
-                :style="{
-                  transform: `translateX(calc(-${tabIndex} * 25%))`,
-                }"
-              ></div>
-            </div>
-            <button
-              v-for="t in tabs"
-              :key="t.key"
-              class="tab-btn"
-              :class="{ active: activeTab === t.key }"
-              @click="activeTab = t.key"
-            >
-              {{ t.label }}
-            </button>
+        <!-- 移动端 (< 768px) 紧凑单行胶囊条 (超薄 34px，极省空间) -->
+        <div class="mobile-metrics-strip">
+          <div class="mobile-metric-pill">
+            <span class="pill-dot node-dot"></span>
+            <span class="pill-title">{{ t('nav.nodesOnline') }}</span>
+            <span class="pill-val">{{ metrics.nodes }}</span>
           </div>
+          <div class="mobile-metric-pill">
+            <span class="pill-dot user-dot"></span>
+            <span class="pill-title">{{ t('nav.usersActive') }}</span>
+            <span class="pill-val">{{ metrics.users }}</span>
+          </div>
+        </div>
+
+        <!-- 移动端吸附 Tab 导航栏 (必须直接作为 main 的子元素以保证 sticky 正常生效！) -->
+        <div ref="stickyAnchorRef" class="tab-sticky-anchor mobile-nav-anchor"></div>
+
+        <div class="tab-navigation mobile-tab-nav" :class="{ pinned: tabNavPinned }">
+          <div
+            class="tab-slider"
+            :style="{
+              width: 'calc((100% - 12px) / 4)',
+              transform: `translateX(calc(${tabIndex} * 100%))`,
+            }"
+          >
+            <div
+              class="tab-slider-inner"
+              :style="{
+                transform: `translateX(calc(-${tabIndex} * 25%))`,
+              }"
+            ></div>
+          </div>
+          <button
+            v-for="t in tabs"
+            :key="t.key"
+            class="tab-btn"
+            :class="{ active: activeTab === t.key }"
+            @click="activeTab = t.key"
+          >
+            {{ t.label }}
+          </button>
         </div>
 
         <!-- 页面视图容器 -->
@@ -287,6 +325,36 @@ provide('metrics', updateMetrics)
           <HelpView v-else />
         </div>
       </main>
+    </div>
+  </div>
+
+  <!-- 移动端 Token 弹窗 -->
+  <div v-if="isMobileTokenModalOpen" class="mobile-token-modal-mask" @click.self="isMobileTokenModalOpen = false">
+    <div class="mobile-token-modal-card">
+      <div class="mobile-token-modal-header">
+        <h4>{{ t('nav.adminTokenTitle') }}</h4>
+        <button type="button" class="btn-close" @click="isMobileTokenModalOpen = false">✕</button>
+      </div>
+      <p class="mobile-token-modal-tip">{{ t('nav.adminTokenTip') }}</p>
+      <div class="mobile-token-input-wrap">
+        <input
+          :type="showToken ? 'text' : 'password'"
+          v-model="mobileTokenInput"
+          class="form-control"
+          :placeholder="t('nav.adminTokenPlaceholder')"
+        />
+        <button
+          type="button"
+          class="eye-toggle"
+          @click="showToken = !showToken"
+        >
+          {{ showToken ? '👁️' : '🔒' }}
+        </button>
+      </div>
+      <div class="mobile-token-modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" @click="isMobileTokenModalOpen = false">{{ t('common.cancel') }}</button>
+        <button type="button" class="btn btn-primary btn-sm" @click="saveMobileToken">{{ t('common.save') }}</button>
+      </div>
     </div>
   </div>
 
@@ -366,18 +434,157 @@ provide('metrics', updateMetrics)
   display: none;
 }
 
-.mobile-only-header,
-.mobile-only-tabs {
-  display: block;
+/* 移动端 (< 768px) 超薄顶栏 */
+.mobile-topbar {
+  display: flex;
+  align-items: center;
+  height: 50px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 0 14px;
+}
+
+.mobile-topbar-inner {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mobile-topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-brand-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+}
+
+.mobile-brand-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+  color: var(--text-main);
+}
+
+.mobile-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-emerald);
+  box-shadow: 0 0 6px var(--accent-emerald);
+}
+
+.mobile-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mobile-action-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-glass);
+  color: var(--text-main);
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mobile-action-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--primary);
+}
+
+/* 移动端紧凑指标胶囊条 */
+.mobile-metrics-strip {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 6px;
+}
+
+.mobile-metric-pill {
+  flex: 1;
+  height: 36px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 0.8rem;
+  backdrop-filter: blur(8px);
+}
+
+.pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.node-dot {
+  background: var(--primary);
+  box-shadow: 0 0 6px var(--primary);
+}
+
+.user-dot {
+  background: #818cf8;
+  box-shadow: 0 0 6px #818cf8;
+}
+
+.pill-title {
+  color: var(--text-muted);
+  margin-left: 6px;
+  margin-right: auto;
+  font-size: 0.78rem;
+}
+
+.pill-val {
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-main);
+  font-size: 0.92rem;
+}
+
+/* 桌面端断点与隐藏 */
+@media (max-width: 767px) {
+  .desktop-metrics {
+    display: none !important;
+  }
+  .app-content-container {
+    padding: 0 12px;
+  }
 }
 
 @media (min-width: 768px) {
+  .mobile-topbar,
+  .mobile-metrics-strip,
+  .mobile-tab-nav,
+  .mobile-nav-anchor {
+    display: none !important;
+  }
   .desktop-sidebar-container {
     display: block;
   }
-  .mobile-only-header,
-  .mobile-only-tabs {
-    display: none !important;
+  .desktop-metrics {
+    display: grid !important;
   }
   .app-viewport {
     margin-left: 68px; /* 中屏 Rail 紧凑窄条宽度 */
@@ -403,6 +610,63 @@ provide('metrics', updateMetrics)
     padding-left: 32px;
     padding-right: 32px;
   }
+}
+
+/* 移动端 Token 弹窗 */
+.mobile-token-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.mobile-token-modal-card {
+  width: min(92vw, 360px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-glass);
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: var(--shadow-lg);
+  animation: popIn 0.18s ease-out;
+}
+
+.mobile-token-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.mobile-token-modal-header h4 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.mobile-token-modal-tip {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+  line-height: 1.4;
+}
+
+.mobile-token-input-wrap {
+  position: relative;
+  margin-bottom: 16px;
+}
+
+.mobile-token-input-wrap input {
+  padding-right: 36px;
+}
+
+.mobile-token-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .tab-sticky-anchor {
