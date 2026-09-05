@@ -138,13 +138,9 @@ onMounted(fetchNodes)
           </div>
         </div>
         <div class="node-card-actions">
-          <button class="btn btn-secondary btn-sm" @click="openEdit(node)">
-            ✏️ {{ t('common.edit') }}
-          </button>
-          <button class="btn btn-danger btn-sm"
-            @click="popover.show($event.currentTarget as Element, t('nodes.deleteNodeConfirm'), () => removeNode(node.id))">
-            🗑️ {{ t('common.delete') }}
-          </button>
+          <IconButton icon="edit" :tip="t('common.edit')" variant="secondary" @click="openEdit(node)" />
+          <IconButton icon="delete" :tip="t('common.delete')" variant="danger"
+            @click="popover.show($event.currentTarget as Element, t('nodes.deleteNodeConfirm'), () => removeNode(node.id))" />
         </div>
       </div>
     </div>

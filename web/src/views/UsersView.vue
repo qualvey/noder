@@ -229,7 +229,7 @@ onMounted(fetchData)
             <th style="min-width: 260px">{{ t('users.colCredentials') }}</th>
             <th style="width: 120px; text-align: center">{{ t('users.colBoundNodes') }}</th>
             <th style="width: 100px; text-align: center">{{ t('users.colStatus') }}</th>
-            <th style="width: 140px; text-align: center">{{ t('users.colActions') }}</th>
+            <th style="width: 90px; text-align: center">{{ t('users.colActions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -315,9 +315,9 @@ onMounted(fetchData)
             </td>
             <td style="text-align: center">
               <div style="display: flex; gap: 8px; justify-content: center; align-items: center; white-space: nowrap">
-                <button class="btn btn-secondary btn-sm" @click="openEdit(user)">✏️ {{ t('common.edit') }}</button>
-                <button class="btn btn-danger btn-sm"
-                  @click="popover.show($event.currentTarget as Element, t('users.deleteConfirm'), () => removeUser(user.id))">🗑️ {{ t('common.delete') }}</button>
+                <IconButton icon="edit" :tip="t('common.edit')" variant="secondary" @click="openEdit(user)" />
+                <IconButton icon="delete" :tip="t('common.delete')" variant="danger"
+                  @click="popover.show($event.currentTarget as Element, t('users.deleteConfirm'), () => removeUser(user.id))" />
               </div>
             </td>
           </tr>
