@@ -17,8 +17,10 @@ const showModal = ref(false)
 const editingNode = ref<Node | null>(null)
 const loading = ref(true)
 
-async function fetchNodes() {
-  loading.value = true
+async function fetchNodes(silent = false) {
+  if (!silent && !nodes.value.length) {
+    loading.value = true
+  }
   try {
     nodes.value = await api.nodes.list()
     updateMetrics(nodes.value.length, nodes.value.length) // users 由 UsersView 覆盖
@@ -39,11 +41,28 @@ function openEdit(n: Node) {
   showModal.value = true
 }
 
-function removeNode(id: number) {
-  api.nodes.remove(id).then(() => {
+async function removeNode(id: number) {
+  const prevNodes = [...nodes.value]
+  // 乐观更新：直接剔除节点，触发 FLIP 平滑过渡与移位
+  nodes.value = nodes.value.filter((n) => n.id !== id)
+  if (selected.value.has(id)) {
+    const s = new Set(selected.value)
+    s.delete(id)
+    selected.value = s
+  }
+  updateMetrics(nodes.value.length, nodes.value.length)
+
+  try {
+    await api.nodes.remove(id)
     toast(t('nodes.deleted'))
-    fetchNodes()
-  }).catch((e) => toast(e.message, 'error'))
+    // 静默对齐后端最新数据，不触发全屏加载与重绘跳动
+    await fetchNodes(true)
+  } catch (e) {
+    // 异常时优雅回滚
+    nodes.value = prevNodes
+    updateMetrics(prevNodes.length, prevNodes.length)
+    toast((e as Error).message, 'error')
+  }
 }
 
 function toggleSelect(id: number) {
@@ -62,20 +81,45 @@ function bulkDelete(e: MouseEvent) {
   const count = selected.value.size
   if (!count) return
   popover.show(e.currentTarget as Element, t('nodes.bulkDeleteConfirm', { count }), async () => {
-    for (const id of selected.value) {
-      try {
-        await api.nodes.remove(id)
-      } catch {
-        /* 继续删下一个 */
-      }
-    }
+    const idsToDelete = Array.from(selected.value)
+    const prevNodes = [...nodes.value]
+
+    // 乐观更新：批量从视图移除
+    nodes.value = nodes.value.filter((n) => !selected.value.has(n.id))
     selected.value = new Set()
-    toast(t('nodes.bulkDeleteSuccess', { count }))
-    fetchNodes()
+    updateMetrics(nodes.value.length, nodes.value.length)
+
+    try {
+      for (const id of idsToDelete) {
+        try {
+          await api.nodes.remove(id)
+        } catch {
+          /* 继续删下一个 */
+        }
+      }
+      toast(t('nodes.bulkDeleteSuccess', { count }))
+      await fetchNodes(true)
+    } catch {
+      nodes.value = prevNodes
+      updateMetrics(prevNodes.length, prevNodes.length)
+    }
   })
 }
 
-onMounted(fetchNodes)
+// 离开动画钩子：记录元素离开瞬间的绝对几何尺寸与位移，保证兄弟卡片丝滑重排 (FLIP)
+function onBeforeLeave(el: Element) {
+  const htmlEl = el as HTMLElement
+  const rect = htmlEl.getBoundingClientRect()
+  const parentRect = htmlEl.parentElement?.getBoundingClientRect()
+  if (parentRect) {
+    htmlEl.style.left = `${rect.left - parentRect.left}px`
+    htmlEl.style.top = `${rect.top - parentRect.top}px`
+    htmlEl.style.width = `${rect.width}px`
+    htmlEl.style.height = `${rect.height}px`
+  }
+}
+
+onMounted(() => fetchNodes())
 </script>
 
 <template>
@@ -97,19 +141,25 @@ onMounted(fetchNodes)
       </div>
     </div>
 
-    <div class="cards-grid">
-      <div v-if="loading" class="loading-container">
-        <!-- SVG 转圈 -->
-        <svg class="spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle class="spinner-track" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="spinner-head" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-        </svg>
-        <span class="loading-text">{{ t('nodes.loadingData') }}</span>
-      </div>
-      <div v-else-if="!nodes.length"
-        style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-muted)">
-        {{ t('nodes.emptyText') }}
-      </div>
+    <div v-if="loading && !nodes.length" class="loading-container">
+      <!-- SVG 转圈 -->
+      <svg class="spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="spinner-track" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="spinner-head" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+      </svg>
+      <span class="loading-text">{{ t('nodes.loadingData') }}</span>
+    </div>
+    <div v-else-if="!nodes.length"
+      style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-muted)">
+      {{ t('nodes.emptyText') }}
+    </div>
+    <TransitionGroup
+      v-else
+      name="node-list"
+      tag="div"
+      class="cards-grid"
+      @before-leave="onBeforeLeave"
+    >
       <div v-for="node in nodes" :key="node.id" class="node-card" :class="{ selected: selected.has(node.id) }">
         <div class="node-card-header">
           <div style="display: flex; align-items: center; gap: 8px">
@@ -117,7 +167,7 @@ onMounted(fetchNodes)
               style="cursor: pointer" />
             <div class="node-title">{{ node.tag || node.node_name }}</div>
           </div>
-          <span class="badge" :class="`badge-${node.protocol}`">{{ node.protocol.toUpperCase() }}</span>
+          <span class="badge" :class="`badge-${node.protocol}`">{{ node.protocol?.toUpperCase() || '' }}</span>
         </div>
         <div class="node-details">
           <div class="detail-row">
@@ -147,8 +197,8 @@ onMounted(fetchNodes)
             @click="popover.show($event.currentTarget as Element, t('nodes.deleteNodeConfirm'), () => removeNode(node.id))" />
         </div>
       </div>
-    </div>
+    </TransitionGroup>
   </section>
 
-  <NodeFormModal :open="showModal" :editing="editingNode" @close="showModal = false" @saved="fetchNodes" />
+  <NodeFormModal :open="showModal" :editing="editingNode" @close="showModal = false" @saved="() => fetchNodes(true)" />
 </template>
