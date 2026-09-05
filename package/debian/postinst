@@ -20,13 +20,38 @@ case "$1" in
         mkdir -p "${DATA_DIR}" "${DATA_DIR}/data/files"
         chmod 755 "${DATA_DIR}"
 
-        # 2. 检查并补全 /etc/noder/noder.env 中的随机 Token
+        # 自动平滑迁移旧版 /opt/sub-server 中的数据与文件
+        OLD_DIR="/opt/sub-server"
+        if [[ -f "${OLD_DIR}/data.db" ]]; then
+            NEW_SIZE=$(stat -c%s "${DATA_DIR}/data.db" 2>/dev/null || echo 0)
+            OLD_SIZE=$(stat -c%s "${OLD_DIR}/data.db" 2>/dev/null || echo 0)
+            if [[ ! -f "${DATA_DIR}/data.db" || "${NEW_SIZE}" -lt "${OLD_SIZE}" ]]; then
+                echo "[INFO] 检测到旧版数据库，正在迁移至 ${DATA_DIR}/data.db ..."
+                cp -a "${OLD_DIR}/data.db" "${DATA_DIR}/data.db"
+                if [[ -d "${OLD_DIR}/data/files" ]]; then
+                    cp -rn "${OLD_DIR}/data/files/"* "${DATA_DIR}/data/files/" 2>/dev/null || true
+                fi
+            fi
+        fi
+
+        # 2. 检查并补全 /etc/noder/noder.env 中的 Token（优先保留旧版 Token）
         if [[ -f "${CONFIG_FILE}" ]]; then
             TOKEN_VAL=$(grep -E '^ADMIN_SECRET_TOKEN=' "${CONFIG_FILE}" | cut -d'=' -f2- | tr -d ' "\r\n' || true)
             if [[ -z "${TOKEN_VAL}" ]]; then
-                # 生成 16 字节 (32 位十六进制) 安全随机密钥
-                RAND_TOKEN=$(openssl rand -hex 16 2>/dev/null || head -c 16 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 32 || echo "admin-secret-$(date +%s)")
-                sed -i "s|^ADMIN_SECRET_TOKEN=.*|ADMIN_SECRET_TOKEN=${RAND_TOKEN}|g" "${CONFIG_FILE}"
+                # 尝试从旧版 sub-server.service 中提取原有 Token
+                OLD_TOKEN=""
+                for svc in /etc/systemd/system/sub-server.service /etc/systemd/system/sub-server.service.bak-old; do
+                    if [[ -f "$svc" ]]; then
+                        OLD_TOKEN=$(sed -n 's/.*ADMIN_SECRET_TOKEN="\([^"]*\)".*/\1/p' "$svc" | head -1)
+                        [[ -n "$OLD_TOKEN" ]] && break
+                    fi
+                done
+                if [[ -n "${OLD_TOKEN}" ]]; then
+                    TOKEN_VAL="${OLD_TOKEN}"
+                else
+                    TOKEN_VAL=$(openssl rand -hex 16 2>/dev/null || head -c 16 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 32 || echo "admin-secret-$(date +%s)")
+                fi
+                sed -i "s|^ADMIN_SECRET_TOKEN=.*|ADMIN_SECRET_TOKEN=${TOKEN_VAL}|g" "${CONFIG_FILE}"
             fi
             chmod 600 "${CONFIG_FILE}"
         fi
