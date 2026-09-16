@@ -134,7 +134,7 @@ const navItems = computed(() => [
     <div class="sidebar-header">
       <div class="brand-badge">⚡</div>
       <div class="brand-text" v-show="isExpanded">
-        <div class="brand-title">Sing-Box Sub</div>
+        <div class="brand-title">欢喜飞机</div>
         <div class="brand-subtitle">
           <span class="pulse-dot"></span>
           <span>{{ t('nav.systemOnline') }}</span>
