@@ -98,3 +98,42 @@ jobs:
           generate_release_notes: true
           # 检测 tag 是否包含 beta / alpha / rc，若包含则自动设为预发布
           prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-rc') }}
+  deploy:
+    name: Deploy to production
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Download amd64 package
+        uses: actions/download-artifact@v4
+        with:
+          name: noder-deb-amd64
+          path: package
+
+      - name: Copy package to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: "package/*.deb"
+          target: "/tmp/noder-deploy"
+
+      - name: Install and restart service
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            set -e
+            sudo dpkg -i /tmp/noder-deploy/*.deb
+            sudo systemctl daemon-reload
+            sudo systemctl enable noder
+            sudo systemctl restart noder
+            sudo systemctl is-active --quiet noder
+            rm -rf /tmp/noder-deploy

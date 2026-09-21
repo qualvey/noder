@@ -192,28 +192,40 @@ async function submitUpload() {
   uploadedBytes.value = 0
   totalBytes.value = selectedFile.value?.size || 0
 
-  const fd = new FormData()
-  if (hasFile) fd.append('file', selectedFile.value!)
-  if (hasUrl) fd.append('source_url', form.value.sourceUrl.trim())
-  if (hasContent) fd.append('content_text', form.value.contentText)
-  fd.append('file_type', form.value.type)
-  fd.append('template_name', form.value.templateName.trim())
   const dlName = form.value.downloadName.trim()
-  if (dlName) {
-    fd.append('name', dlName)
-    fd.append('download_name', dlName)
-  }
-  fd.append('remark', form.value.remark.trim())
 
   try {
-    if (hasFile) {
-      await api.files.createWithProgress(fd, (pct, loaded, total) => {
-        uploadProgress.value = pct
-        uploadedBytes.value = loaded
-        totalBytes.value = total
+    if (hasUrl) {
+      // Remote files use the dedicated JSON endpoint. /api/files is the
+      // multipart local-upload endpoint and requires a file field.
+      await api.files.createRemote({
+        url: form.value.sourceUrl.trim(),
+        name: dlName || undefined,
+        download_name: dlName || undefined,
+        remark: form.value.remark.trim() || undefined,
+        file_type: form.value.type,
       })
     } else {
-      await api.files.create(fd)
+      const fd = new FormData()
+      if (hasFile) fd.append('file', selectedFile.value!)
+      if (hasContent) fd.append('content_text', form.value.contentText)
+      fd.append('file_type', form.value.type)
+      fd.append('template_name', form.value.templateName.trim())
+      if (dlName) {
+        fd.append('name', dlName)
+        fd.append('download_name', dlName)
+      }
+      fd.append('remark', form.value.remark.trim())
+
+      if (hasFile) {
+        await api.files.createWithProgress(fd, (pct, loaded, total) => {
+          uploadProgress.value = pct
+          uploadedBytes.value = loaded
+          totalBytes.value = total
+        })
+      } else {
+        await api.files.create(fd)
+      }
     }
 
     toast(hasUrl ? t('files.successRemoteAdded') : hasContent ? t('files.successTextSaved') : t('files.successUploaded'))

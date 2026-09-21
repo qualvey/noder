@@ -51,6 +51,13 @@ function Write-Success($msg) { Write-Host "[SUCCESS] $msg" -ForegroundColor Gree
 function Write-Warn($msg) { Write-Host "[WARN] $msg" -ForegroundColor Yellow }
 function Write-ErrorMsg($msg) { Write-Host "[ERROR] $msg" -ForegroundColor Red }
 
+$Version = "1.0.0"
+$GitTag = git describe --tags --abbrev=0 2>$null
+if ($LASTEXITCODE -eq 0 -and $GitTag) {
+    $Version = $GitTag.Trim() -replace '^v', ''
+}
+Write-Info "构建版本: $Version"
+
 # 1. 清理
 if ($Clean) {
     Write-Info "正在清理构建缓存..."
@@ -96,7 +103,7 @@ if ($Cross) {
         $env:GOOS = $targetOS
         $env:GOARCH = $targetArch
         $env:CGO_ENABLED = "0"
-        go build -ldflags "-s -w" -o $targetOut ./cmd/server
+        go build -ldflags "-s -w -X main.Version=$Version" -o $targetOut ./cmd/server
         if ($LASTEXITCODE -ne 0) {
             Write-ErrorMsg "交叉编译 $targetOS/$targetArch 失败！"
             exit $LASTEXITCODE
@@ -123,7 +130,7 @@ if (-not $FrontendOnly) {
     }
 
     # 编译 Go 可执行文件并剥离符号表以缩减体积
-    go build -ldflags "-s -w" -o noder.exe ./cmd/server
+    go build -ldflags "-s -w -X main.Version=$Version" -o noder.exe ./cmd/server
     if ($LASTEXITCODE -ne 0) {
         Write-ErrorMsg "Go 后端编译失败！"
         exit $LASTEXITCODE

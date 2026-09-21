@@ -1,12 +1,24 @@
 # Sing-Box Subscription Middleman (订阅中间件管理服务 - Noder)
 
-基于 Go + Gin + SQLite + Vue 3 打造的高性能 Sing-Box 与 Mihomo 节点与订阅动态生成中间件系统。
+基于 Go + Chi + SQLite + Vue 3 打造的 Sing-Box 与 Mihomo 节点及订阅动态生成中间件系统。
 
 采用 **方案 3：独立凭证与动态拼接** 架构设计：
 - **`Node` 表**：仅存储服务器基础设施属性（IP、端口、协议类型、TLS SNI、传输方式等），**不存储任何用户鉴权信息（如 UUID 或密码）**。
 - **`User` 表**：存储用户个人标识、鉴权 Token、**专属 UUID / Password** 以及绑定的节点 ID。
 - **动态拼接引擎**：当用户请求订阅链接或验证接口时，服务端从 `Node` 表提取服务器信息，并结合 `User` 表该用户的专属 UUID 和密码，在内存中动态组装为完整的 Sing-Box / Mihomo 节点配置。
 - **单二进制自包含**：Go 内嵌前端静态页面（`//go:embed`），开箱即用，无 Python 运行时与虚拟环境依赖，秒级冷启动与极低内存开销。
+
+## 🧭 项目概览
+
+- `cmd/server/`：服务启动、路由注册和嵌入式 SPA 托管
+- `internal/handler/`：节点、用户、文件、模板、设置和订阅 API
+- `internal/service/`：Sing-Box/Mihomo 配置生成、文件分发和模板渲染
+- `internal/model/`、`internal/db/`：SQLite 数据模型、初始化与迁移
+- `internal/contract/`：协议字段校验及核心能力注册
+- `web/`：Vue 3 + TypeScript 管理面板源码
+- `templates/`、`static/`：默认配置模板与前端构建产物
+
+完整 API 字段、鉴权方式、请求示例和状态码见 **[API 参考](doc/api.md)**。
 
 ---
 
@@ -86,6 +98,8 @@ make deb-all        # 构建 amd64 与 arm64 架构 deb 包
 ---
 
 ## 📡 核心 API 端点说明
+
+> 本节为快速索引；完整接口以 **[doc/api.md](doc/api.md)** 为准。
 
 ### 1. 客户端订阅导出 API (公开 / 用户侧)
 - **请求方法**：`GET /sub?token={USER_TOKEN}`

@@ -23,6 +23,8 @@ import (
 	"noder/internal/handler"
 )
 
+var Version = "dev"
+
 func main() {
 	config.Init("")
 
@@ -77,7 +79,7 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("Noder (Go Edition) server listening on http://0.0.0.0:%s", port)
+		log.Printf("Noder (Go Edition %s) server listening on http://0.0.0.0:%s", Version, port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Server error: %v", err)
 		}

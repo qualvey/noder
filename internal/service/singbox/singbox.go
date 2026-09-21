@@ -1,7 +1,9 @@
 package singbox
 
 import (
+	"errors"
 	"encoding/json"
+	"log"
 	"os"
 
 	"noder/internal/config"
@@ -179,21 +181,22 @@ func BuildSingboxOutbound(node *model.Node, user *model.User) (map[string]interf
 	return outbound, nil
 }
 
-func LoadSingboxTemplate() map[string]interface{} {
-	if data, err := os.ReadFile(config.SingBoxTemplatePath); err == nil && len(data) > 0 {
-		var res map[string]interface{}
-		if err := json.Unmarshal(data, &res); err == nil {
-			return res
-		}
+func LoadSingboxTemplate() (map[string]interface{}, error) {
+	data, err := os.ReadFile(config.SingBoxTemplatePath)
+	if err != nil {
+		log.Printf("Failed to read singbox template: %v", err)
+		return nil, err
 	}
-	return map[string]interface{}{
-		"log": map[string]interface{}{"level": "info", "timestamp": true},
-		"outbounds": []interface{}{
-			map[string]interface{}{"type": "direct", "tag": "direct"},
-			map[string]interface{}{"tag": "Proxy", "type": "selector", "outbounds": []interface{}{"urltest"}},
-			map[string]interface{}{"tag": "urltest", "type": "urltest", "outbounds": []interface{}{}},
-		},
+	if len(data) == 0 {
+		log.Printf("Singbox template file is empty")
+		return nil, errors.New("empty singbox template")
 	}
+	var res map[string]interface{}
+	if err := json.Unmarshal(data, &res); err != nil {
+		log.Printf("Failed to unmarshal singbox template: %v", err)
+		return nil, err
+	}
+	return res, nil
 }
 
 func GenerateSingboxConfig(nodes []*model.Node, user *model.User) (map[string]interface{}, error) {
@@ -215,7 +218,10 @@ func GenerateSingboxConfig(nodes []*model.Node, user *model.User) (map[string]in
 		nodeTags = append(nodeTags, n.Tag)
 	}
 
-	cfg := LoadSingboxTemplate()
+	cfg, err := LoadSingboxTemplate()
+	if err != nil {
+		return nil, err
+	}
 
 	var rawOutbounds []interface{}
 	if obs, ok := cfg["outbounds"].([]interface{}); ok {

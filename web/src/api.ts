@@ -65,6 +65,13 @@ export const api = {
   files: {
     list: () => request<DistFile[]>('/api/files'),
     create: (fd: FormData) => request<DistFile>('/api/files', { method: 'POST', body: fd }),
+    createRemote: (body: {
+      url: string
+      name?: string
+      remark?: string
+      download_name?: string
+      file_type?: string
+    }) => request<DistFile>('/api/files/remote', { method: 'POST', body }),
     createWithProgress: (
       fd: FormData,
       onProgress?: (percent: number, loaded: number, total: number) => void
