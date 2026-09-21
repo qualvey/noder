@@ -103,7 +103,7 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    environment: production
+    environment: CD
 
     steps:
       - name: Download amd64 package
