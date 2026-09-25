@@ -3,7 +3,7 @@ import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { LocaleType } from '../i18n'
 
-export type TabKey = 'nodes' | 'users' | 'files' | 'help'
+export type TabKey = 'nodes' | 'users' | 'files' | 'help' | 'tools'
 
 const props = defineProps<{
   activeTab: TabKey
@@ -116,6 +116,12 @@ const navItems = computed(() => [
     badge: undefined,
     icon: 'help',
   },
+  {
+    key: 'tools' as const,
+    label: '实用工具',
+    badge: undefined,
+    icon: 'tools',
+  },
 ])
 </script>
 
@@ -176,12 +182,15 @@ const navItems = computed(() => [
             <line x1="16" y1="17" x2="8" y2="17"></line>
             <polyline points="10 9 9 9 8 9"></polyline>
           </svg>
-          <!-- Help Icon -->
-          <svg v-else class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+           <!-- Help / tools icon -->
+           <svg v-else-if="item.icon === 'help'" class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10"></circle>
             <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
             <line x1="12" y1="17" x2="12.01" y2="17"></line>
-          </svg>
+           </svg>
+           <svg v-else class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+             <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.1 2.1-2.1-2.1z" />
+           </svg>
         </span>
 
         <span class="nav-label" v-show="isExpanded">{{ item.label }}</span>

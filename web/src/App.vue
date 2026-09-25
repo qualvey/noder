@@ -117,10 +117,20 @@ function handleGlobalScrollOrResize() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('scroll', handleGlobalScrollOrResize, { passive: true })
   window.addEventListener('resize', handleGlobalScrollOrResize, { passive: true })
+
+  // Session storage is only a UI cache; revalidate the cached token after reload.
+  if (sessionStorage.getItem('noder_unlocked') === 'true' && getAdminToken()) {
+    if (await validateAdminToken(getAdminToken())) {
+      isUnlocked.value = true
+    } else {
+      sessionStorage.removeItem('noder_unlocked')
+      setAdminToken('')
+    }
+  }
 })
 
 onBeforeUnmount(() => {
@@ -144,8 +154,8 @@ function toggleLocale() {
 }
 
 // 页面状态
-const activeTab = ref<'nodes' | 'users' | 'files' | 'help'>('nodes')
-const adminTokenInput = ref(localStorage.getItem('admin_token') || 'admin-secret')
+const activeTab = ref<'nodes' | 'users' | 'files' | 'help' | 'tools'>('nodes')
+const adminTokenInput = ref(getAdminToken() || 'admin-secret')
 const showToken = ref(false)
 const metrics = ref({ nodes: 0, users: 0 })
 
@@ -164,6 +174,7 @@ const tabs = computed(() => [
   { key: 'users' as const, label: t('nav.users') },
   { key: 'files' as const, label: t('nav.files') },
   { key: 'help' as const, label: t('nav.help') },
+  { key: 'tools' as const, label: '实用工具' },
 ])
 const tabIndex = computed(() => tabs.value.findIndex((t) => t.key === activeTab.value))
 
@@ -231,31 +242,46 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', handleTabNavScroll)
 })
 
-import { getAdminToken, setAdminToken } from './api'
+import { getAdminToken, setAdminToken, validateAdminToken } from './api'
 import NodesView from './views/NodesView.vue'
 import UsersView from './views/UsersView.vue'
 import FilesView from './views/FilesView.vue'
 import HelpView from './views/HelpView.vue'
+import ToolsView from './views/ToolsView.vue'
 
-const isUnlocked = ref(sessionStorage.getItem('noder_unlocked') === 'true')
+const isUnlocked = ref(false)
 const unlockInput = ref('')
 const unlockError = ref(false)
 const showUnlockPassword = ref(false)
 
-function unlock() {
-  if (unlockInput.value === getAdminToken()) {
-    sessionStorage.setItem('noder_unlocked', 'true')
-    isUnlocked.value = true
-    unlockInput.value = ''
-    unlockError.value = false
+async function unlock() {
+  const token = unlockInput.value.trim()
+  if (!token) {
+    unlockError.value = true
     return
   }
 
+  try {
+    if (await validateAdminToken(token)) {
+      setAdminToken(token)
+      sessionStorage.setItem('noder_unlocked', 'true')
+      isUnlocked.value = true
+      unlockInput.value = ''
+      unlockError.value = false
+      return
+    }
+  } catch {
+    // Keep the same message for invalid credentials and unavailable servers.
+  }
+
+  setAdminToken('')
+  sessionStorage.removeItem('noder_unlocked')
   unlockError.value = true
 }
 
 function saveToken() {
-  setAdminToken(adminTokenInput.value.trim())
+  const token = adminTokenInput.value.trim()
+  setAdminToken(token)
   showToast(t('nav.adminTokenSaved'))
   window.location.reload()
 }
@@ -409,7 +435,7 @@ provide('metrics', updateMetrics)
 
       <main class="container app-content-container">
         <!-- 桌面端 (>= 768px) 宽幅卡片 -->
-        <div class="metrics-grid desktop-metrics">
+        <div v-if="activeTab !== 'tools'" class="metrics-grid desktop-metrics">
           <div class="metric-card">
             <div class="metric-info">
               <h4>{{ t('nav.nodesOnline') }}</h4>
@@ -427,7 +453,7 @@ provide('metrics', updateMetrics)
         </div>
 
         <!-- 移动端 (< 768px) 紧凑单行胶囊条 (超薄 34px，极省空间) -->
-        <div class="mobile-metrics-strip">
+        <div v-if="activeTab !== 'tools'" class="mobile-metrics-strip">
           <div class="mobile-metric-pill">
             <span class="pill-dot node-dot"></span>
             <span class="pill-title">{{ t('nav.nodesOnline') }}</span>
@@ -447,14 +473,14 @@ provide('metrics', updateMetrics)
           <div
             class="tab-slider"
             :style="{
-              width: 'calc((100% - 12px) / 4)',
+               width: 'calc((100% - 12px) / 5)',
               transform: `translateX(calc(${tabIndex} * 100%))`,
             }"
           >
             <div
               class="tab-slider-inner"
               :style="{
-                transform: `translateX(calc(-${tabIndex} * 25%))`,
+                 transform: `translateX(calc(-${tabIndex} * 20%))`,
               }"
             ></div>
           </div>
@@ -474,7 +500,8 @@ provide('metrics', updateMetrics)
           <NodesView v-if="activeTab === 'nodes'" />
           <UsersView v-else-if="activeTab === 'users'" />
           <FilesView v-else-if="activeTab === 'files'" />
-          <HelpView v-else />
+          <HelpView v-else-if="activeTab === 'help'" />
+          <ToolsView v-else />
         </div>
       </main>
     </div>
@@ -1040,7 +1067,7 @@ provide('metrics', updateMetrics)
   top: 0;
   z-index: 110;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   margin: 18px 0 20px;
   padding: 6px;
   border: 1px solid rgba(255, 255, 255, 0.05);
@@ -1095,7 +1122,7 @@ provide('metrics', updateMetrics)
   top: 0;
   bottom: 0;
   left: 0;
-  width: 400%;
+   width: 500%;
   height: 100%;
   background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 30%, #38bdf8 70%, #06b6d4 100%);
   transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
