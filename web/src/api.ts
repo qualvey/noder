@@ -7,15 +7,51 @@ export function apiBase(): string {
   return base.endsWith('/') ? base.slice(0, -1) : base
 }
 
-let adminToken = localStorage.getItem('admin_token') || 'admin-secret'
+const ADMIN_TOKEN_KEY = 'noder_admin_token'
+
+function loadAdminToken(): string {
+  try {
+    return sessionStorage.getItem(ADMIN_TOKEN_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+let adminToken = loadAdminToken()
 
 export function getAdminToken(): string {
   return adminToken
 }
 
 export function setAdminToken(t: string): void {
-  adminToken = t
-  localStorage.setItem('admin_token', t)
+  const next = t.trim()
+  adminToken = next
+
+  try {
+    if (next) {
+      sessionStorage.setItem(ADMIN_TOKEN_KEY, next)
+    } else {
+      sessionStorage.removeItem(ADMIN_TOKEN_KEY)
+    }
+  } catch {
+    // 某些隐私模式或浏览器限制下，sessionStorage 可能不可用，直接忽略即可
+  }
+}
+
+export function clearAdminToken(): void {
+  adminToken = ''
+  try {
+    sessionStorage.removeItem(ADMIN_TOKEN_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+export async function validateAdminToken(token: string): Promise<boolean> {
+  const res = await fetch(apiBase() + '/api/auth/check', {
+    headers: { 'X-Admin-Token': token },
+  })
+  return res.ok
 }
 
 export class ApiError extends Error {

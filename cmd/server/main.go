@@ -53,6 +53,7 @@ func main() {
 	}))
 
 	// 注册业务 API 路由
+	handler.RegisterAuthRoutes(r)
 	handler.RegisterNodeRoutes(r)
 	handler.RegisterUserRoutes(r)
 	handler.RegisterTemplateRoutes(r)

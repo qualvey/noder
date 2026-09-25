@@ -1,11 +1,13 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath, URL } from 'node:url'
 
 // 构建产物输出到后端 static/（后端挂载 /static 与 "/" 兜底）
 export default defineConfig({
   plugins: [
-    vue()
+    vue(),
+    tailwindcss(),
   ],
   "resolve": {
     "alias": {

@@ -7,6 +7,8 @@ import (
 
 	"noder/internal/config"
 	"noder/internal/contract"
+	"noder/internal/db"
+	"noder/internal/model"
 )
 
 func RespondJSON(w http.ResponseWriter, status int, data interface{}) {
@@ -29,7 +31,14 @@ func HandleAPIError(w http.ResponseWriter, err error) {
 
 func AdminAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expected := config.AdminSecretToken
+		var setting model.AppSetting
+		expected := ""
+		if err := db.DB.NewSelect().Model(&setting).Where("key = ?", "admin_secret_token").Scan(r.Context()); err == nil {
+			expected = setting.Value
+		} else {
+			// 兼容数据库初始化失败或旧运行模式。
+			expected = config.AdminSecretToken
+		}
 		if expected == "" {
 			next.ServeHTTP(w, r)
 			return

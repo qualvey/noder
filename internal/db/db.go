@@ -90,6 +90,17 @@ func randomHex(bytesLen int) string {
 }
 
 func SeedDefaultData(ctx context.Context) error {
+	// 管理员密钥迁移到数据库。已有部署首次启动时从环境变量导入。
+	var adminSetting model.AppSetting
+	adminErr := DB.NewSelect().Model(&adminSetting).Where("key = ?", "admin_secret_token").Scan(ctx)
+	if adminErr != nil {
+		if _, err := DB.NewInsert().Model(&model.AppSetting{
+			Key: "admin_secret_token", Value: config.AdminSecretToken,
+		}).Exec(ctx); err != nil {
+			return err
+		}
+	}
+
 	// 确保 shared_download_token 存在
 	var setting model.AppSetting
 	err := DB.NewSelect().Model(&setting).Where("key = ?", "shared_download_token").Scan(ctx)
@@ -108,15 +119,15 @@ func SeedDefaultData(ctx context.Context) error {
 	}
 
 	tuicNode := &model.Node{
-		NodeName:      "TUIC 高速专线 01",
-		Tag:           "tuic-01",
-		Protocol:      "tuic",
-		ServerAddress: "tuic.example.com",
-		ServerPort:    8443,
-		Security:      "tls",
-		SNI:           strPtr("tuic.example.com"),
+		NodeName:          "TUIC 高速专线 01",
+		Tag:               "tuic-01",
+		Protocol:          "tuic",
+		ServerAddress:     "tuic.example.com",
+		ServerPort:        8443,
+		Security:          "tls",
+		SNI:               strPtr("tuic.example.com"),
 		CongestionControl: strPtr("bbr"),
-		IsActive:      true,
+		IsActive:          true,
 	}
 
 	vlessNode := &model.Node{
