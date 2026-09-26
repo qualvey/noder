@@ -10,10 +10,14 @@ const {
   inputText,
   supportedHandlers,
   conversionDirection,
-  parsedConfig,
+  parsedConfigs,
+  activeConfig,
+  activeNodeIndex,
+  nodeCount,
   parseError,
-  shareLink,
-  shareLinkJson,
+  allShareLinksText,
+  allShareJsonText,
+  activeShareLink,
   configDetails,
   handlePasteSample,
   handleClear,
@@ -31,7 +35,7 @@ const {
     <header class="tool-intro">
       <div>
         <h2>节点配置转换</h2>
-        <p>在 Sing-box JSON 与 VLESS / TUIC 等分享链接之间快速转换。</p>
+        <p>在 Sing-box JSON 与 VLESS / TUIC 等分享链接之间快速转换，支持单/多节点批量解析。</p>
       </div>
       <div class="flex flex-1 justify-center">
         <div class="direction-switch">
@@ -105,8 +109,8 @@ const {
             v-model="inputText"
             :placeholder="
               conversionDirection === 'json2link'
-                ? '粘贴 sing-box 的 VLESS 或 TUIC 出站配置 JSON…'
-                : '粘贴 vless:// 或 tuic:// 分享链接…'
+                ? '粘贴 sing-box 出站配置 JSON（支持单个对象、数组或逗号分隔的多节点）…'
+                : '粘贴分享链接（支持单行或多行 vless://、tuic://）…'
             "
           ></textarea>
         </div>
@@ -114,8 +118,8 @@ const {
           <span>{{ inputText.length }} 个字符</span>
           <span>{{
             conversionDirection === 'json2link'
-              ? '支持 sing-box 1.18+'
-              : '支持 vless:// / tuic://'
+              ? '支持 sing-box 1.18+ / 多节点数组'
+              : '支持 vless:// / tuic:// (可多行)'
           }}</span>
         </footer>
       </section>
@@ -123,53 +127,64 @@ const {
       <!-- 输出区域 -->
       <section class="transfer-card output-card">
         <div class="card-heading">
-          <div>
+          <div class="flex items-center gap-2">
             <h3>
               {{
                 conversionDirection === 'json2link'
-                  ? `${(parsedConfig?.type as string)?.toUpperCase() || '节点'} 标准链接`
+                  ? `${nodeCount > 1 ? '批量' : (activeConfig?.type as string)?.toUpperCase() || '节点'} 标准链接`
                   : 'Sing-box 配置 JSON'
               }}
             </h3>
+            <span v-if="nodeCount > 0 && !parseError" class="valid-badge">
+              {{ nodeCount > 1 ? `已识别 ${nodeCount} 个节点` : '已识别' }}
+            </span>
           </div>
-          <span v-if="parsedConfig && !parseError" class="valid-badge">已识别</span>
+          <!-- 多节点预览切换器 -->
+          <div v-if="nodeCount > 1" class="node-selector">
+            <label for="node-select">当前节点:</label>
+            <select id="node-select" v-model="activeNodeIndex">
+              <option v-for="(cfg, idx) in parsedConfigs" :key="idx" :value="idx">
+                #{{ idx + 1 }} {{ cfg.tag || cfg.server }} ({{ (cfg.type as string).toUpperCase() }})
+              </option>
+            </select>
+          </div>
         </div>
 
-        <div v-if="parsedConfig && !parseError" class="output-content">
+        <div v-if="nodeCount > 0 && !parseError" class="output-content">
           <div class="result-box">
             <textarea
               readonly
-              :value="conversionDirection === 'json2link' ? shareLink : shareLinkJson"
+              :value="conversionDirection === 'json2link' ? allShareLinksText : allShareJsonText"
             ></textarea>
             <button
               @click="
-                handleCopy(conversionDirection === 'json2link' ? shareLink : shareLinkJson)
+                handleCopy(conversionDirection === 'json2link' ? allShareLinksText : allShareJsonText)
               "
             >
-              复制
+              {{ nodeCount > 1 ? '复制全部' : '复制' }}
             </button>
           </div>
           <div class="output-meta">
-            <div v-if="shareLink" class="qr-box">
-              <qrcode-vue :value="shareLink" :size="126" level="L" render-as="svg" />
-              <small>扫码导入</small>
+            <div v-if="activeShareLink" class="qr-box">
+              <qrcode-vue :value="activeShareLink" :size="126" level="L" render-as="svg" />
+              <small>{{ nodeCount > 1 ? `扫码导入 (#${activeNodeIndex + 1})` : '扫码导入' }}</small>
             </div>
             <div class="summary text-2xl">
               <dl class="w-full">
                 <div class="grid grid-cols-3 gap-4 w-full">
                   <div>
                     <dt>节点名称</dt>
-                    <dd>{{ parsedConfig?.tag || '未命名' }}</dd>
+                    <dd>{{ activeConfig?.tag || '未命名' }}</dd>
                   </div>
                   <div>
                     <dt>协议</dt>
                     <dd class="accent">
-                      {{ (parsedConfig?.type as string)?.toUpperCase() }}
+                      {{ (activeConfig?.type as string)?.toUpperCase() }}
                     </dd>
                   </div>
                   <div>
                     <dt>服务器</dt>
-                    <dd>{{ parsedConfig?.server }}:{{ parsedConfig?.server_port }}</dd>
+                    <dd>{{ activeConfig?.server }}:{{ activeConfig?.server_port }}</dd>
                   </div>
                 </div>
               </dl>
@@ -183,12 +198,17 @@ const {
       </section>
     </div>
 
-    <!-- 详细参数列表 -->
-    <section v-if="parsedConfig && !parseError" class="transfer-card details-card">
+    <!-- 详细参数列表 (展示当前选中的节点) -->
+    <section v-if="activeConfig && !parseError" class="transfer-card details-card">
       <div class="card-heading">
         <div>
           <span class="card-kicker">DETAILS</span>
-          <h3>配置参数</h3>
+          <h3>
+            配置参数
+            <span v-if="nodeCount > 1" class="details-subtitle">
+              — #{{ activeNodeIndex + 1 }} {{ activeConfig?.tag || activeConfig?.server }}
+            </span>
+          </h3>
         </div>
       </div>
       <div class="details-list">
@@ -230,6 +250,12 @@ const {
   letter-spacing: 0.13em;
 }
 
+.details-subtitle {
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
 .tool-intro h2 {
   margin: 5px 0;
   font-size: 1.2rem;
@@ -242,12 +268,36 @@ const {
 }
 
 .valid-badge {
-  padding: 5px 8px;
+  padding: 4px 7px;
   border-radius: 6px;
   background: color-mix(in srgb, var(--primary) 12%, transparent);
   color: var(--primary);
   font-size: 0.62rem;
   font-weight: 800;
+  white-space: nowrap;
+}
+
+.node-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.node-selector select {
+  padding: 4px 8px;
+  border: 1px solid var(--border-glass);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--text-main);
+  font-size: 0.68rem;
+  outline: none;
+  cursor: pointer;
+}
+
+.node-selector select:focus {
+  border-color: var(--primary);
 }
 
 .direction-switch {
@@ -308,14 +358,15 @@ const {
 
 .card-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 10px;
   margin-bottom: 15px;
 }
 
 .card-heading h3 {
-  margin: 4px 0 0;
+  margin: 0;
   font-size: 0.9rem;
 }
 
@@ -605,6 +656,7 @@ const {
 
   .card-heading {
     flex-direction: column;
+    align-items: flex-start;
   }
 
   .card-actions {
