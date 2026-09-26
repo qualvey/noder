@@ -120,6 +120,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           source: "package/*.deb"
           target: "/tmp/noder-deploy"
+          strip_components: 1
 
       - name: Install and restart service
         uses: appleboy/ssh-action@v1.2.0
@@ -130,9 +131,16 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             set -e
-            sudo dpkg -i /tmp/noder-deploy/*.deb
+            DEB_FILE=$(find /tmp/noder-deploy -type f -name "*.deb" | head -n 1)
+            if [ -z "$DEB_FILE" ]; then
+              echo "Error: No .deb file found in /tmp/noder-deploy"
+              ls -la /tmp/noder-deploy || true
+              exit 1
+            fi
+            echo "Installing $DEB_FILE ..."
+            sudo dpkg -i "$DEB_FILE"
             sudo systemctl daemon-reload
             sudo systemctl enable noder
             sudo systemctl restart noder
             sudo systemctl is-active --quiet noder
-            rm -rf /tmp/noder-deploy
+            sudo rm -rf /tmp/noder-deploy
