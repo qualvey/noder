@@ -10,20 +10,18 @@ const {
   inputText,
   supportedHandlers,
   conversionDirection,
-  parsedConfigs,
+  nodeResults,
   activeConfig,
   activeNodeIndex,
   nodeCount,
   parseError,
-  allShareLinksText,
-  allShareJsonText,
-  activeShareLink,
   configDetails,
   handlePasteSample,
   handleClear,
   handleDirectionChange,
   handleFormat,
   handleCopy,
+  handleCopyAll,
 } = useNodeTransfer({
   onSuccess: (msg) => toast?.(msg, 'success'),
   onError: (msg) => toast?.(msg, 'error'),
@@ -35,7 +33,7 @@ const {
     <header class="tool-intro">
       <div>
         <h2>节点配置转换</h2>
-        <p>在 Sing-box JSON 与 VLESS / TUIC 等分享链接之间快速转换，支持单/多节点批量解析。</p>
+        <p>在 Sing-box JSON 与 VLESS / TUIC 等分享链接之间转换，支持多节点独立解析与扫码。</p>
       </div>
       <div class="flex flex-1 justify-center">
         <div class="direction-switch">
@@ -124,73 +122,81 @@ const {
         </footer>
       </section>
 
-      <!-- 输出区域 -->
+      <!-- 输出区域 (每个节点分开展示：独立文本 + 独立二维码) -->
       <section class="transfer-card output-card">
         <div class="card-heading">
           <div class="flex items-center gap-2">
-            <h3>
-              {{
-                conversionDirection === 'json2link'
-                  ? `${nodeCount > 1 ? '批量' : (activeConfig?.type as string)?.toUpperCase() || '节点'} 标准链接`
-                  : 'Sing-box 配置 JSON'
-              }}
-            </h3>
+            <h3>转换结果</h3>
             <span v-if="nodeCount > 0 && !parseError" class="valid-badge">
-              {{ nodeCount > 1 ? `已识别 ${nodeCount} 个节点` : '已识别' }}
+              {{ nodeCount > 1 ? `共 ${nodeCount} 个节点` : '已识别' }}
             </span>
           </div>
-          <!-- 多节点预览切换器 -->
-          <div v-if="nodeCount > 1" class="node-selector">
-            <label for="node-select">当前节点:</label>
-            <select id="node-select" v-model="activeNodeIndex">
-              <option v-for="(cfg, idx) in parsedConfigs" :key="idx" :value="idx">
-                #{{ idx + 1 }} {{ cfg.tag || cfg.server }} ({{ (cfg.type as string).toUpperCase() }})
-              </option>
-            </select>
+          <div v-if="nodeCount > 1 && !parseError" class="card-actions">
+            <button class="copy-all-btn" @click="handleCopyAll">
+              复制全部 ({{ nodeCount }})
+            </button>
           </div>
         </div>
 
-        <div v-if="nodeCount > 0 && !parseError" class="output-content">
-          <div class="result-box">
-            <textarea
-              readonly
-              :value="conversionDirection === 'json2link' ? allShareLinksText : allShareJsonText"
-            ></textarea>
-            <button
-              @click="
-                handleCopy(conversionDirection === 'json2link' ? allShareLinksText : allShareJsonText)
-              "
-            >
-              {{ nodeCount > 1 ? '复制全部' : '复制' }}
-            </button>
-          </div>
-          <div class="output-meta">
-            <div v-if="activeShareLink" class="qr-box">
-              <qrcode-vue :value="activeShareLink" :size="126" level="L" render-as="svg" />
-              <small>{{ nodeCount > 1 ? `扫码导入 (#${activeNodeIndex + 1})` : '扫码导入' }}</small>
-            </div>
-            <div class="summary text-2xl">
-              <dl class="w-full">
-                <div class="grid grid-cols-3 gap-4 w-full">
-                  <div>
-                    <dt>节点名称</dt>
-                    <dd>{{ activeConfig?.tag || '未命名' }}</dd>
-                  </div>
-                  <div>
-                    <dt>协议</dt>
-                    <dd class="accent">
-                      {{ (activeConfig?.type as string)?.toUpperCase() }}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>服务器</dt>
-                    <dd>{{ activeConfig?.server }}:{{ activeConfig?.server_port }}</dd>
-                  </div>
+        <!-- 多节点结果列表 (每个节点：文本 + 二维码分开) -->
+        <div v-if="nodeCount > 0 && !parseError" class="node-results-list">
+          <article
+            v-for="(item, idx) in nodeResults"
+            :key="item.index"
+            class="node-result-item"
+            :class="{ active: activeNodeIndex === idx }"
+            @click="activeNodeIndex = idx"
+          >
+            <!-- 节点头部 -->
+            <header class="node-item-header">
+              <div class="node-item-title">
+                <span class="node-badge">#{{ item.index }}</span>
+                <span class="node-tag">{{ item.config.tag || '未命名节点' }}</span>
+                <span class="proto-tag">{{ (item.config.type as string).toUpperCase() }}</span>
+              </div>
+              <div class="node-item-server">
+                {{ item.config.server }}:{{ item.config.server_port }}
+              </div>
+            </header>
+
+            <!-- 节点主体：文本 + 二维码并排分开 -->
+            <div class="node-item-body">
+              <!-- 文本框 -->
+              <div class="node-text-col">
+                <textarea
+                  readonly
+                  :value="conversionDirection === 'json2link' ? item.shareLink : item.shareJson"
+                ></textarea>
+                <button
+                  class="node-copy-btn"
+                  title="复制此节点"
+                  @click.stop="
+                    handleCopy(
+                      conversionDirection === 'json2link' ? item.shareLink : item.shareJson,
+                      `已复制节点 #${item.index}`,
+                    )
+                  "
+                >
+                  复制
+                </button>
+              </div>
+
+              <!-- 二维码 -->
+              <div class="node-qr-col">
+                <div class="node-qr-inner">
+                  <qrcode-vue
+                    :value="item.shareLink"
+                    :size="104"
+                    level="L"
+                    render-as="svg"
+                  />
+                  <small>扫码导入</small>
                 </div>
-              </dl>
+              </div>
             </div>
-          </div>
+          </article>
         </div>
+
         <div v-else class="empty-output">
           <span>◎</span>
           <p>输入有效配置后，结果会显示在这里</p>
@@ -277,29 +283,6 @@ const {
   white-space: nowrap;
 }
 
-.node-selector {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.68rem;
-  color: var(--text-muted);
-}
-
-.node-selector select {
-  padding: 4px 8px;
-  border: 1px solid var(--border-glass);
-  border-radius: 6px;
-  background: var(--bg-soft);
-  color: var(--text-main);
-  font-size: 0.68rem;
-  outline: none;
-  cursor: pointer;
-}
-
-.node-selector select:focus {
-  border-color: var(--primary);
-}
-
 .direction-switch {
   display: flex;
   gap: 4px;
@@ -335,6 +318,12 @@ const {
 .direction-switch b {
   margin: 0 4px;
   color: var(--text-dim);
+}
+
+.copy-all-btn {
+  background: color-mix(in srgb, var(--primary) 14%, transparent) !important;
+  color: var(--primary) !important;
+  border-color: color-mix(in srgb, var(--primary) 30%, transparent) !important;
 }
 
 .transfer-grid {
@@ -396,11 +385,10 @@ const {
   position: relative;
 }
 
-.editor-wrap textarea,
-.result-box textarea {
+.editor-wrap textarea {
   display: block;
   width: 100%;
-  height: fit-content;
+  height: 340px;
   box-sizing: border-box;
   resize: none;
   border: 1px solid var(--border-glass);
@@ -410,10 +398,6 @@ const {
   background: var(--bg-input);
   color: var(--text-main);
   font: 0.72rem/1.7 var(--font-mono);
-}
-
-.editor-wrap textarea {
-  height: 340px;
 }
 
 .editor-wrap textarea:focus {
@@ -470,88 +454,159 @@ const {
   font-size: 0.64rem;
 }
 
-.output-content {
-  display: grid;
+/* 独立节点结果列表 */
+.node-results-list {
+  display: flex;
+  flex-direction: column;
   gap: 14px;
+  max-height: 640px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
-.result-box {
+.node-result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  background: var(--bg-soft);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+}
+
+.node-result-item:hover {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border-glass));
+}
+
+.node-result-item.active {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.node-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.72rem;
+}
+
+.node-item-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.node-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font: 0.62rem var(--font-mono);
+  font-weight: 700;
+}
+
+.node-tag {
+  font-weight: 700;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proto-tag {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+  font-size: 0.6rem;
+  font-weight: 800;
+}
+
+.node-item-server {
+  font: 0.65rem var(--font-mono);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 节点主体：文本 + 二维码并排分开 */
+.node-item-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 130px;
+  gap: 12px;
+}
+
+.node-text-col {
   position: relative;
+  display: flex;
 }
 
-.result-box textarea {
-  height: 340px;
-  min-height: 220px;
-  padding-right: 70px;
+.node-text-col textarea {
+  display: block;
+  width: 100%;
+  height: 140px;
+  box-sizing: border-box;
+  resize: none;
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  padding: 10px 58px 10px 10px;
+  outline: none;
+  background: var(--bg-input);
+  color: var(--text-main);
+  font: 0.68rem/1.6 var(--font-mono);
 }
 
-.result-box button {
+.node-copy-btn {
   position: absolute;
   top: 8px;
   right: 8px;
   border: 0;
   border-radius: 6px;
-  padding: 6px 9px;
+  padding: 5px 8px;
   background: var(--primary);
   color: white;
   cursor: pointer;
   font: inherit;
-  font-size: 0.65rem;
+  font-size: 0.62rem;
   font-weight: 700;
 }
 
-.output-meta {
-  display: grid;
-  grid-template-columns: 150px minmax(0, 1fr);
-  gap: 12px;
+.node-qr-col {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.qr-box,
-.summary {
+.node-qr-inner {
   display: grid;
   align-content: center;
   justify-items: center;
-  gap: 7px;
-  padding: 12px;
+  gap: 5px;
+  width: 100%;
+  height: 100%;
+  padding: 8px;
   border: 1px solid var(--border-glass);
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--bg-input);
 }
 
-.qr-box svg {
+.node-qr-inner svg {
   max-width: 100%;
-  padding: 7px;
+  padding: 5px;
   background: white;
+  border-radius: 4px;
 }
 
-.qr-box small {
+.node-qr-inner small {
   color: var(--text-dim);
-  font-size: 0.62rem;
-}
-
-.summary {
-  align-content: start;
-  justify-items: stretch;
-}
-
-.summary dl {
-  display: grid;
-  gap: 9px;
-  margin: 11px 0;
-}
-
-.summary dt {
-  color: var(--text-dim);
-  font-size: 0.62rem;
-}
-
-.summary dd {
-  overflow: hidden;
-  margin: 0;
-  color: var(--text-main);
-  font: 0.7rem var(--font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 0.6rem;
 }
 
 .accent {
@@ -663,12 +718,8 @@ const {
     justify-content: flex-start;
   }
 
-  .output-meta {
+  .node-item-body {
     grid-template-columns: 1fr;
-  }
-
-  .qr-box {
-    justify-items: center;
   }
 
   .details-list > div {

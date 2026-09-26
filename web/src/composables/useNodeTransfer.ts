@@ -2,6 +2,8 @@ import { ref, computed, watch } from 'vue'
 import { copyText } from '../utils'
 import {
   type TransferDirection,
+  type BaseOutboundConfig,
+  type ConfigDetailItem,
   detectDirection,
   tryParseJsonWithArrayFallback,
   parseJsonConfigs,
@@ -12,6 +14,14 @@ import {
   getAllHandlers,
   getHandlerByProtocol,
 } from '../tools/node-transfer'
+
+export interface TransferNodeResult {
+  index: number
+  config: BaseOutboundConfig
+  shareLink: string
+  shareJson: string
+  details: ConfigDetailItem[]
+}
 
 export interface UseNodeTransferOptions {
   onSuccess?: (message: string) => void
@@ -62,7 +72,19 @@ export function useNodeTransfer(options: UseNodeTransferOptions = {}) {
     },
   )
 
-  // 当前选中的节点配置（用于右侧二维码、节点摘要与详细参数展示）
+  // 每个独立节点的转换结果（文本 + 二维码 + 详情）
+  const nodeResults = computed<TransferNodeResult[]>(() => {
+    if (parsedConfigs.value.length === 0 || parseError.value) return []
+    return parsedConfigs.value.map((cfg, idx) => ({
+      index: idx + 1,
+      config: cfg,
+      shareLink: buildShareLink(cfg),
+      shareJson: JSON.stringify(cfg, null, 2),
+      details: extractConfigDetails(cfg),
+    }))
+  })
+
+  // 当前激活选中的节点（用于底部查看完整参数列表）
   const activeConfig = computed(() => {
     if (parsedConfigs.value.length === 0) return null
     return parsedConfigs.value[activeNodeIndex.value] || parsedConfigs.value[0]
@@ -74,19 +96,13 @@ export function useNodeTransfer(options: UseNodeTransferOptions = {}) {
     return buildShareLinks(parsedConfigs.value)
   })
 
-  // 输出文本：所有节点的 JSON (单个为对象，多个为数组)
+  // 输出文本：所有节点的 JSON
   const allShareJsonText = computed(() => {
     if (parsedConfigs.value.length === 0 || parseError.value) return ''
     if (parsedConfigs.value.length === 1) {
       return JSON.stringify(parsedConfigs.value[0], null, 2)
     }
     return JSON.stringify(parsedConfigs.value, null, 2)
-  })
-
-  // 当前选中节点的二维码链接
-  const activeShareLink = computed(() => {
-    if (!activeConfig.value || parseError.value) return ''
-    return buildShareLink(activeConfig.value)
   })
 
   // 当前选中节点的配置参数详情
@@ -128,14 +144,19 @@ export function useNodeTransfer(options: UseNodeTransferOptions = {}) {
     }
   }
 
-  const handleCopy = async (text: string) => {
+  const handleCopy = async (text: string, customSuccessMsg?: string) => {
     if (!text) return
     const success = await copyText(text)
     if (success) {
-      onSuccess?.('已复制到剪贴板')
+      onSuccess?.(customSuccessMsg || '已复制到剪贴板')
     } else {
       onError?.('复制失败，请手动选择复制')
     }
+  }
+
+  const handleCopyAll = () => {
+    const text = conversionDirection.value === 'json2link' ? allShareLinksText.value : allShareJsonText.value
+    handleCopy(text, `已复制全部 ${nodeCount.value} 个节点`)
   }
 
   return {
@@ -146,16 +167,17 @@ export function useNodeTransfer(options: UseNodeTransferOptions = {}) {
     supportedHandlers,
     conversionDirection,
     parsedConfigs,
+    nodeResults,
     activeConfig,
     parseError,
     allShareLinksText,
     allShareJsonText,
-    activeShareLink,
     configDetails,
     handlePasteSample,
     handleClear,
     handleDirectionChange,
     handleFormat,
     handleCopy,
+    handleCopyAll,
   }
 }
