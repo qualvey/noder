@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { DistFile } from '../types'
 import { apiLinkPrefix, formatFileSize } from '../utils'
+import { useFuzzySearch } from '../composables'
 
 const { t } = useI18n()
 const toast = inject('toast') as (msg: string, type?: 'info' | 'error') => void
@@ -15,6 +16,18 @@ const files = ref<DistFile[]>([])
 const showModal = ref(false)
 const sharedToken = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
+
+const { searchQuery, filteredItems: filteredFiles, clear: clearSearch } = useFuzzySearch(files, (f) => [
+  f.download_name,
+  f.original_name,
+  f.name,
+  f.remark,
+  f.file_type,
+  f.source_url,
+  f.template_name,
+  f.is_active ? t('files.statusActive') : t('files.statusInactive'),
+  String(f.id),
+])
 
 // 选中的本地文件与拖拽交互状态
 const selectedFile = ref<File | null>(null)
@@ -338,7 +351,14 @@ onMounted(fetchData)
   <section class="tab-content" style="display: block">
     <div class="section-header">
       <div class="section-title">{{ t('files.headerTitle') }}</div>
-      <div style="display: flex; gap: 10px; align-items: center">
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+        <SearchInput
+          v-model="searchQuery"
+          :placeholder="t('files.searchPlaceholder')"
+          :total-count="files.length"
+          :filtered-count="filteredFiles.length"
+          :disabled="!files.length"
+        />
         <button class="btn btn-primary" @click="openCreate"><span>+</span> {{ t('files.uploadBtn') }}</button>
       </div>
     </div>
@@ -370,7 +390,14 @@ onMounted(fetchData)
           <tr v-if="!files.length">
             <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px">{{ t('files.emptyText') }}</td>
           </tr>
-          <tr v-for="f in files" :key="f.id">
+          <tr v-else-if="!filteredFiles.length">
+            <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 36px">
+              <div style="font-size: 1.8rem; margin-bottom: 8px">🔍</div>
+              <div style="margin-bottom: 12px">{{ t('files.noMatchingFiles') }}</div>
+              <button class="btn btn-secondary btn-sm" @click="clearSearch">{{ t('common.clearFilter') }}</button>
+            </td>
+          </tr>
+          <tr v-for="f in filteredFiles" :key="f.id">
             <td>{{ f.id }}</td>
             <td>
               <code>{{ f.download_name || f.original_name || f.name }}</code>

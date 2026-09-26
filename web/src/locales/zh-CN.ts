@@ -24,6 +24,7 @@ export default {
     copy: '复制',
     reset: '重置',
     empty: '暂无数据',
+    clearFilter: '清除搜索',
     networkError: '网络异常，请重试',
   },
   nav: {
@@ -148,6 +149,8 @@ export default {
     deleteConfirm: '⚠️ 确定删除该用户？',
     loadingData: '正在加载用户数据...',
     emptyText: '暂无订阅用户，点击右上角新增',
+    noMatchingUsers: '未找到匹配的用户',
+    searchPlaceholder: '模糊搜索用户 (备注/Token/UUID/密码/绑定节点)...',
     menu: {
       copyToken: '复制 鉴权 Token',
       copyUniversal: '复制通用订阅链接',
@@ -237,6 +240,8 @@ export default {
     editText: '编辑内容',
     deleteConfirm: '⚠️ 确定删除该分发文件？(磁盘文件一并删除)',
     emptyText: '暂无分发文件，点击右上角「+ 上传分发文件」进行配置',
+    noMatchingFiles: '未找到匹配的分发文件',
+    searchPlaceholder: '模糊搜索文件 (文件名/备注/类型/来源)...',
     templateHintTitle: '📄 ZIP 模板占位符：',
     templateHintDesc: '下载时按用户凭证实时渲染；其余文件原样分发。硬编码 token/uuid 也会自动按用户替换。未指定模板文件名时自动取 ZIP 内第一个 .yaml/.yml 文件。文本类型为死字符原样分发。',
     modal: {

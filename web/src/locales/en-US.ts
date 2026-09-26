@@ -24,6 +24,7 @@ export default {
     copy: 'Copy',
     reset: 'Reset',
     empty: 'No data available',
+    clearFilter: 'Clear Search',
     networkError: 'Network error, please try again',
   },
   nav: {
@@ -145,6 +146,8 @@ export default {
     deleteConfirm: '⚠️ Are you sure you want to delete this user?',
     loadingData: 'Loading user data...',
     emptyText: 'No subscribers yet. Click above to add.',
+    noMatchingUsers: 'No matching users found',
+    searchPlaceholder: 'Search users (Username/Token/UUID/Password/Nodes)...',
     menu: {
       copyToken: 'Copy Auth Token',
       copyUniversal: 'Copy Universal Sub Link',
@@ -234,6 +237,8 @@ export default {
     editText: 'Edit Content',
     deleteConfirm: '⚠️ Delete this distributed file? (Disk file will also be deleted)',
     emptyText: 'No distributed files yet. Click "+ Upload & Distribute" to configure.',
+    noMatchingFiles: 'No matching files found',
+    searchPlaceholder: 'Search files (Filename/Remarks/Type/Source)...',
     templateHintTitle: '📄 ZIP Template Placeholders:',
     templateHintDesc: 'Rendered with user credentials on-the-fly when downloaded; other files are distributed as-is. Hardcoded token/uuid in template are also replaced automatically. If no template name is specified, the first .yaml/.yml file in the zip is used. Text files are served raw.',
     modal: {

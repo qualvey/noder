@@ -12,7 +12,9 @@ document.documentElement.dataset.theme = initialTheme
 
 import { i18n } from './i18n'
 import IconButton from './components/IconButton.vue'
+import SearchInput from './components/SearchInput.vue'
 
 const app = createApp(App)
 app.component('IconButton', IconButton)
+app.component('SearchInput', SearchInput)
 app.use(i18n).mount('#app')

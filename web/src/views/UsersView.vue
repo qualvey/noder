@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 用户管理：表格 / 全选批量删除 / 右键复制订阅链接 + 下载配置包（新增/编辑表单在 UserFormModal 组件）
-import { inject, onMounted, ref } from 'vue'
+import { computed, inject, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { DistFile, Node, User } from '../types'
@@ -8,6 +8,7 @@ import { buildDownloadLink, buildMihomoLink, buildSubLink, copyText } from '../u
 import UserFormModal from '../components/UserFormModal.vue'
 import ContextMenu, { type ContextMenuItem } from '../components/ContextMenu.vue'
 import { ToastType } from '@/App.vue'
+import { useFuzzySearch } from '../composables'
 
 const { t } = useI18n()
 const toast = inject('toast') as (msg: string, type?: ToastType) => void
@@ -190,6 +191,21 @@ async function removeUser(id: number) {
   }
 }
 
+const { searchQuery, filteredItems: filteredUsers, clear: clearSearch } = useFuzzySearch(users, (u) => [
+  u.name,
+  u.remark,
+  u.token,
+  u.uuid,
+  u.password,
+  u.is_active ? t('common.enabled') : t('common.disabled'),
+  ...(u.node_ids || []).map((id) => getNodeName(id)),
+])
+
+const isAllFilteredSelected = computed(() => {
+  if (!filteredUsers.value.length) return false
+  return filteredUsers.value.every((u) => selected.value.has(u.id))
+})
+
 function toggleSelect(id: number) {
   const s = new Set(selected.value)
   if (s.has(id)) s.delete(id)
@@ -198,8 +214,17 @@ function toggleSelect(id: number) {
 }
 
 function toggleSelectAll() {
-  if (selected.value.size === users.value.length) selected.value = new Set()
-  else selected.value = new Set(users.value.map((u) => u.id))
+  const s = new Set(selected.value)
+  if (isAllFilteredSelected.value) {
+    for (const u of filteredUsers.value) {
+      s.delete(u.id)
+    }
+  } else {
+    for (const u of filteredUsers.value) {
+      s.add(u.id)
+    }
+  }
+  selected.value = s
 }
 
 function bulkDelete(e: MouseEvent) {
@@ -251,7 +276,14 @@ onMounted(() => fetchData())
   <section class="tab-content" style="display: block">
     <div class="section-header">
       <div class="section-title">{{ t('users.headerTitle') }}</div>
-      <div style="display: flex; gap: 12px; align-items: center">
+      <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
+        <SearchInput
+          v-model="searchQuery"
+          :placeholder="t('users.searchPlaceholder')"
+          :total-count="users.length"
+          :filtered-count="filteredUsers.length"
+          :disabled="!users.length"
+        />
         <button v-if="selected.size" class="btn btn-danger btn-sm" @click="bulkDelete">
           🗑️ {{ t('users.bulkDelete', { count: selected.size }) }}
         </button>
@@ -266,7 +298,7 @@ onMounted(() => fetchData())
         <thead>
           <tr>
             <th style="width: 44px; text-align: center">
-              <input type="checkbox" :checked="selected.size === users.length && users.length > 0"
+              <input type="checkbox" :checked="isAllFilteredSelected"
                 @change="toggleSelectAll" />
             </th>
             <th style="min-width: 140px">{{ t('users.colName') }}</th>
@@ -295,13 +327,22 @@ onMounted(() => fetchData())
             <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px">{{ t('users.emptyText') }}</td>
           </tr>
         </tbody>
+        <tbody v-else-if="!filteredUsers.length">
+          <tr>
+            <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 36px">
+              <div style="font-size: 1.8rem; margin-bottom: 8px">🔍</div>
+              <div style="margin-bottom: 12px">{{ t('users.noMatchingUsers') }}</div>
+              <button class="btn btn-secondary btn-sm" @click="clearSearch">{{ t('common.clearFilter') }}</button>
+            </td>
+          </tr>
+        </tbody>
         <TransitionGroup
           v-else
           tag="tbody"
           name="user-row"
           @before-leave="onBeforeLeave"
         >
-          <tr v-for="user in users" :key="user.id" @contextmenu.prevent="onRowContextMenu($event, user)">
+          <tr v-for="user in filteredUsers" :key="user.id" @contextmenu.prevent="onRowContextMenu($event, user)">
             <td style="text-align: center">
               <input type="checkbox" :checked="selected.has(user.id)" @change="toggleSelect(user.id)" />
             </td>

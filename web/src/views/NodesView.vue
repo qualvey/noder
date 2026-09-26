@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { Node } from '../types'
 import NodeFormModal from '../components/NodeFormModal.vue'
+import { useFuzzySearch } from '../composables'
 
 const { t } = useI18n()
 const toast = inject('toast') as (msg: string, type?: 'info' | 'error') => void
@@ -16,43 +17,20 @@ const selected = ref<Set<number>>(new Set())
 const showModal = ref(false)
 const editingNode = ref<Node | null>(null)
 const loading = ref(true)
-const searchQuery = ref('')
 
-function matchesFuzzy(text: string, term: string): boolean {
-  if (text.includes(term)) return true
-  const cleanText = text.replace(/[-_\s.:/]/g, '')
-  const cleanTerm = term.replace(/[-_\s.:/]/g, '')
-  return cleanTerm.length > 0 && cleanText.includes(cleanTerm)
-}
-
-const filteredNodes = computed(() => {
-  const query = searchQuery.value.trim().toLowerCase()
-  if (!query) return nodes.value
-
-  const terms = query.split(/\s+/).filter(Boolean)
-
-  return nodes.value.filter((node) => {
-    const fields: string[] = [
-      node.tag,
-      node.node_name,
-      node.protocol,
-      node.server_address,
-      node.server_port != null ? String(node.server_port) : '',
-      node.security,
-      node.sni,
-      node.transport_type,
-      node.path,
-      node.congestion_control,
-      node.remark,
-    ]
-      .filter((v): v is string => Boolean(v))
-      .map((v) => v.toLowerCase())
-
-    const fullText = fields.join(' ')
-
-    return terms.every((term) => fields.some((f) => matchesFuzzy(f, term)) || matchesFuzzy(fullText, term))
-  })
-})
+const { searchQuery, filteredItems: filteredNodes, clear: clearSearch } = useFuzzySearch(nodes, (node) => [
+  node.tag,
+  node.node_name,
+  node.protocol,
+  node.server_address,
+  node.server_port,
+  node.security,
+  node.sni,
+  node.transport_type,
+  node.path,
+  node.congestion_control,
+  node.remark,
+])
 
 const isAllFilteredSelected = computed(() => {
   if (!filteredNodes.value.length) return false
@@ -178,34 +156,13 @@ onMounted(() => fetchNodes())
     <div class="section-header">
       <div class="section-title">{{ t('nodes.headerTitle') }}</div>
       <div class="section-actions">
-        <div class="search-box">
-          <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-          </svg>
-          <input
-            v-model="searchQuery"
-            type="text"
-            class="search-input"
-            :placeholder="t('nodes.searchPlaceholder')"
-            @keydown.esc="searchQuery = ''"
-          />
-          <button
-            v-if="searchQuery"
-            type="button"
-            class="search-clear-btn"
-            :title="t('nodes.clearFilter')"
-            @click="searchQuery = ''"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
-          <span v-if="searchQuery.trim()" class="search-badge">
-            {{ filteredNodes.length }}/{{ nodes.length }}
-          </span>
-        </div>
+        <SearchInput
+          v-model="searchQuery"
+          :placeholder="t('nodes.searchPlaceholder')"
+          :total-count="nodes.length"
+          :filtered-count="filteredNodes.length"
+          :disabled="!nodes.length"
+        />
 
         <label
           style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-muted); cursor: pointer; user-select: none">
@@ -237,8 +194,8 @@ onMounted(() => fetchNodes())
       style="text-align: center; padding: 48px 20px; color: var(--text-muted)">
       <div style="font-size: 1.8rem; margin-bottom: 8px">🔍</div>
       <div style="font-size: 0.95rem; margin-bottom: 12px">{{ t('nodes.noMatchingNodes') }}</div>
-      <button class="btn btn-secondary btn-sm" @click="searchQuery = ''">
-        {{ t('nodes.clearFilter') }}
+      <button class="btn btn-secondary btn-sm" @click="clearSearch">
+        {{ t('common.clearFilter') }}
       </button>
     </div>
     <TransitionGroup
@@ -299,85 +256,11 @@ onMounted(() => fetchNodes())
   flex-wrap: wrap;
 }
 
-.search-box {
-  position: relative;
-  display: flex;
-  align-items: center;
-  background: var(--bg-input);
-  border: 1px solid var(--border-glass);
-  border-radius: var(--radius-md);
-  padding: 0 10px;
-  height: 34px;
-  transition: all 0.2s ease;
-}
-
-.search-box:focus-within {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
-}
-
-.search-icon {
-  color: var(--text-muted);
-  flex-shrink: 0;
-  margin-right: 8px;
-}
-
-.search-input {
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--text-main);
-  font-size: 0.85rem;
-  width: 220px;
-  min-width: 140px;
-}
-
-.search-input::placeholder {
-  color: var(--text-dim);
-}
-
-.search-clear-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px;
-  border-radius: 50%;
-  margin-left: 4px;
-  transition: color 0.15s, background-color 0.15s;
-}
-
-.search-clear-btn:hover {
-  color: var(--text-main);
-  background-color: var(--bg-hover);
-}
-
-.search-badge {
-  font-size: 0.72rem;
-  color: var(--primary);
-  background: rgba(59, 130, 246, 0.12);
-  border: 1px solid rgba(59, 130, 246, 0.25);
-  border-radius: 10px;
-  padding: 1px 6px;
-  margin-left: 6px;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-}
-
 @media (max-width: 640px) {
   .section-header {
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
-  }
-  .search-box {
-    width: 100%;
-  }
-  .search-input {
-    width: 100%;
   }
 }
 </style>
