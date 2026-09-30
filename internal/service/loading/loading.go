@@ -218,67 +218,44 @@ func RenderLoadingPage(dist *model.DistFile, user *model.User) string {
       progressUrl.searchParams.set('progress_stream', '1');
       progressUrl.searchParams.set('progress_id', progressId);
       const progressEvents = new EventSource(progressUrl.toString());
+
+      const downloadUrl = new URL(window.location.href);
+      downloadUrl.searchParams.set('download', '1');
+      downloadUrl.searchParams.set('progress_id', progressId);
+      const downloadButton = document.getElementById('download-btn');
+      downloadButton.href = downloadUrl.toString();
+
       progressEvents.onmessage = event => {
         const progress = JSON.parse(event.data);
         updateProgress(progress.percent, progress.stage);
-        if (progress.done) progressEvents.close();
-      };
-
-      const readBlobWithProgress = async response => {
-        if (!response.body || !response.body.getReader) return response.blob();
-        const total = Number(response.headers.get('Content-Length')) || 0;
-        const reader = response.body.getReader();
-        const chunks = [];
-        let received = 0;
-        while (true) {
-          const {done, value} = await reader.read();
-          if (done) break;
-          chunks.push(value);
-          received += value.byteLength;
-          const percent = total > 0
-            ? Math.min(99, 90 + Math.floor(Math.min(1, received / total) * 9))
-            : displayedPercent;
-          const stage = total > 0
-            ? '正在接收配置包（' + (received / 1048576).toFixed(1) + ' / ' + (total / 1048576).toFixed(1) + ' MB）'
-            : '正在接收配置包（' + (received / 1048576).toFixed(1) + ' MB）';
-          updateProgress(percent, stage);
-        }
-        return new Blob(chunks, {type: response.headers.get('Content-Type') || 'application/zip'});
-      };
-
-      const url = new URL(window.location.href);
-      url.searchParams.set('download', '1');
-      url.searchParams.set('progress_id', progressId);
-      fetch(url.toString())
-        .then(res => {
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          return readBlobWithProgress(res);
-        })
-        .then(blob => {
-          const blobUrl = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = blobUrl;
-          a.download = '%s';
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          document.getElementById('status-title').textContent = '配置包生成完成！';
-          document.getElementById('status-desc').textContent = '若浏览器未自动触发下载，请点击下方按钮：';
+        if (progress.percent >= 100) {
+          document.getElementById('status-title').textContent = '浏览器下载已启动';
+          document.getElementById('status-desc').textContent = '文件正在由浏览器下载；如未自动开始，请点击下方按钮：';
           document.getElementById('loader-icon').textContent = '✅';
-          updateProgress(100, '配置包已接收，正在开始下载');
-          progressEvents.close();
-          document.getElementById('download-btn').href = blobUrl;
-          document.getElementById('download-btn').download = '%s';
           document.getElementById('actions').style.display = 'block';
-        })
-        .catch(err => {
+        }
+        if (progress.done) {
+          if (progress.stage.indexOf('中断') >= 0) {
+            document.getElementById('status-title').textContent = '下载连接中断';
+            document.getElementById('status-desc').textContent = '可点击下方按钮重试下载。';
+            document.getElementById('loader-icon').textContent = '⚠️';
+            document.getElementById('actions').style.display = 'block';
+          } else if (progress.percent < 100) {
+            document.getElementById('status-title').textContent = '配置包生成失败';
+            document.getElementById('status-desc').textContent = progress.stage;
+            document.getElementById('loader-icon').textContent = '⚠️';
+          }
           progressEvents.close();
-          document.getElementById('status-title').textContent = '生成失败';
-          document.getElementById('status-desc').textContent = err.message || '网络连接超时，请重试';
-          document.getElementById('loader-icon').textContent = '⚠️';
-        });
+        }
+      };
+
+      const downloadFrame = document.createElement('iframe');
+      downloadFrame.hidden = true;
+      downloadFrame.title = '配置包下载';
+      document.body.appendChild(downloadFrame);
+      downloadFrame.src = downloadUrl.toString();
     })();
   </script>
 </body>
-</html>`, safeFilename, safeFilename, safeUserName, safeFilename, safeFilename)
+</html>`, safeFilename, safeFilename, safeUserName)
 }

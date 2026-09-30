@@ -132,6 +132,9 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 
 	data, err := file.ReadFileContent(&dist)
 	if err != nil {
+		if progressID != "" {
+			publishDownloadProgress(progressID, 5, "读取源文件失败", true)
+		}
 		RespondError(w, http.StatusInternalServerError, "读取文件失败: "+err.Error())
 		return
 	}
@@ -161,7 +164,7 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 			}
 			percent := 10
 			if total > 0 {
-				percent += int(float64(processed) / float64(total) * 75)
+				percent += int(float64(processed) / float64(total) * 80)
 			}
 			publishDownloadProgress(progressID, percent, fmt.Sprintf("正在处理压缩包文件（%d/%d）", processed, total), false)
 		})
@@ -174,7 +177,7 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 		}
 		data = renderedZip
 		if progressID != "" {
-			publishDownloadProgress(progressID, 90, "配置包已生成，准备传输", false)
+			publishDownloadProgress(progressID, 95, "配置包已生成，启动下载", false)
 		}
 	}
 	contentType := "application/octet-stream"
@@ -200,13 +203,27 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", cd)
 
 	w.WriteHeader(http.StatusOK)
-	written, writeErr := w.Write(data)
+	written := 0
+	var writeErr error
+	if progressID != "" && len(data) > 0 {
+		written, writeErr = w.Write(data[:1])
+		if writeErr == nil && written == 1 {
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			publishDownloadProgress(progressID, 100, "浏览器下载已启动", false)
+		}
+	}
+	if writeErr == nil && written < len(data) {
+		var n int
+		n, writeErr = w.Write(data[written:])
+		written += n
+	}
 	if progressID != "" {
 		if writeErr != nil || written != len(data) {
-			publishDownloadProgress(progressID, 90, "配置包传输中断", true)
+			publishDownloadProgress(progressID, 100, "下载传输中断", true)
 		} else {
-			// The browser measures the remaining transfer from the response stream.
-			publishDownloadProgress(progressID, 90, "正在完成下载", true)
+			publishDownloadProgress(progressID, 100, "浏览器下载已启动", true)
 		}
 	}
 	if matchedUser != nil && writeErr == nil && written == len(data) {

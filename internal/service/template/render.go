@@ -120,6 +120,35 @@ func readAllWithProgress(r io.Reader, onRead func(uint64)) ([]byte, error) {
 	}
 }
 
+type progressReader struct {
+	reader io.Reader
+	read   uint64
+	onRead func(uint64)
+}
+
+func (r *progressReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 {
+		r.read += uint64(n)
+		if r.onRead != nil {
+			r.onRead(r.read)
+		}
+	}
+	return n, err
+}
+
+func zipEntryProgressWeight(f *zip.File, rendered bool) uint64 {
+	weight := f.CompressedSize64
+	if rendered {
+		// Template data is decompressed and then rendered, so count both passes.
+		weight = f.UncompressedSize64 * 2
+	}
+	if weight == 0 {
+		return 1
+	}
+	return weight
+}
+
 func RenderTemplateText(text string, user *model.User, nodes []*model.Node, knownTokens []string) string {
 	return RenderTemplateTextWithContext(text, user, BuildTemplateContext(user, nodes, strings.Contains(text, MihomoPlaceholder)), knownTokens)
 }
@@ -188,27 +217,32 @@ func RenderZipForUserWithProgress(zipData []byte, templateName *string, user *mo
 	zw := zip.NewWriter(&buf)
 	var totalWeight uint64
 	for _, f := range zr.File {
-		weight := f.CompressedSize64
-		if targetName == "" || filepath.Base(f.Name) == targetName {
-			weight = f.UncompressedSize64
-		}
-		if weight == 0 {
-			weight = 1
-		}
-		totalWeight += weight
+		totalWeight += zipEntryProgressWeight(f, targetName == "" || filepath.Base(f.Name) == targetName)
 	}
 	var processedWeight uint64
 	for _, f := range zr.File {
 		renderedEntry := targetName == "" || filepath.Base(f.Name) == targetName
-		weight := f.CompressedSize64
-		if renderedEntry {
-			weight = f.UncompressedSize64
-		}
-		if weight == 0 {
-			weight = 1
-		}
+		weight := zipEntryProgressWeight(f, renderedEntry)
 		if !renderedEntry {
-			if err := zw.Copy(f); err != nil {
+			raw, err := f.OpenRaw()
+			if err != nil {
+				return nil, err
+			}
+			header := f.FileHeader
+			entryWriter, err := zw.CreateRaw(&header)
+			if err != nil {
+				return nil, err
+			}
+			reader := &progressReader{reader: raw, onRead: func(read uint64) {
+				if onProgress != nil {
+					progress := processedWeight + read
+					if progress > totalWeight {
+						progress = totalWeight
+					}
+					onProgress(progress, totalWeight)
+				}
+			}}
+			if _, err := io.CopyBuffer(entryWriter, reader, make([]byte, 32*1024)); err != nil {
 				return nil, err
 			}
 		} else {

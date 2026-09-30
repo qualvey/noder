@@ -13,11 +13,11 @@ func TestRenderLoadingPageIncludesProgressUIAndDownload(t *testing.T) {
 	for _, expected := range []string{
 		"id=\"progress-fill\"",
 		"new EventSource(progressUrl.toString())",
-		"response.body.getReader()",
-		"Math.min(99, 90 + Math.floor",
-		"url.searchParams.set('download', '1')",
-		"url.searchParams.set('progress_id', progressId)",
-		"配置包生成完成！",
+		"downloadUrl.searchParams.set('download', '1')",
+		"downloadUrl.searchParams.set('progress_id', progressId)",
+		"downloadButton.href = downloadUrl.toString()",
+		"downloadFrame.src = downloadUrl.toString()",
+		"浏览器下载已启动",
 		"style.width = percent + '%'",
 	} {
 		if !strings.Contains(html, expected) {
@@ -27,7 +27,7 @@ func TestRenderLoadingPageIncludesProgressUIAndDownload(t *testing.T) {
 	if strings.Contains(html, "%!") {
 		t.Fatalf("loading page contains an unexpanded fmt format directive")
 	}
-	if strings.Index(html, "updateProgress(100") < strings.Index(html, "a.click();") {
-		t.Fatalf("loading page marks completion before triggering the download")
+	if strings.Contains(html, "fetch(") || strings.Contains(html, "new Blob(") {
+		t.Fatalf("loading page must use the browser's direct download instead of buffering a Blob")
 	}
 }
