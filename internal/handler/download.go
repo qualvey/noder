@@ -95,17 +95,6 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 远程模式：缓存过期则自动刷新，失败时保留旧缓存继续服务
-	if dist.SourceURL != nil && *dist.SourceURL != "" && file.IsRemoteCacheExpired(&dist) {
-		if content, err := file.FetchRemoteFile(*dist.SourceURL); err == nil {
-			_ = file.SaveFileContent(&dist, content)
-			dist.Size = int64(len(content))
-			now := time.Now().Format("2006-01-02 15:04:05")
-			dist.CachedAt = &now
-			_, _ = db.DB.NewUpdate().Model(&dist).Where("id = ?", dist.ID).Exec(r.Context())
-		}
-	}
-
 	downloadParam := r.URL.Query().Get("download")
 	rawParam := r.URL.Query().Get("raw")
 	isDirectDownload := downloadParam == "1" || downloadParam == "true" || rawParam == "1" || rawParam == "true"
@@ -115,6 +104,18 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(html))
 		return
+	}
+
+	// 远程模式：缓存过期则自动刷新，失败时保留旧缓存继续服务。
+	// Keep this after returning the loading page so the original URL remains responsive.
+	if dist.SourceURL != nil && *dist.SourceURL != "" && file.IsRemoteCacheExpired(&dist) {
+		if content, err := file.FetchRemoteFile(*dist.SourceURL); err == nil {
+			_ = file.SaveFileContent(&dist, content)
+			dist.Size = int64(len(content))
+			now := time.Now().Format("2006-01-02 15:04:05")
+			dist.CachedAt = &now
+			_, _ = db.DB.NewUpdate().Model(&dist).Where("id = ?", dist.ID).Exec(r.Context())
+		}
 	}
 
 	data, err := file.ReadFileContent(&dist)

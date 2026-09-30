@@ -110,6 +110,11 @@ func TestRenderZipForUserPreservesUntouchedStoredEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = readme.Write([]byte("static"))
+	compressed, err := zw.Create("docs/help.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = compressed.Write([]byte("compressed static content"))
 	if err := zw.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -124,13 +129,17 @@ func TestRenderZipForUserPreservesUntouchedStoredEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read rendered archive: %v", err)
 	}
-	if len(zr.File) != 2 {
-		t.Fatalf("expected 2 ZIP entries, got %d", len(zr.File))
+	if len(zr.File) != 3 {
+		t.Fatalf("expected 3 ZIP entries, got %d", len(zr.File))
 	}
 	for _, f := range zr.File {
-		if f.Name == "readme.txt" {
-			if f.Method != zip.Store {
-				t.Errorf("expected untouched stored entry to remain Store, got method %d", f.Method)
+		if f.Name == "readme.txt" || f.Name == "docs/help.txt" {
+			expectedMethod := uint16(zip.Deflate)
+			if f.Name == "readme.txt" {
+				expectedMethod = zip.Store
+			}
+			if f.Method != expectedMethod {
+				t.Errorf("expected untouched entry %s to retain method %d, got %d", f.Name, expectedMethod, f.Method)
 			}
 			rc, err := f.Open()
 			if err != nil {
@@ -138,7 +147,11 @@ func TestRenderZipForUserPreservesUntouchedStoredEntry(t *testing.T) {
 			}
 			contents, err := io.ReadAll(rc)
 			_ = rc.Close()
-			if err != nil || string(contents) != "static" {
+			expectedContents := "static"
+			if f.Name == "docs/help.txt" {
+				expectedContents = "compressed static content"
+			}
+			if err != nil || string(contents) != expectedContents {
 				t.Errorf("unexpected readme content %q, error %v", contents, err)
 			}
 		}
