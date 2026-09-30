@@ -145,6 +145,10 @@ func RenderLoadingPage(dist *model.DistFile, user *model.User) string {
     }
     .info-label { color: var(--text-dim); }
     .info-value { color: var(--text-main); font-family: monospace; }
+    .progress-wrap { margin: 0 0 24px; text-align: left; }
+    .progress-meta { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: var(--text-muted); font-size: 0.8rem; }
+    .progress-track { height: 8px; overflow: hidden; border-radius: 999px; background: rgba(148, 163, 184, 0.16); }
+    .progress-fill { width: 0%%; height: 100%%; border-radius: inherit; background: linear-gradient(90deg, var(--primary), var(--accent-cyan)); transition: width 180ms ease; }
     .btn {
       display: inline-flex;
       align-items: center;
@@ -178,16 +182,50 @@ func RenderLoadingPage(dist *model.DistFile, user *model.User) string {
         <span class="info-value">%s</span>
       </div>
     </div>
+    <div class="progress-wrap" aria-live="polite">
+      <div class="progress-meta">
+        <span id="progress-stage">准备生成配置包</span>
+        <span id="progress-percent">0%%</span>
+      </div>
+      <div class="progress-track" role="progressbar" aria-label="配置包生成进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+    </div>
     <div id="actions" style="display: none;">
       <a href="#" class="btn" id="download-btn">点击下载</a>
     </div>
   </div>
   <script>
     (function() {
+      const makeProgressId = () => {
+        if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+        if (window.crypto && crypto.getRandomValues) {
+          return Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+        }
+        return Date.now().toString(16) + Math.random().toString(16).slice(2);
+      };
+      const progressId = makeProgressId();
+      const progressUrl = new URL(window.location.href);
+      progressUrl.searchParams.set('progress_stream', '1');
+      progressUrl.searchParams.set('progress_id', progressId);
+      const progressEvents = new EventSource(progressUrl.toString());
+      progressEvents.onmessage = event => {
+        const progress = JSON.parse(event.data);
+        document.getElementById('progress-fill').style.width = progress.percent + '%%';
+        document.getElementById('progress-percent').textContent = progress.percent + '%%';
+        document.getElementById('progress-stage').textContent = progress.stage;
+        document.getElementById('progress-track').setAttribute('aria-valuenow', progress.percent);
+        if (progress.done) progressEvents.close();
+      };
+
       const url = new URL(window.location.href);
       url.searchParams.set('download', '1');
+      url.searchParams.set('progress_id', progressId);
       fetch(url.toString())
-        .then(res => res.blob())
+        .then(res => {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.blob();
+        })
         .then(blob => {
           const blobUrl = URL.createObjectURL(blob);
           const a = document.createElement('a');
@@ -199,11 +237,17 @@ func RenderLoadingPage(dist *model.DistFile, user *model.User) string {
           document.getElementById('status-title').textContent = '配置包生成完成！';
           document.getElementById('status-desc').textContent = '若浏览器未自动触发下载，请点击下方按钮：';
           document.getElementById('loader-icon').textContent = '✅';
+          document.getElementById('progress-fill').style.width = '100%%';
+          document.getElementById('progress-percent').textContent = '100%%';
+          document.getElementById('progress-stage').textContent = '配置包生成完成';
+          document.getElementById('progress-track').setAttribute('aria-valuenow', '100');
+          progressEvents.close();
           document.getElementById('download-btn').href = blobUrl;
           document.getElementById('download-btn').download = '%s';
           document.getElementById('actions').style.display = 'block';
         })
         .catch(err => {
+          progressEvents.close();
           document.getElementById('status-title').textContent = '生成失败';
           document.getElementById('status-desc').textContent = err.message || '网络连接超时，请重试';
           document.getElementById('loader-icon').textContent = '⚠️';

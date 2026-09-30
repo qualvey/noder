@@ -121,9 +121,25 @@ func TestRenderZipForUserPreservesUntouchedStoredEntry(t *testing.T) {
 
 	user := &model.User{Token: "zip-token"}
 	templateName := "config.json"
-	rendered, err := RenderZipForUser(buf.Bytes(), &templateName, user, nil, nil)
+	var progress []uint64
+	var totalProgress uint64
+	rendered, err := RenderZipForUserWithProgress(buf.Bytes(), &templateName, user, nil, nil, func(processed, total uint64) {
+		progress = append(progress, processed)
+		totalProgress = total
+		if processed > total {
+			t.Errorf("progress exceeds total: %d > %d", processed, total)
+		}
+	})
 	if err != nil {
 		t.Fatalf("RenderZipForUser failed: %v", err)
+	}
+	if len(progress) < 3 || progress[len(progress)-1] != totalProgress {
+		t.Fatalf("expected byte and entry progress through the complete ZIP, got %v of %d", progress, totalProgress)
+	}
+	for i := 1; i < len(progress); i++ {
+		if progress[i] < progress[i-1] {
+			t.Fatalf("progress moved backwards: %v", progress)
+		}
 	}
 	zr, err := zip.NewReader(bytes.NewReader(rendered), int64(len(rendered)))
 	if err != nil {

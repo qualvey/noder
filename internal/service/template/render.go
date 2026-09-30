@@ -96,6 +96,30 @@ func BuildTemplateContext(user *model.User, nodes []*model.Node, includeMihomo b
 
 var keyedPattern = regexp.MustCompile(`(?i)(["']?[\w.\-]*?(?:token|uuid|password)["']?\s*[:=]\s*)(["']?)([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(["']?)`)
 
+func readAllWithProgress(r io.Reader, onRead func(uint64)) ([]byte, error) {
+	var data bytes.Buffer
+	chunk := make([]byte, 32*1024)
+	var read uint64
+	for {
+		n, err := r.Read(chunk)
+		if n > 0 {
+			if _, writeErr := data.Write(chunk[:n]); writeErr != nil {
+				return nil, writeErr
+			}
+			read += uint64(n)
+			if onRead != nil {
+				onRead(read)
+			}
+		}
+		if err == io.EOF {
+			return data.Bytes(), nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+}
+
 func RenderTemplateText(text string, user *model.User, nodes []*model.Node, knownTokens []string) string {
 	return RenderTemplateTextWithContext(text, user, BuildTemplateContext(user, nodes, strings.Contains(text, MihomoPlaceholder)), knownTokens)
 }
@@ -147,6 +171,10 @@ func RenderTemplateTextWithContext(text string, user *model.User, ctx map[string
 }
 
 func RenderZipForUser(zipData []byte, templateName *string, user *model.User, nodes []*model.Node, knownTokens []string) ([]byte, error) {
+	return RenderZipForUserWithProgress(zipData, templateName, user, nodes, knownTokens, nil)
+}
+
+func RenderZipForUserWithProgress(zipData []byte, templateName *string, user *model.User, nodes []*model.Node, knownTokens []string, onProgress func(processed, total uint64)) ([]byte, error) {
 	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
 		return nil, err
@@ -158,45 +186,79 @@ func RenderZipForUser(zipData []byte, templateName *string, user *model.User, no
 
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
+	var totalWeight uint64
+	for _, f := range zr.File {
+		weight := f.CompressedSize64
+		if targetName == "" || filepath.Base(f.Name) == targetName {
+			weight = f.UncompressedSize64
+		}
+		if weight == 0 {
+			weight = 1
+		}
+		totalWeight += weight
+	}
+	var processedWeight uint64
 	for _, f := range zr.File {
 		renderedEntry := targetName == "" || filepath.Base(f.Name) == targetName
+		weight := f.CompressedSize64
+		if renderedEntry {
+			weight = f.UncompressedSize64
+		}
+		if weight == 0 {
+			weight = 1
+		}
 		if !renderedEntry {
 			if err := zw.Copy(f); err != nil {
 				return nil, err
 			}
-			continue
-		}
+		} else {
+			rc, err := f.Open()
+			if err != nil {
+				return nil, err
+			}
+			data, err := readAllWithProgress(rc, func(read uint64) {
+				if onProgress == nil {
+					return
+				}
+				processed := processedWeight + read
+				if processed > totalWeight {
+					processed = totalWeight
+				}
+				onProgress(processed, totalWeight)
+			})
+			_ = rc.Close()
+			if err != nil {
+				return nil, err
+			}
+			ctx := BuildTemplateContext(user, nodes, strings.Contains(string(data), MihomoPlaceholder))
+			rendered := []byte(RenderTemplateTextWithContext(string(data), user, ctx, knownTokens))
 
-		rc, err := f.Open()
-		if err != nil {
-			return nil, err
+			header := f.FileHeader
+			header.Method = zip.Store
+			header.Flags &^= 0x08
+			header.CRC32 = crc32.ChecksumIEEE(rendered)
+			header.CompressedSize = uint32(len(rendered))
+			header.UncompressedSize = uint32(len(rendered))
+			header.CompressedSize64 = uint64(len(rendered))
+			header.UncompressedSize64 = uint64(len(rendered))
+			w, err := zw.CreateHeader(&header)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := w.Write(rendered); err != nil {
+				return nil, err
+			}
 		}
-		data, err := io.ReadAll(rc)
-		_ = rc.Close()
-		if err != nil {
-			return nil, err
-		}
-		ctx := BuildTemplateContext(user, nodes, strings.Contains(string(data), MihomoPlaceholder))
-		rendered := []byte(RenderTemplateTextWithContext(string(data), user, ctx, knownTokens))
-
-		header := f.FileHeader
-		header.Method = zip.Store
-		header.Flags &^= 0x08
-		header.CRC32 = crc32.ChecksumIEEE(rendered)
-		header.CompressedSize = uint32(len(rendered))
-		header.UncompressedSize = uint32(len(rendered))
-		header.CompressedSize64 = uint64(len(rendered))
-		header.UncompressedSize64 = uint64(len(rendered))
-		w, err := zw.CreateHeader(&header)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := w.Write(rendered); err != nil {
-			return nil, err
+		processedWeight += weight
+		if onProgress != nil {
+			onProgress(processedWeight, totalWeight)
 		}
 	}
 	if err := zw.Close(); err != nil {
 		return nil, err
+	}
+	if onProgress != nil && totalWeight == 0 {
+		onProgress(0, 0)
 	}
 	return buf.Bytes(), nil
 }

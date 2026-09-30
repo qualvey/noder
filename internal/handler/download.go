@@ -94,6 +94,10 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusUnauthorized, "无效或已过期的下载凭证")
 		return
 	}
+	if r.URL.Query().Get("progress_stream") == "1" {
+		streamDownloadProgress(w, r, progressIDFromRequest(r))
+		return
+	}
 
 	downloadParam := r.URL.Query().Get("download")
 	rawParam := r.URL.Query().Get("raw")
@@ -105,10 +109,17 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(html))
 		return
 	}
+	progressID := progressIDFromRequest(r)
+	if progressID != "" {
+		publishDownloadProgress(progressID, 3, "准备下载文件", false)
+	}
 
 	// 远程模式：缓存过期则自动刷新，失败时保留旧缓存继续服务。
 	// Keep this after returning the loading page so the original URL remains responsive.
 	if dist.SourceURL != nil && *dist.SourceURL != "" && file.IsRemoteCacheExpired(&dist) {
+		if progressID != "" {
+			publishDownloadProgress(progressID, 5, "检查远程文件缓存", false)
+		}
 		if content, err := file.FetchRemoteFile(*dist.SourceURL); err == nil {
 			_ = file.SaveFileContent(&dist, content)
 			dist.Size = int64(len(content))
@@ -131,6 +142,9 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 
 	// 用户下载 ZIP：进行模板渲染
 	if matchedUser != nil && dist.FileType == "zip" {
+		if progressID != "" {
+			publishDownloadProgress(progressID, 10, "准备模板与用户数据", false)
+		}
 		var allUsers []*model.User
 		_ = db.DB.NewSelect().Model(&allUsers).Column("token").Scan(r.Context())
 		var knownTokens []string
@@ -140,12 +154,27 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		renderedZip, err := template.RenderZipForUser(data, dist.TemplateName, matchedUser, matchedUser.Nodes, knownTokens)
+		renderedZip, err := template.RenderZipForUserWithProgress(data, dist.TemplateName, matchedUser, matchedUser.Nodes, knownTokens, func(processed, total uint64) {
+			if progressID == "" {
+				return
+			}
+			percent := 10
+			if total > 0 {
+				percent += int(float64(processed) / float64(total) * 85)
+			}
+			publishDownloadProgress(progressID, percent, fmt.Sprintf("正在处理压缩包文件（%d/%d）", processed, total), false)
+		})
 		if err != nil {
+			if progressID != "" {
+				publishDownloadProgress(progressID, 10, "配置包生成失败", true)
+			}
 			RespondError(w, http.StatusInternalServerError, "渲染个性化 ZIP 失败: "+err.Error())
 			return
 		}
 		data = renderedZip
+		if progressID != "" {
+			publishDownloadProgress(progressID, 100, "配置包生成完成", true)
+		}
 	}
 	contentType := "application/octet-stream"
 	switch dist.FileType {
