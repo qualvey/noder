@@ -197,6 +197,15 @@ func RenderLoadingPage(dist *model.DistFile, user *model.User) string {
   </div>
   <script>
     (function() {
+      let displayedPercent = 0;
+      const updateProgress = (percent, stage) => {
+        if (percent < displayedPercent) return;
+        displayedPercent = percent;
+        document.getElementById('progress-fill').style.width = percent + '%%';
+        document.getElementById('progress-percent').textContent = percent + '%%';
+        document.getElementById('progress-stage').textContent = stage;
+        document.getElementById('progress-track').setAttribute('aria-valuenow', percent);
+      };
       const makeProgressId = () => {
         if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
         if (window.crypto && crypto.getRandomValues) {
@@ -211,11 +220,30 @@ func RenderLoadingPage(dist *model.DistFile, user *model.User) string {
       const progressEvents = new EventSource(progressUrl.toString());
       progressEvents.onmessage = event => {
         const progress = JSON.parse(event.data);
-        document.getElementById('progress-fill').style.width = progress.percent + '%%';
-        document.getElementById('progress-percent').textContent = progress.percent + '%%';
-        document.getElementById('progress-stage').textContent = progress.stage;
-        document.getElementById('progress-track').setAttribute('aria-valuenow', progress.percent);
+        updateProgress(progress.percent, progress.stage);
         if (progress.done) progressEvents.close();
+      };
+
+      const readBlobWithProgress = async response => {
+        if (!response.body || !response.body.getReader) return response.blob();
+        const total = Number(response.headers.get('Content-Length')) || 0;
+        const reader = response.body.getReader();
+        const chunks = [];
+        let received = 0;
+        while (true) {
+          const {done, value} = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.byteLength;
+          const percent = total > 0
+            ? Math.min(99, 90 + Math.floor(Math.min(1, received / total) * 9))
+            : displayedPercent;
+          const stage = total > 0
+            ? '正在接收配置包（' + (received / 1048576).toFixed(1) + ' / ' + (total / 1048576).toFixed(1) + ' MB）'
+            : '正在接收配置包（' + (received / 1048576).toFixed(1) + ' MB）';
+          updateProgress(percent, stage);
+        }
+        return new Blob(chunks, {type: response.headers.get('Content-Type') || 'application/zip'});
       };
 
       const url = new URL(window.location.href);
@@ -224,7 +252,7 @@ func RenderLoadingPage(dist *model.DistFile, user *model.User) string {
       fetch(url.toString())
         .then(res => {
           if (!res.ok) throw new Error('HTTP ' + res.status);
-          return res.blob();
+          return readBlobWithProgress(res);
         })
         .then(blob => {
           const blobUrl = URL.createObjectURL(blob);
@@ -237,10 +265,7 @@ func RenderLoadingPage(dist *model.DistFile, user *model.User) string {
           document.getElementById('status-title').textContent = '配置包生成完成！';
           document.getElementById('status-desc').textContent = '若浏览器未自动触发下载，请点击下方按钮：';
           document.getElementById('loader-icon').textContent = '✅';
-          document.getElementById('progress-fill').style.width = '100%%';
-          document.getElementById('progress-percent').textContent = '100%%';
-          document.getElementById('progress-stage').textContent = '配置包生成完成';
-          document.getElementById('progress-track').setAttribute('aria-valuenow', '100');
+          updateProgress(100, '配置包已接收，正在开始下载');
           progressEvents.close();
           document.getElementById('download-btn').href = blobUrl;
           document.getElementById('download-btn').download = '%s';

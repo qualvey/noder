@@ -13,10 +13,12 @@ func TestRenderLoadingPageIncludesProgressUIAndDownload(t *testing.T) {
 	for _, expected := range []string{
 		"id=\"progress-fill\"",
 		"new EventSource(progressUrl.toString())",
+		"response.body.getReader()",
+		"Math.min(99, 90 + Math.floor",
 		"url.searchParams.set('download', '1')",
 		"url.searchParams.set('progress_id', progressId)",
 		"配置包生成完成！",
-		"progress.percent + '%'",
+		"style.width = percent + '%'",
 	} {
 		if !strings.Contains(html, expected) {
 			t.Errorf("loading page does not contain %q", expected)
@@ -24,5 +26,8 @@ func TestRenderLoadingPageIncludesProgressUIAndDownload(t *testing.T) {
 	}
 	if strings.Contains(html, "%!") {
 		t.Fatalf("loading page contains an unexpanded fmt format directive")
+	}
+	if strings.Index(html, "updateProgress(100") < strings.Index(html, "a.click();") {
+		t.Fatalf("loading page marks completion before triggering the download")
 	}
 }
