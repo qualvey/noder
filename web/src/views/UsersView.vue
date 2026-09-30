@@ -3,14 +3,14 @@
 import { computed, inject, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
-import type { DistFile, Node, User } from '../types'
+import type { DistFile, Node, User, UserDownload } from '../types'
 import { buildDownloadLink, buildMihomoLink, buildSubLink, copyText } from '../utils'
 import UserFormModal from '../components/UserFormModal.vue'
 import ContextMenu, { type ContextMenuItem } from '../components/ContextMenu.vue'
 import { ToastType } from '@/App.vue'
 import { useFuzzySearch } from '../composables'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const toast = inject('toast') as (msg: string, type?: ToastType) => void
 const popover = inject('popover') as { show: (el: Element, title: string, cb: () => void) => void }
 const updateMetrics = inject('metrics') as (nodes: number, users: number) => void
@@ -24,6 +24,9 @@ const editingUser = ref<User | null>(null)
 const ctxMenu = ref<{ x: number; y: number; user: User } | null>(null)
 const downloading = ref<string | null>(null) // waiting 页文案；null=不显示
 const loading = ref(true)
+const downloadHistoryUser = ref<User | null>(null)
+const downloadHistory = ref<UserDownload[]>([])
+const loadingDownloadHistory = ref(false)
 
 // 右键菜单：复制订阅链接
 function onRowContextMenu(e: MouseEvent, user: User) {
@@ -110,6 +113,24 @@ function getNodeName(id: number) {
 function getNodeProtocol(id: number) {
   const node = nodes.value.find((n) => n.id === id)
   return node?.protocol || ''
+}
+
+function formatDownloadTime(value?: string | null) {
+  if (!value) return t('users.noDownloads')
+  return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+}
+
+async function showDownloadHistory(user: User) {
+  downloadHistoryUser.value = user
+  downloadHistory.value = []
+  loadingDownloadHistory.value = true
+  try {
+    downloadHistory.value = await api.users.downloads(user.id)
+  } catch (e) {
+    toast((e as Error).message, 'error')
+  } finally {
+    loadingDownloadHistory.value = false
+  }
 }
 
 // 复制 ZIP 配置包下载链接
@@ -305,12 +326,13 @@ onMounted(() => fetchData())
             <th style="min-width: 260px">{{ t('users.colCredentials') }}</th>
             <th style="width: 120px; text-align: center">{{ t('users.colBoundNodes') }}</th>
             <th style="width: 100px; text-align: center">{{ t('users.colStatus') }}</th>
+            <th style="min-width: 190px; text-align: center">{{ t('users.colDownloads') }}</th>
             <th style="width: 90px; text-align: center">{{ t('users.colActions') }}</th>
           </tr>
         </thead>
         <tbody v-if="loading && !users.length">
           <tr>
-            <td :colspan="6" style="text-align: center; padding: 40px 0;">
+            <td :colspan="7" style="text-align: center; padding: 40px 0;">
               <div class="table-loading-container">
                 <!-- SVG 转圈 -->
                 <svg class="spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -324,12 +346,12 @@ onMounted(() => fetchData())
         </tbody>
         <tbody v-else-if="!users.length">
           <tr>
-            <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px">{{ t('users.emptyText') }}</td>
+            <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px">{{ t('users.emptyText') }}</td>
           </tr>
         </tbody>
         <tbody v-else-if="!filteredUsers.length">
           <tr>
-            <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 36px">
+            <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 36px">
               <div style="font-size: 1.8rem; margin-bottom: 8px">🔍</div>
               <div style="margin-bottom: 12px">{{ t('users.noMatchingUsers') }}</div>
               <button class="btn btn-secondary btn-sm" @click="clearSearch">{{ t('common.clearFilter') }}</button>
@@ -408,6 +430,12 @@ onMounted(() => fetchData())
               </span>
             </td>
             <td style="text-align: center">
+              <button class="download-summary" :title="t('users.viewDownloadHistory')" @click.stop="showDownloadHistory(user)">
+                <span>{{ formatDownloadTime(user.last_download_at) }}</span>
+                <span class="download-count">{{ t('users.downloadCount', { count: user.download_count || 0 }) }}</span>
+              </button>
+            </td>
+            <td style="text-align: center">
               <div style="display: flex; gap: 8px; justify-content: center; align-items: center; white-space: nowrap">
                 <IconButton icon="edit" :tip="t('common.edit')" variant="secondary" @click="openEdit(user)" />
                 <IconButton icon="delete" :tip="t('common.delete')" variant="danger"
@@ -425,6 +453,26 @@ onMounted(() => fetchData())
 
   <ContextMenu v-if="ctxMenu" :x="ctxMenu.x" :y="ctxMenu.y" :title="ctxMenu.user.name" :items="ctxMenuItems()"
     @close="closeCtxMenu" />
+
+  <div v-if="downloadHistoryUser" class="modal-overlay active" @click.self="downloadHistoryUser = null">
+    <div class="modal download-history-modal">
+      <div class="modal-header">
+        <div class="modal-title">{{ t('users.downloadHistoryTitle', { name: downloadHistoryUser.name }) }}</div>
+        <button class="modal-close" @click="downloadHistoryUser = null">&times;</button>
+      </div>
+      <div class="download-history-content">
+        <div v-if="loadingDownloadHistory" class="download-history-empty">{{ t('common.loading') }}</div>
+        <div v-else-if="!downloadHistory.length" class="download-history-empty">{{ t('users.noDownloads') }}</div>
+        <div v-else class="download-history-list">
+          <div v-for="item in downloadHistory" :key="item.id" class="download-history-item">
+            <span class="download-history-name">{{ item.file_name }}</span>
+            <time>{{ formatDownloadTime(item.downloaded_at) }}</time>
+          </div>
+        </div>
+        <div v-if="downloadHistory.length === 100" class="download-history-hint">{{ t('users.historyLimit') }}</div>
+      </div>
+    </div>
+  </div>
 
   <!-- ZIP 生成等待页 -->
   <div v-if="downloading" class="download-waiting">
@@ -446,6 +494,27 @@ onMounted(() => fetchData())
   user-select: none;
   white-space: nowrap;
 }
+.download-summary {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-main);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+}
+.download-summary:hover { color: var(--primary); }
+.download-count { color: var(--text-muted); font-size: 0.7rem; }
+.download-history-modal { max-width: 620px; }
+.download-history-content { padding: 16px 20px 20px; max-height: 65vh; overflow-y: auto; }
+.download-history-list { display: flex; flex-direction: column; gap: 8px; }
+.download-history-item { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 12px; border: 1px solid var(--border-glass); border-radius: var(--radius-sm); }
+.download-history-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.download-history-item time { flex-shrink: 0; color: var(--text-muted); font-size: 0.78rem; }
+.download-history-empty, .download-history-hint { color: var(--text-muted); text-align: center; padding: 18px; font-size: 0.85rem; }
+.download-history-hint { padding-bottom: 0; font-size: 0.75rem; }
 .cred-label {
   font-size: 0.7rem;
   font-weight: 700;

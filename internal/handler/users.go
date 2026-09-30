@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -9,9 +10,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/uptrace/bun"
 	"noder/internal/config"
 	"noder/internal/db"
 	"noder/internal/model"
@@ -22,6 +25,7 @@ func RegisterUserRoutes(r chi.Router) {
 		r.Use(AdminAuth)
 		r.Post("/", CreateUser)
 		r.Get("/", ListUsers)
+		r.Get("/{id}/downloads", ListUserDownloads)
 		r.Get("/{id}", GetUser)
 		r.Put("/{id}", UpdateUser)
 		r.Delete("/{id}", DeleteUser)
@@ -71,16 +75,69 @@ type UserCreateReq struct {
 }
 
 type UserReadResp struct {
-	ID             int64   `json:"id"`
-	Name           string  `json:"name"`
-	IsActive       bool    `json:"is_active"`
-	Token          string  `json:"token"`
-	UUID           *string `json:"uuid"`
-	Password       *string `json:"password"`
-	Remark         *string `json:"remark"`
-	ConfigOverride *string `json:"config_override"`
-	NodeOrder      *string `json:"node_order"`
-	NodeIDs        []int64 `json:"node_ids"`
+	ID             int64      `json:"id"`
+	Name           string     `json:"name"`
+	IsActive       bool       `json:"is_active"`
+	Token          string     `json:"token"`
+	UUID           *string    `json:"uuid"`
+	Password       *string    `json:"password"`
+	Remark         *string    `json:"remark"`
+	ConfigOverride *string    `json:"config_override"`
+	NodeOrder      *string    `json:"node_order"`
+	NodeIDs        []int64    `json:"node_ids"`
+	DownloadCount  int        `json:"download_count"`
+	LastDownloadAt *time.Time `json:"last_download_at,omitempty"`
+}
+
+type UserDownloadReadResp struct {
+	ID           int64     `json:"id"`
+	FileID       int64     `json:"file_id"`
+	FileName     string    `json:"file_name"`
+	DownloadedAt time.Time `json:"downloaded_at"`
+}
+
+type userDownloadStats struct {
+	Count int
+	Last  *time.Time
+}
+
+func loadUserDownloadStats(ctx context.Context, userIDs []int64) map[int64]userDownloadStats {
+	stats := make(map[int64]userDownloadStats, len(userIDs))
+	if len(userIDs) == 0 {
+		return stats
+	}
+	type downloadStatRow struct {
+		UserID int64     `bun:"user_id"`
+		Count  int       `bun:"count"`
+		Last   time.Time `bun:"last"`
+	}
+	var rows []downloadStatRow
+	if err := db.DB.NewSelect().TableExpr("user_download_log").
+		ColumnExpr("user_id").
+		ColumnExpr("COUNT(*) AS count").
+		ColumnExpr("MAX(downloaded_at) AS last").
+		Where("user_id IN (?)", bun.In(userIDs)).
+		Group("user_id").Scan(ctx, &rows); err != nil {
+		return stats
+	}
+	for _, row := range rows {
+		last := row.Last
+		stats[row.UserID] = userDownloadStats{Count: row.Count, Last: &last}
+	}
+	return stats
+}
+
+func attachDownloadStats(ctx context.Context, users []*model.User, responses []UserReadResp) {
+	ids := make([]int64, 0, len(users))
+	for _, user := range users {
+		ids = append(ids, user.ID)
+	}
+	stats := loadUserDownloadStats(ctx, ids)
+	for i, user := range users {
+		stat := stats[user.ID]
+		responses[i].DownloadCount = stat.Count
+		responses[i].LastDownloadAt = stat.Last
+	}
 }
 
 func toUserRead(u *model.User) UserReadResp {
@@ -210,6 +267,7 @@ func ListUsers(w http.ResponseWriter, r *http.Request) {
 	if res == nil {
 		res = []UserReadResp{}
 	}
+	attachDownloadStats(r.Context(), users, res)
 	RespondJSON(w, http.StatusOK, res)
 }
 
@@ -228,7 +286,45 @@ func GetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	RespondJSON(w, http.StatusOK, toUserRead(&user))
+	response := []UserReadResp{toUserRead(&user)}
+	attachDownloadStats(r.Context(), []*model.User{&user}, response)
+	RespondJSON(w, http.StatusOK, response[0])
+}
+
+func ListUserDownloads(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	exists, err := db.DB.NewSelect().Model((*model.User)(nil)).Where("id = ?", id).Exists(r.Context())
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !exists {
+		RespondError(w, http.StatusNotFound, "User not found")
+		return
+	}
+
+	var logs []model.UserDownloadLog
+	err = db.DB.NewSelect().Model(&logs).Where("user_id = ?", id).
+		OrderExpr("downloaded_at DESC, id DESC").Limit(100).Scan(r.Context())
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	responses := make([]UserDownloadReadResp, 0, len(logs))
+	for _, entry := range logs {
+		responses = append(responses, UserDownloadReadResp{
+			ID:           entry.ID,
+			FileID:       entry.FileID,
+			FileName:     entry.FileName,
+			DownloadedAt: entry.DownloadedAt,
+		})
+	}
+	RespondJSON(w, http.StatusOK, responses)
 }
 
 func UpdateUser(w http.ResponseWriter, r *http.Request) {
@@ -326,7 +422,9 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	// 重新拉取关系
 	_ = db.DB.NewSelect().Model(&user).Relation("Nodes").Where("user.id = ?", id).Scan(r.Context())
-	RespondJSON(w, http.StatusOK, toUserRead(&user))
+	response := []UserReadResp{toUserRead(&user)}
+	attachDownloadStats(r.Context(), []*model.User{&user}, response)
+	RespondJSON(w, http.StatusOK, response[0])
 }
 
 func DeleteUser(w http.ResponseWriter, r *http.Request) {

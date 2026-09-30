@@ -51,6 +51,7 @@ func CreateDBAndTables(ctx context.Context) error {
 		(*model.Node)(nil),
 		(*model.User)(nil),
 		(*model.DistFile)(nil),
+		(*model.UserDownloadLog)(nil),
 		(*model.Template)(nil),
 		(*model.TemplateHistory)(nil),
 		(*model.AppSetting)(nil),
@@ -60,6 +61,9 @@ func CreateDBAndTables(ctx context.Context) error {
 		if _, err := DB.NewCreateTable().Model(m).IfNotExists().Exec(ctx); err != nil {
 			return err
 		}
+	}
+	if _, err := DB.NewCreateIndex().Model((*model.UserDownloadLog)(nil)).IfNotExists().Index("user_download_log_user_time_idx").Column("user_id", "downloaded_at").Exec(ctx); err != nil {
+		return err
 	}
 
 	// 兼容旧库迁移 (ALTER TABLE)

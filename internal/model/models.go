@@ -124,6 +124,18 @@ type DistFile struct {
 	CreatedAt    string  `bun:"created_at" json:"created_at"`
 }
 
+// UserDownloadLog records a successful file download authenticated by a user token.
+type UserDownloadLog struct {
+	bun.BaseModel `bun:"table:user_download_log"`
+
+	ID           int64     `bun:"id,pk,autoincrement" json:"id"`
+	UserID       int64     `bun:"user_id,notnull" json:"user_id"`
+	UserName     string    `bun:"user_name,notnull" json:"user_name"`
+	FileID       int64     `bun:"file_id,notnull" json:"file_id"`
+	FileName     string    `bun:"file_name,notnull" json:"file_name"`
+	DownloadedAt time.Time `bun:"downloaded_at,nullzero,notnull,default:current_timestamp" json:"downloaded_at"`
+}
+
 // Template 模板模型
 type Template struct {
 	bun.BaseModel `bun:"table:template"`

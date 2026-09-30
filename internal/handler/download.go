@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -160,7 +161,7 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 			}
 			percent := 10
 			if total > 0 {
-				percent += int(float64(processed) / float64(total) * 85)
+				percent += int(float64(processed) / float64(total) * 75)
 			}
 			publishDownloadProgress(progressID, percent, fmt.Sprintf("正在处理压缩包文件（%d/%d）", processed, total), false)
 		})
@@ -173,7 +174,7 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 		}
 		data = renderedZip
 		if progressID != "" {
-			publishDownloadProgress(progressID, 100, "配置包生成完成", true)
+			publishDownloadProgress(progressID, 90, "配置包已生成，准备传输", false)
 		}
 	}
 	contentType := "application/octet-stream"
@@ -188,6 +189,10 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	if progressID != "" {
+		// Allow reverse proxies such as nginx to forward ZIP chunks as they arrive.
+		w.Header().Set("X-Accel-Buffering", "no")
+	}
 
 	// 对普通下载添加 Content-Disposition
 	escapedName := url.PathEscape(outFileName)
@@ -195,5 +200,25 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", cd)
 
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	written, writeErr := w.Write(data)
+	if progressID != "" {
+		if writeErr != nil || written != len(data) {
+			publishDownloadProgress(progressID, 90, "配置包传输中断", true)
+		} else {
+			// The browser measures the remaining transfer from the response stream.
+			publishDownloadProgress(progressID, 90, "正在完成下载", true)
+		}
+	}
+	if matchedUser != nil && writeErr == nil && written == len(data) {
+		_, logErr := db.DB.NewInsert().Model(&model.UserDownloadLog{
+			UserID:       matchedUser.ID,
+			UserName:     matchedUser.Name,
+			FileID:       dist.ID,
+			FileName:     outFileName,
+			DownloadedAt: time.Now().UTC(),
+		}).Exec(r.Context())
+		if logErr != nil {
+			log.Printf("failed to record download for user %d and file %d: %v", matchedUser.ID, dist.ID, logErr)
+		}
+	}
 }

@@ -31,6 +31,15 @@ export interface User {
   remark?: string | null
   config_override?: string | null
   node_ids: number[]
+  download_count: number
+  last_download_at?: string | null
+}
+
+export interface UserDownload {
+  id: number
+  file_id: number
+  file_name: string
+  downloaded_at: string
 }
 
 export type FileType = 'apk' | 'zip' | 'text'
