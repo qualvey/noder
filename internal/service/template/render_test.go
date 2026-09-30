@@ -75,3 +75,25 @@ func TestRenderZipForUser(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderZipForUserToRendersOnlySelectedFile(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	config, _ := zw.Create("folder/config.json")
+	_, _ = config.Write([]byte(`{"token":"{{token}}"}`))
+	readme, _ := zw.Create("readme.txt")
+	_, _ = readme.Write([]byte("unrelated content"))
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	user := &model.User{Token: "streamed-token"}
+	templateName := "config.json"
+	var output bytes.Buffer
+	if err := RenderZipForUserTo(buf.Bytes(), &templateName, user, nil, nil, &output); err != nil {
+		t.Fatalf("RenderZipForUserTo failed: %v", err)
+	}
+	if got := output.String(); got != `{"token":"streamed-token"}` {
+		t.Fatalf("unexpected rendered output: %s", got)
+	}
+}

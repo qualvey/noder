@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"path/filepath"
 	"regexp"
@@ -29,9 +30,9 @@ func BuildTemplateContext(user *model.User, nodes []*model.Node, includeMihomo b
 	var nodeMeta []map[string]interface{}
 	for _, n := range activeNodes {
 		nodeMeta = append(nodeMeta, map[string]interface{}{
-			"node_name": n.NodeName,
-			"protocol":  n.Protocol,
-			"server":    n.ServerAddress,
+			"node_name":   n.NodeName,
+			"protocol":    n.Protocol,
+			"server":      n.ServerAddress,
 			"server_port": n.ServerPort,
 		})
 	}
@@ -69,15 +70,15 @@ func BuildTemplateContext(user *model.User, nodes []*model.Node, includeMihomo b
 	}
 
 	ctx := map[string]string{
-		"uuid":            uuidStr,
-		"password":        pwdStr,
-		"token":           user.Token,
-		"name":            user.Name,
-		"user_name":       user.Name,
-		"node_list_yaml":  yamlDump(nodeMeta),
-		"node_list_json":  jsonIndent(nodeMeta),
-		"outbounds_yaml":  yamlDump(outbounds),
-		"outbounds_json":  jsonIndent(outbounds),
+		"uuid":           uuidStr,
+		"password":       pwdStr,
+		"token":          user.Token,
+		"name":           user.Name,
+		"user_name":      user.Name,
+		"node_list_yaml": yamlDump(nodeMeta),
+		"node_list_json": jsonIndent(nodeMeta),
+		"outbounds_yaml": yamlDump(outbounds),
+		"outbounds_json": jsonIndent(outbounds),
 	}
 
 	if includeMihomo {
@@ -96,7 +97,10 @@ func BuildTemplateContext(user *model.User, nodes []*model.Node, includeMihomo b
 var keyedPattern = regexp.MustCompile(`(?i)(["']?[\w.\-]*?(?:token|uuid|password)["']?\s*[:=]\s*)(["']?)([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(["']?)`)
 
 func RenderTemplateText(text string, user *model.User, nodes []*model.Node, knownTokens []string) string {
-	ctx := BuildTemplateContext(user, nodes, strings.Contains(text, MihomoPlaceholder))
+	return RenderTemplateTextWithContext(text, user, BuildTemplateContext(user, nodes, strings.Contains(text, MihomoPlaceholder)), knownTokens)
+}
+
+func RenderTemplateTextWithContext(text string, user *model.User, ctx map[string]string, knownTokens []string) string {
 
 	for k, v := range ctx {
 		text = strings.ReplaceAll(text, "{{"+k+"}}", v)
@@ -147,7 +151,6 @@ func RenderZipForUser(zipData []byte, templateName *string, user *model.User, no
 	if err != nil {
 		return nil, err
 	}
-
 	targetName := ""
 	if templateName != nil && *templateName != "" {
 		targetName = filepath.Base(*templateName)
@@ -155,7 +158,6 @@ func RenderZipForUser(zipData []byte, templateName *string, user *model.User, no
 
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-
 	for _, f := range zr.File {
 		rc, err := f.Open()
 		if err != nil {
@@ -166,17 +168,11 @@ func RenderZipForUser(zipData []byte, templateName *string, user *model.User, no
 		if err != nil {
 			return nil, err
 		}
-
-		currName := filepath.Base(f.Name)
-		// 如果未指定 templateName，或者匹配到目标文件
-		if targetName == "" || currName == targetName {
-			// 尝试 utf8 解码并替换
-			rendered := RenderTemplateText(string(data), user, nodes, knownTokens)
-			data = []byte(rendered)
+		if targetName == "" || filepath.Base(f.Name) == targetName {
+			ctx := BuildTemplateContext(user, nodes, strings.Contains(string(data), MihomoPlaceholder))
+			data = []byte(RenderTemplateTextWithContext(string(data), user, ctx, knownTokens))
 		}
-
-		header := f.FileHeader
-		w, err := zw.CreateHeader(&header)
+		w, err := zw.CreateHeader(&f.FileHeader)
 		if err != nil {
 			return nil, err
 		}
@@ -184,10 +180,49 @@ func RenderZipForUser(zipData []byte, templateName *string, user *model.User, no
 			return nil, err
 		}
 	}
-
 	if err := zw.Close(); err != nil {
 		return nil, err
 	}
-
 	return buf.Bytes(), nil
+}
+
+// RenderZipForUserTo renders only the selected ZIP member and writes its bytes to dst.
+// This avoids recompressing every file when the personalized content is a single config.
+func RenderZipForUserTo(zipData []byte, templateName *string, user *model.User, nodes []*model.Node, knownTokens []string, dst io.Writer) error {
+	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		return err
+	}
+
+	targetName := ""
+	if templateName != nil && *templateName != "" {
+		targetName = filepath.Base(*templateName)
+	}
+
+	var target *zip.File
+	for _, f := range zr.File {
+		currName := filepath.Base(f.Name)
+		if targetName != "" && currName != targetName {
+			continue
+		}
+		target = f
+		break
+	}
+	if target == nil {
+		return errors.New("template file not found in ZIP")
+	}
+
+	rc, err := target.Open()
+	if err != nil {
+		return err
+	}
+	data, err := io.ReadAll(rc)
+	_ = rc.Close()
+	if err != nil {
+		return err
+	}
+
+	ctx := BuildTemplateContext(user, nodes, strings.Contains(string(data), MihomoPlaceholder))
+	_, err = io.WriteString(dst, RenderTemplateTextWithContext(string(data), user, ctx, knownTokens))
+	return err
 }
