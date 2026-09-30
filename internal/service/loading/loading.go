@@ -3,7 +3,6 @@ package loading
 import (
 	"fmt"
 	"html"
-	"strings"
 
 	"noder/internal/model"
 )
@@ -18,11 +17,6 @@ func RenderLoadingPage(dist *model.DistFile, user *model.User) string {
 	safeFilename := html.EscapeString(rawFilename)
 	safeUserName := html.EscapeString(user.Name)
 
-	textFilename := rawFilename
-	if len(textFilename) >= 4 && strings.EqualFold(textFilename[len(textFilename)-4:], ".zip") {
-		textFilename = textFilename[:len(textFilename)-4] + ".txt"
-	}
-	safeTextFilename := html.EscapeString(textFilename)
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -191,20 +185,18 @@ func RenderLoadingPage(dist *model.DistFile, user *model.User) string {
   <script>
     (function() {
       const url = new URL(window.location.href);
+      url.searchParams.set('download', '1');
       fetch(url.toString())
-        .then(res => {
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          return res.text();
-        })
-        .then(text => {
-          const blobUrl = URL.createObjectURL(new Blob([text], {type: 'text/plain;charset=utf-8'}));
+        .then(res => res.blob())
+        .then(blob => {
+          const blobUrl = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = blobUrl;
           a.download = '%s';
           document.body.appendChild(a);
           a.click();
           a.remove();
-          document.getElementById('status-title').textContent = '配置生成完成！';
+          document.getElementById('status-title').textContent = '配置包生成完成！';
           document.getElementById('status-desc').textContent = '若浏览器未自动触发下载，请点击下方按钮：';
           document.getElementById('loader-icon').textContent = '✅';
           document.getElementById('download-btn').href = blobUrl;
@@ -219,5 +211,5 @@ func RenderLoadingPage(dist *model.DistFile, user *model.User) string {
     })();
   </script>
 </body>
-</html>`, safeFilename, safeFilename, safeUserName, safeTextFilename, safeTextFilename)
+</html>`, safeFilename, safeFilename, safeUserName, safeFilename, safeFilename)
 }

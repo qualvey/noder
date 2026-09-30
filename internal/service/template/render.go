@@ -4,7 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
-	"errors"
+	"hash/crc32"
 	"io"
 	"path/filepath"
 	"regexp"
@@ -159,6 +159,14 @@ func RenderZipForUser(zipData []byte, templateName *string, user *model.User, no
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	for _, f := range zr.File {
+		renderedEntry := targetName == "" || filepath.Base(f.Name) == targetName
+		if !renderedEntry {
+			if err := zw.Copy(f); err != nil {
+				return nil, err
+			}
+			continue
+		}
+
 		rc, err := f.Open()
 		if err != nil {
 			return nil, err
@@ -168,15 +176,22 @@ func RenderZipForUser(zipData []byte, templateName *string, user *model.User, no
 		if err != nil {
 			return nil, err
 		}
-		if targetName == "" || filepath.Base(f.Name) == targetName {
-			ctx := BuildTemplateContext(user, nodes, strings.Contains(string(data), MihomoPlaceholder))
-			data = []byte(RenderTemplateTextWithContext(string(data), user, ctx, knownTokens))
-		}
-		w, err := zw.CreateHeader(&f.FileHeader)
+		ctx := BuildTemplateContext(user, nodes, strings.Contains(string(data), MihomoPlaceholder))
+		rendered := []byte(RenderTemplateTextWithContext(string(data), user, ctx, knownTokens))
+
+		header := f.FileHeader
+		header.Method = zip.Store
+		header.Flags &^= 0x08
+		header.CRC32 = crc32.ChecksumIEEE(rendered)
+		header.CompressedSize = uint32(len(rendered))
+		header.UncompressedSize = uint32(len(rendered))
+		header.CompressedSize64 = uint64(len(rendered))
+		header.UncompressedSize64 = uint64(len(rendered))
+		w, err := zw.CreateHeader(&header)
 		if err != nil {
 			return nil, err
 		}
-		if _, err := w.Write(data); err != nil {
+		if _, err := w.Write(rendered); err != nil {
 			return nil, err
 		}
 	}
@@ -209,7 +224,7 @@ func RenderZipForUserTo(zipData []byte, templateName *string, user *model.User, 
 		break
 	}
 	if target == nil {
-		return errors.New("template file not found in ZIP")
+		return zip.ErrFormat
 	}
 
 	rc, err := target.Open()

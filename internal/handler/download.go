@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 	"noder/internal/db"
 	"noder/internal/model"
 	"noder/internal/service/file"
+	"noder/internal/service/loading"
 	"noder/internal/service/template"
 )
 
@@ -109,30 +109,17 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 	downloadParam := r.URL.Query().Get("download")
 	rawParam := r.URL.Query().Get("raw")
 	isDirectDownload := downloadParam == "1" || downloadParam == "true" || rawParam == "1" || rawParam == "true"
+	if matchedUser != nil && dist.FileType == "zip" && !isDirectDownload {
+		html := loading.RenderLoadingPage(&dist, matchedUser)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(html))
+		return
+	}
 
 	data, err := file.ReadFileContent(&dist)
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, "读取文件失败: "+err.Error())
-		return
-	}
-
-	// ZIP 个性化配置直接流式返回模板文本；只有显式下载时才重新生成 ZIP。
-	if matchedUser != nil && dist.FileType == "zip" && !isDirectDownload && dist.TemplateName != nil && *dist.TemplateName != "" {
-		var allUsers []*model.User
-		_ = db.DB.NewSelect().Model(&allUsers).Column("token").Scan(r.Context())
-		var knownTokens []string
-		for _, au := range allUsers {
-			if au.Token != "" {
-				knownTokens = append(knownTokens, au.Token)
-			}
-		}
-
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Content-Disposition", "inline")
-		w.WriteHeader(http.StatusOK)
-		if err := template.RenderZipForUserTo(data, dist.TemplateName, matchedUser, matchedUser.Nodes, knownTokens, w); err != nil {
-			log.Printf("渲染个性化模板失败: %v", err)
-		}
 		return
 	}
 
@@ -159,7 +146,6 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 		}
 		data = renderedZip
 	}
-
 	contentType := "application/octet-stream"
 	switch dist.FileType {
 	case "apk":

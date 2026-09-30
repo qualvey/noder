@@ -3,6 +3,7 @@ package template
 import (
 	"archive/zip"
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 
@@ -95,5 +96,51 @@ func TestRenderZipForUserToRendersOnlySelectedFile(t *testing.T) {
 	}
 	if got := output.String(); got != `{"token":"streamed-token"}` {
 		t.Fatalf("unexpected rendered output: %s", got)
+	}
+}
+
+func TestRenderZipForUserPreservesUntouchedStoredEntry(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	config, _ := zw.Create("config.json")
+	_, _ = config.Write([]byte(`{"token":"{{token}}"}`))
+	readmeHeader := &zip.FileHeader{Name: "readme.txt", Method: zip.Store}
+	readme, err := zw.CreateHeader(readmeHeader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = readme.Write([]byte("static"))
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	user := &model.User{Token: "zip-token"}
+	templateName := "config.json"
+	rendered, err := RenderZipForUser(buf.Bytes(), &templateName, user, nil, nil)
+	if err != nil {
+		t.Fatalf("RenderZipForUser failed: %v", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(rendered), int64(len(rendered)))
+	if err != nil {
+		t.Fatalf("read rendered archive: %v", err)
+	}
+	if len(zr.File) != 2 {
+		t.Fatalf("expected 2 ZIP entries, got %d", len(zr.File))
+	}
+	for _, f := range zr.File {
+		if f.Name == "readme.txt" {
+			if f.Method != zip.Store {
+				t.Errorf("expected untouched stored entry to remain Store, got method %d", f.Method)
+			}
+			rc, err := f.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			contents, err := io.ReadAll(rc)
+			_ = rc.Close()
+			if err != nil || string(contents) != "static" {
+				t.Errorf("unexpected readme content %q, error %v", contents, err)
+			}
+		}
 	}
 }
