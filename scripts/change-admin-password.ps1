@@ -3,8 +3,8 @@
     修改 Noder 数据库中的管理员 Token。
 
 .DESCRIPTION
-    强制覆盖 SQLite appsetting 表中的管理员 Token，不要求旧 Token。
-    仅允许通过本机 localhost 接口执行。
+    通过本机 localhost 接口强制覆盖 SQLite appsetting 表中的管理员 Token，
+    不要求旧 Token。
 
 .EXAMPLE
     .\scripts\change-admin-password.ps1
