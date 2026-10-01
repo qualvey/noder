@@ -48,6 +48,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ ! -f "${DB_FILE}" ]]; then
+    SCRIPT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+    if [[ -f "${SCRIPT_ROOT}/data.db" ]]; then
+        DB_FILE="${SCRIPT_ROOT}/data.db"
+    fi
+fi
+
 command -v sqlite3 >/dev/null 2>&1 || {
     echo "错误：未找到 sqlite3，请先安装 sqlite3。" >&2
     exit 1
@@ -69,7 +76,18 @@ fi
     echo "错误：Token 只能包含字母、数字及 . _ ~ + / = -" >&2
     exit 1
 }
-[[ -f "${DB_FILE}" ]] || { echo "错误：数据库不存在：${DB_FILE}" >&2; exit 1; }
+[[ -f "${DB_FILE}" ]] || {
+    echo "错误：数据库不存在：${DB_FILE}" >&2
+    echo "可使用 --db-file 指定实际数据库路径。" >&2
+    exit 1
+}
+
+DB_DIR="$(dirname -- "${DB_FILE}")"
+[[ -w "${DB_DIR}" ]] || {
+    echo "错误：数据库目录不可写：${DB_DIR}" >&2
+    echo "请使用 sudo 运行，或使用数据库所属用户运行。" >&2
+    exit 1
+}
 
 SQL="INSERT INTO appsetting (key, value) VALUES ('admin_secret_token', '$(printf '%s' "${NEW_TOKEN}" | sed "s/'/''/g")') ON CONFLICT(key) DO UPDATE SET value = excluded.value;"
 sqlite3 "${DB_FILE}" "${SQL}"
