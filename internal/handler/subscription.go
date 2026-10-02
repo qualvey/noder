@@ -10,12 +10,14 @@ import (
 	"noder/internal/model"
 	"noder/internal/service/mihomo"
 	"noder/internal/service/singbox"
+	"noder/internal/service/xray"
 )
 
 func RegisterSubscriptionRoutes(r chi.Router) {
 	r.Get("/sub", GetSingboxConfig)
 	r.Get("/node", GetUserNodes)
 	r.Get("/mihomo", GetMihomoConfig)
+	r.Get("/xray", GetXrayConfig)
 	r.Get("/api/user/verify", VerifyUserToken)
 	r.Get("/api/user/nodes", GetNodesForUser)
 }
@@ -135,6 +137,29 @@ func GetMihomoConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(yamlBytes)
+}
+
+func GetXrayConfig(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	user, err := getActiveUser(r.Context(), token)
+	if err != nil {
+		HandleAPIError(w, err)
+		return
+	}
+
+	activeNodes := getUserOrderedActiveNodes(user)
+	if len(activeNodes) == 0 {
+		RespondError(w, http.StatusNotFound, "No active nodes associated with this user")
+		return
+	}
+
+	cfg, err := xray.GenerateXrayConfig(activeNodes, user)
+	if err != nil {
+		HandleAPIError(w, err)
+		return
+	}
+
+	RespondJSON(w, http.StatusOK, cfg)
 }
 
 func VerifyUserToken(w http.ResponseWriter, r *http.Request) {

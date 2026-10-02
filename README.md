@@ -105,6 +105,8 @@ make deb-all        # 构建 amd64 与 arm64 架构 deb 包
 - **请求方法**：`GET /sub?token={USER_TOKEN}`
 - **说明**：Sing-Box 客户端导入该 URL，系统会自动校验 Token 有效性，提取绑定节点的服务器信息与用户的专属 UUID/密码，返回完整的 Sing-Box 配置文件 JSON。
 
+- **Xray**：`GET /xray?token={USER_TOKEN}`，读取 `templates/xray.json`，保留模板其它内容，仅追加该用户绑定的 VLESS + Reality outbound。
+
 ### 2. 用户节点查询 API (用户侧)
 - **请求方法**：`GET /node?token={USER_TOKEN}`
 - **说明**：传入用户 Token，返回该用户绑定的所有节点元数据及动态拼接好的 Sing-Box Outbound 节点配置。

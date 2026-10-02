@@ -114,7 +114,7 @@ func mountSPA(r *chi.Mux) {
 
 		// 如果是 API 或下载/订阅前缀且 404，返回标准 JSON 404
 		if strings.HasPrefix(path, "/api") || strings.HasPrefix(path, "/dl") ||
-			path == "/sub" || path == "/node" || path == "/mihomo" {
+			path == "/sub" || path == "/node" || path == "/mihomo" || path == "/xray" {
 			handler.RespondError(w, http.StatusNotFound, fmt.Sprintf("Path '%s' not found", path))
 			return
 		}

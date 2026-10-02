@@ -207,6 +207,12 @@ func seedTemplates(ctx context.Context) {
 			ContentFormat: "yaml",
 			Content:       loadMihomoTemplateYAML(),
 		},
+		{
+			Target:        "xray",
+			Name:          "Xray VLESS Reality 模板",
+			ContentFormat: "json",
+			Content:       loadXrayTemplateJSON(),
+		},
 	}
 
 	for _, tpl := range defaultTpls {
@@ -268,6 +274,13 @@ func loadMihomoTemplateYAML() string {
 	}
 	out, _ := yaml.Marshal(basic)
 	return string(out)
+}
+
+func loadXrayTemplateJSON() string {
+	if data, err := os.ReadFile(config.XrayTemplatePath); err == nil && len(data) > 0 {
+		return string(data)
+	}
+	return `{"outbounds": []}`
 }
 
 func strPtr(s string) *string {

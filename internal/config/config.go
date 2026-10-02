@@ -9,6 +9,7 @@ var (
 	BaseDir              string
 	DBPath               string
 	SingBoxTemplatePath  string
+	XrayTemplatePath     string
 	MihomoTemplatePath   string
 	StaticDir            string
 	FilesDir             string
@@ -34,6 +35,7 @@ func Init(baseDir string) {
 
 	DBPath = filepath.Join(BaseDir, "data.db")
 	SingBoxTemplatePath = filepath.Join(BaseDir, "templates", "sing-box.json")
+	XrayTemplatePath = filepath.Join(BaseDir, "templates", "xray.json")
 	MihomoTemplatePath = filepath.Join(BaseDir, "templates", "mihomo.yml")
 	StaticDir = filepath.Join(BaseDir, "static")
 	FilesDir = filepath.Join(BaseDir, "data", "files")

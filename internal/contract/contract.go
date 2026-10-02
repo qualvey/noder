@@ -209,6 +209,12 @@ var CoreRegistry = map[string]*CoreInfo{
 		SupportedProtocols: map[string]bool{"vless": true, "tuic": true},
 		ContentType:        "text/yaml",
 	},
+	"xray": {
+		Key:                "xray",
+		Name:               "Xray",
+		SupportedProtocols: map[string]bool{"vless": true},
+		ContentType:        "application/json",
+	},
 }
 
 func GetCore(core string) (*CoreInfo, error) {
@@ -218,7 +224,7 @@ func GetCore(core string) (*CoreInfo, error) {
 	}
 	info, ok := CoreRegistry[key]
 	if !ok {
-		return nil, NewBadRequest(fmt.Sprintf("Unsupported core '%s'. Available cores: mihomo, singbox", core))
+		return nil, NewBadRequest(fmt.Sprintf("Unsupported core '%s'. Available cores: mihomo, singbox, xray", core))
 	}
 	return info, nil
 }

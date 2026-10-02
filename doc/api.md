@@ -176,6 +176,7 @@ Token 下载时进行个性化渲染；远程文件还包含 `source_url`、`cac
 | --- | --- | --- |
 | `GET` | `/sub?token={token}` | Sing-Box JSON，`application/json` |
 | `GET` | `/mihomo?token={token}` | Mihomo YAML，`text/yaml` |
+| `GET` | `/xray?token={token}` | Xray JSON，追加 VLESS + Reality outbound |
 | `GET` | `/node?token={token}` | 节点及 Sing-Box outbound 数组 |
 | `GET` | `/api/user/nodes?token={token}` | Sing-Box outbound 数组 |
 | `GET` | `/api/user/verify?token={token}` | 用户摘要及 `singbox_config` |
