@@ -14,7 +14,8 @@ var (
 	StaticDir            string
 	FilesDir             string
 	AdminSecretToken     string
-	AllowedProtocols     = map[string]bool{"tuic": true, "vless": true, "anytls": true}
+	MallServiceSecret    string
+	AllowedProtocols     = map[string]bool{"tuic": true, "vless": true, "anytls": true, "socks5": true}
 	AllowedOverrideKeys  = map[string]bool{"route": true, "dns": true}
 	AllowedFileTypes     = map[string]bool{"apk": true, "zip": true, "text": true}
 	MaxFileSize          int64 = 100 * 1024 * 1024 // 100MB
@@ -43,6 +44,14 @@ func Init(baseDir string) {
 	AdminSecretToken = os.Getenv("ADMIN_SECRET_TOKEN")
 	if AdminSecretToken == "" {
 		AdminSecretToken = "admin-secret"
+	}
+
+	MallServiceSecret = os.Getenv("MALL_SERVICE_SECRET")
+	if MallServiceSecret == "" {
+		MallServiceSecret = os.Getenv("SERVICE_SECRET_TOKEN")
+	}
+	if MallServiceSecret == "" {
+		MallServiceSecret = "service-secret"
 	}
 }
 

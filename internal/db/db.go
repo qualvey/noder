@@ -92,17 +92,26 @@ func CreateDBAndTables(ctx context.Context) error {
 	`)
 
 	// 兼容旧库迁移 (ALTER TABLE)
-	nodeCols := []string{"public_key", "short_id", "fingerprint", "flow", "remark", "tag", "congestion_control", "sort_order"}
+	nodeCols := []string{"public_key", "short_id", "fingerprint", "flow", "remark", "tag", "congestion_control", "sort_order", "country"}
 	for _, col := range nodeCols {
 		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE node ADD COLUMN %s VARCHAR", col))
 	}
 	_, _ = DB.ExecContext(ctx, "UPDATE node SET tag = node_name WHERE tag IS NULL OR tag = ''")
 	_, _ = DB.ExecContext(ctx, "UPDATE node SET transport_type = NULL, path = NULL WHERE protocol = 'tuic'")
 
-	userCols := []string{"remark", "config_override", "node_order", "template_branch_id"}
+	userCols := []string{"remark", "config_override", "node_order", "template_branch_id", "external_id"}
 	for _, col := range userCols {
-		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE user ADD COLUMN %s BIGINT", col))
+		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE user ADD COLUMN %s VARCHAR", col))
 	}
+	if _, err := DB.NewCreateIndex().Model((*model.User)(nil)).IfNotExists().Index("user_external_id_idx").Column("external_id").Exec(ctx); err != nil {
+		return err
+	}
+
+	endpointCols := []string{"username", "status", "country"}
+	for _, col := range endpointCols {
+		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE endpoint ADD COLUMN %s VARCHAR", col))
+	}
+	_, _ = DB.ExecContext(ctx, "UPDATE endpoint SET status = 'active' WHERE status IS NULL OR status = ''")
 
 	fileCols := []string{"source_url", "cached_at", "download_name"}
 	for _, col := range fileCols {
@@ -209,9 +218,9 @@ func SeedDefaultData(ctx context.Context) error {
 	_, _ = DB.NewInsert().Model(&links).Exec(ctx)
 
 	endpoints := []*model.Endpoint{
-		{UserID: testUser.ID, NodeID: tuicNode.ID, Tag: tuicNode.Tag, UUID: *testUser.UUID, Password: testUser.Password, IsActive: true, SortOrder: 0},
-		{UserID: testUser.ID, NodeID: vlessNode.ID, Tag: vlessNode.Tag, UUID: *testUser.UUID, Password: testUser.Password, IsActive: true, SortOrder: 1},
-		{UserID: testUser.ID, NodeID: anytlsNode.ID, Tag: anytlsNode.Tag, UUID: *testUser.UUID, Password: testUser.Password, IsActive: true, SortOrder: 2},
+		{UserID: testUser.ID, NodeID: &tuicNode.ID, Tag: tuicNode.Tag, UUID: *testUser.UUID, Password: testUser.Password, Status: "active", IsActive: true, SortOrder: 0},
+		{UserID: testUser.ID, NodeID: &vlessNode.ID, Tag: vlessNode.Tag, UUID: *testUser.UUID, Password: testUser.Password, Status: "active", IsActive: true, SortOrder: 1},
+		{UserID: testUser.ID, NodeID: &anytlsNode.ID, Tag: anytlsNode.Tag, UUID: *testUser.UUID, Password: testUser.Password, Status: "active", IsActive: true, SortOrder: 2},
 	}
 	_, _ = DB.NewInsert().Model(&endpoints).Exec(ctx)
 

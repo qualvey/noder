@@ -69,10 +69,13 @@ func parseAndValidateConfigOverride(raw string) (*string, error) {
 
 type EndpointInput struct {
 	ID        *int64  `json:"id,omitempty"`
-	NodeID    int64   `json:"node_id"`
+	NodeID    *int64  `json:"node_id,omitempty"`
 	Tag       string  `json:"tag"`
 	UUID      *string `json:"uuid,omitempty"`
+	Username  *string `json:"username,omitempty"`
 	Password  *string `json:"password,omitempty"`
+	Status    *string `json:"status,omitempty"`
+	Country   *string `json:"country,omitempty"`
 	IsActive  *bool   `json:"is_active,omitempty"`
 	SortOrder *int    `json:"sort_order,omitempty"`
 	Remark    *string `json:"remark,omitempty"`
@@ -81,10 +84,13 @@ type EndpointInput struct {
 type EndpointReadResp struct {
 	ID        int64       `json:"id"`
 	UserID    int64       `json:"user_id"`
-	NodeID    int64       `json:"node_id"`
+	NodeID    *int64      `json:"node_id"`
 	Tag       string      `json:"tag"`
 	UUID      string      `json:"uuid"`
+	Username  *string     `json:"username,omitempty"`
 	Password  *string     `json:"password,omitempty"`
+	Status    string      `json:"status"`
+	Country   *string     `json:"country,omitempty"`
 	IsActive  bool        `json:"is_active"`
 	SortOrder int         `json:"sort_order"`
 	Remark    *string     `json:"remark,omitempty"`
@@ -99,13 +105,20 @@ func resolveEndpointUUID(rawUUID *string) string {
 }
 
 func toEndpointRead(ep *model.Endpoint) EndpointReadResp {
+	status := ep.Status
+	if status == "" {
+		status = "active"
+	}
 	return EndpointReadResp{
 		ID:        ep.ID,
 		UserID:    ep.UserID,
 		NodeID:    ep.NodeID,
 		Tag:       ep.Tag,
 		UUID:      ep.UUID,
+		Username:  ep.Username,
 		Password:  ep.Password,
+		Status:    status,
+		Country:   ep.Country,
 		IsActive:  ep.IsActive,
 		SortOrder: ep.SortOrder,
 		Remark:    ep.Remark,
@@ -115,6 +128,7 @@ func toEndpointRead(ep *model.Endpoint) EndpointReadResp {
 
 type UserCreateReq struct {
 	Name             string          `json:"name"`
+	ExternalID       *string         `json:"external_id"`
 	IsActive         *bool           `json:"is_active"`
 	Token            *string         `json:"token"`
 	UUID             *string         `json:"uuid"`
@@ -128,6 +142,7 @@ type UserCreateReq struct {
 
 type UserReadResp struct {
 	ID               int64              `json:"id"`
+	ExternalID       *string            `json:"external_id,omitempty"`
 	Name             string             `json:"name"`
 	IsActive         bool               `json:"is_active"`
 	Token            string             `json:"token"`
@@ -208,6 +223,7 @@ func toUserRead(u *model.User) UserReadResp {
 	}
 	return UserReadResp{
 		ID:               u.ID,
+		ExternalID:       u.ExternalID,
 		Name:             u.Name,
 		IsActive:         u.IsActive,
 		Token:            u.Token,
@@ -252,6 +268,16 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ExternalID != nil && strings.TrimSpace(*req.ExternalID) != "" {
+		extID := strings.TrimSpace(*req.ExternalID)
+		req.ExternalID = &extID
+		exists, _ := db.DB.NewSelect().Model((*model.User)(nil)).Where("external_id = ?", extID).Exists(r.Context())
+		if exists {
+			RespondError(w, http.StatusBadRequest, fmt.Sprintf("external_id '%s' already exists", extID))
+			return
+		}
+	}
+
 	userUUID := uuid.New().String()
 	if req.UUID != nil && strings.TrimSpace(*req.UUID) != "" {
 		userUUID = strings.TrimSpace(*req.UUID)
@@ -286,6 +312,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	user := &model.User{
 		Name:             req.Name,
+		ExternalID:       req.ExternalID,
 		Token:            token,
 		IsActive:         isActive,
 		UUID:             &userUUID,
@@ -307,10 +334,14 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		var nodeIDs []int64
 		nodeSeen := make(map[int64]bool)
 		for idx, epIn := range req.Endpoints {
+			var epNodeID *int64
+			if epIn.NodeID != nil && *epIn.NodeID > 0 {
+				epNodeID = epIn.NodeID
+			}
 			tag := strings.TrimSpace(epIn.Tag)
-			if tag == "" {
+			if tag == "" && epNodeID != nil {
 				var n model.Node
-				if err := db.DB.NewSelect().Model(&n).Where("id = ?", epIn.NodeID).Scan(r.Context()); err == nil {
+				if err := db.DB.NewSelect().Model(&n).Where("id = ?", *epNodeID).Scan(r.Context()); err == nil {
 					tag = n.Tag
 					if tag == "" {
 						tag = n.NodeName
@@ -326,19 +357,28 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 			if epIn.SortOrder != nil {
 				sortOrder = *epIn.SortOrder
 			}
+			epStatus := "active"
+			if epIn.Status != nil && *epIn.Status != "" {
+				epStatus = *epIn.Status
+			} else if epNodeID == nil {
+				epStatus = "pending_binding"
+			}
 			endpoints = append(endpoints, &model.Endpoint{
 				UserID:    user.ID,
-				NodeID:    epIn.NodeID,
+				NodeID:    epNodeID,
 				Tag:       tag,
 				UUID:      epUUID,
+				Username:  epIn.Username,
 				Password:  epIn.Password,
+				Status:    epStatus,
+				Country:   epIn.Country,
 				IsActive:  epActive,
 				SortOrder: sortOrder,
 				Remark:    epIn.Remark,
 			})
-			if !nodeSeen[epIn.NodeID] {
-				nodeIDs = append(nodeIDs, epIn.NodeID)
-				nodeSeen[epIn.NodeID] = true
+			if epNodeID != nil && !nodeSeen[*epNodeID] {
+				nodeIDs = append(nodeIDs, *epNodeID)
+				nodeSeen[*epNodeID] = true
 			}
 		}
 		if len(endpoints) > 0 {
@@ -368,12 +408,14 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 					tag = n.NodeName
 				}
 			}
+			nidCopy := nid
 			endpoints = append(endpoints, &model.Endpoint{
 				UserID:    user.ID,
-				NodeID:    nid,
+				NodeID:    &nidCopy,
 				Tag:       tag,
 				UUID:      userUUID,
 				Password:  &userPassword,
+				Status:    "active",
 				IsActive:  true,
 				SortOrder: idx,
 			})
@@ -528,6 +570,24 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 		user.Remark = &r
 	}
 
+	if rawExtID, exists := body["external_id"]; exists {
+		if rawExtID == nil {
+			user.ExternalID = nil
+		} else if extStr, ok := rawExtID.(string); ok {
+			trimmed := strings.TrimSpace(extStr)
+			if trimmed == "" {
+				user.ExternalID = nil
+			} else {
+				exists, _ := db.DB.NewSelect().Model((*model.User)(nil)).Where("external_id = ? AND id != ?", trimmed, id).Exists(r.Context())
+				if exists {
+					RespondError(w, http.StatusBadRequest, fmt.Sprintf("external_id '%s' already exists", trimmed))
+					return
+				}
+				user.ExternalID = &trimmed
+			}
+		}
+	}
+
 	if rawOverride, exists := body["config_override"]; exists {
 		if rawOverride == nil {
 			user.ConfigOverride = nil
@@ -626,12 +686,17 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 					epRemark = &trimmed
 				}
 
+				var epNodeID *int64
+				if nodeID > 0 {
+					epNodeID = &nodeID
+				}
 				endpoints = append(endpoints, &model.Endpoint{
 					UserID:    id,
-					NodeID:    nodeID,
+					NodeID:    epNodeID,
 					Tag:       tag,
 					UUID:      epUUID,
 					Password:  epPwd,
+					Status:    "active",
 					IsActive:  isActive,
 					SortOrder: sortOrder,
 					Remark:    epRemark,
@@ -690,12 +755,14 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 							tag = n.NodeName
 						}
 					}
+					nidCopy := nid
 					endpoints = append(endpoints, &model.Endpoint{
 						UserID:    id,
-						NodeID:    nid,
+						NodeID:    &nidCopy,
 						Tag:       tag,
 						UUID:      uUUID,
 						Password:  user.Password,
+						Status:    "active",
 						IsActive:  true,
 						SortOrder: idx,
 					})
@@ -798,23 +865,28 @@ func AddUserEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.NodeID <= 0 {
-		RespondError(w, http.StatusBadRequest, "node_id is required")
-		return
-	}
-
-	var node model.Node
-	if err := db.DB.NewSelect().Model(&node).Where("id = ?", req.NodeID).Scan(r.Context()); err != nil {
-		RespondError(w, http.StatusBadRequest, "Node not found")
-		return
+	var nodeIDPtr *int64
+	var defaultTag string
+	if req.NodeID != nil && *req.NodeID > 0 {
+		var node model.Node
+		if err := db.DB.NewSelect().Model(&node).Where("id = ?", *req.NodeID).Scan(r.Context()); err != nil {
+			RespondError(w, http.StatusBadRequest, "Node not found")
+			return
+		}
+		nodeIDPtr = req.NodeID
+		defaultTag = node.Tag
+		if defaultTag == "" {
+			defaultTag = node.NodeName
+		}
 	}
 
 	tag := strings.TrimSpace(req.Tag)
 	if tag == "" {
-		tag = node.Tag
-		if tag == "" {
-			tag = node.NodeName
-		}
+		tag = defaultTag
+	}
+	if tag == "" {
+		RespondError(w, http.StatusBadRequest, "tag is required")
+		return
 	}
 
 	epUUID := resolveEndpointUUID(req.UUID)
@@ -830,12 +902,22 @@ func AddUserEndpoint(w http.ResponseWriter, r *http.Request) {
 		sortOrder = count
 	}
 
+	status := "active"
+	if req.Status != nil && *req.Status != "" {
+		status = *req.Status
+	} else if nodeIDPtr == nil {
+		status = "pending_binding"
+	}
+
 	ep := &model.Endpoint{
 		UserID:    userID,
-		NodeID:    req.NodeID,
+		NodeID:    nodeIDPtr,
 		Tag:       tag,
 		UUID:      epUUID,
+		Username:  req.Username,
 		Password:  req.Password,
+		Status:    status,
+		Country:   req.Country,
 		IsActive:  isActive,
 		SortOrder: sortOrder,
 		Remark:    req.Remark,
@@ -870,6 +952,27 @@ func UpdateUserEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if nidVal, exists := body["node_id"]; exists {
+		if nidVal == nil {
+			ep.NodeID = nil
+		} else if f, ok := nidVal.(float64); ok {
+			nid := int64(f)
+			if nid > 0 {
+				ep.NodeID = &nid
+			} else {
+				ep.NodeID = nil
+			}
+		}
+	}
+	if status, ok := body["status"].(string); ok && status != "" {
+		ep.Status = status
+	}
+	if uname, ok := body["username"].(string); ok {
+		ep.Username = &uname
+	}
+	if ctry, ok := body["country"].(string); ok {
+		ep.Country = &ctry
+	}
 	if tag, ok := body["tag"].(string); ok && strings.TrimSpace(tag) != "" {
 		ep.Tag = strings.TrimSpace(tag)
 	}

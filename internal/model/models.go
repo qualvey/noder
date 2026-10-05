@@ -39,6 +39,7 @@ type Node struct {
 	Fingerprint       *string `bun:"fingerprint" json:"fingerprint,omitempty"`
 	Flow              *string `bun:"flow" json:"flow,omitempty"`
 	CongestionControl *string `bun:"congestion_control" json:"congestion_control,omitempty"`
+	Country           *string `bun:"country" json:"country,omitempty"`
 	Remark            *string `bun:"remark" json:"remark,omitempty"`
 	SortOrder         int     `bun:"sort_order,default:0" json:"sort_order"`
 
@@ -52,12 +53,15 @@ type Endpoint struct {
 	ID        int64     `bun:"id,pk,autoincrement" json:"id"`
 	UserID    int64     `bun:"user_id,notnull" json:"user_id"`
 	User      *User     `bun:"rel:belongs-to,join:user_id=id" json:"-"`
-	NodeID    int64     `bun:"node_id,notnull" json:"node_id"`
+	NodeID    *int64    `bun:"node_id" json:"node_id"`
 	Node      *Node     `bun:"rel:belongs-to,join:node_id=id" json:"node,omitempty"`
 
 	Tag       string    `bun:"tag,notnull" json:"tag"`
 	UUID      string    `bun:"uuid,notnull" json:"uuid"`
+	Username  *string   `bun:"username" json:"username,omitempty"`
 	Password  *string   `bun:"password" json:"password,omitempty"`
+	Status    string    `bun:"status,notnull,default:'active'" json:"status"`
+	Country   *string   `bun:"country" json:"country,omitempty"`
 	IsActive  bool      `bun:"is_active,notnull,default:true" json:"is_active"`
 	SortOrder int       `bun:"sort_order,notnull,default:0" json:"sort_order"`
 	Remark    *string   `bun:"remark" json:"remark,omitempty"`
@@ -71,6 +75,7 @@ type User struct {
 	bun.BaseModel `bun:"table:user"`
 
 	ID               int64   `bun:"id,pk,autoincrement" json:"id"`
+	ExternalID       *string `bun:"external_id,unique" json:"external_id,omitempty"`
 	Name             string  `bun:"name,notnull" json:"name"`
 	Token            string  `bun:"token,notnull,unique" json:"token"`
 	IsActive         bool    `bun:"is_active,notnull,default:true" json:"is_active"`
@@ -129,11 +134,11 @@ func (u *User) GetSortedNodeIDs() []int64 {
 	return result
 }
 
-// GetActiveEndpoints 返回该用户已启用且对应物理入口节点也启用的端点列表（按 SortOrder 排序）
+// GetActiveEndpoints 返回该用户已启用且对应物理入口节点也启用的端点列表（按 SortOrder 排序，排除 socks5 独立业务线）
 func (u *User) GetActiveEndpoints() []*Endpoint {
 	var res []*Endpoint
 	for _, ep := range u.Endpoints {
-		if ep.IsActive && ep.Node != nil && ep.Node.IsActive {
+		if ep.IsActive && ep.Node != nil && ep.Node.IsActive && ep.Node.Protocol != "socks5" {
 			res = append(res, ep)
 		}
 	}

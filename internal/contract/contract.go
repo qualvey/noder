@@ -34,7 +34,7 @@ var NodeOwnedFields = map[string]bool{
 	"tag": true, "node_name": true, "server_address": true, "server_port": true,
 	"security": true, "sni": true, "method": true, "transport_type": true,
 	"path": true, "public_key": true, "short_id": true, "fingerprint": true,
-	"flow": true, "remark": true, "congestion_control": true,
+	"flow": true, "remark": true, "congestion_control": true, "country": true,
 }
 
 var (
@@ -77,13 +77,18 @@ var ProtocolContracts = map[string]*NodeContract{
 			},
 		},
 	},
+	"socks5": {
+		Protocol: "socks5",
+		Required: map[string]bool{"server_address": true, "server_port": true},
+		Optional: map[string]bool{"tag": true, "node_name": true, "country": true, "remark": true, "sort_order": true},
+	},
 }
 
 func GetContract(protocol string) (*NodeContract, error) {
 	proto := strings.ToLower(strings.TrimSpace(protocol))
 	contract, ok := ProtocolContracts[proto]
 	if !ok {
-		return nil, NewBadRequest(fmt.Sprintf("Protocol '%s' is invalid. Allowed protocols: anytls, tuic, vless", protocol))
+		return nil, NewBadRequest(fmt.Sprintf("Protocol '%s' is invalid. Allowed protocols: anytls, tuic, vless, socks5", protocol))
 	}
 	return contract, nil
 }

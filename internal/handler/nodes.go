@@ -51,6 +51,15 @@ func CreateNode(w http.ResponseWriter, r *http.Request) {
 		if _, ok := body["congestion_control"]; !ok {
 			body["congestion_control"] = "bbr"
 		}
+	} else if proto == "socks5" {
+		delete(body, "congestion_control")
+		delete(body, "transport_type")
+		delete(body, "path")
+		delete(body, "public_key")
+		delete(body, "short_id")
+		delete(body, "fingerprint")
+		delete(body, "flow")
+		delete(body, "security")
 	} else {
 		delete(body, "congestion_control")
 		if _, ok := body["transport_type"]; !ok {
@@ -167,6 +176,15 @@ func UpdateNode(w http.ResponseWriter, r *http.Request) {
 		merged["short_id"] = nil
 		merged["fingerprint"] = nil
 		merged["flow"] = nil
+	} else if proto == "socks5" {
+		merged["congestion_control"] = nil
+		merged["transport_type"] = ""
+		merged["path"] = nil
+		merged["public_key"] = nil
+		merged["short_id"] = nil
+		merged["fingerprint"] = nil
+		merged["flow"] = nil
+		merged["security"] = ""
 	} else {
 		merged["congestion_control"] = nil
 		if t, ok := merged["transport_type"].(string); !ok || t == "" {

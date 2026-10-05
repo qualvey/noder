@@ -49,7 +49,7 @@ func getUserActiveEndpoints(user *model.User) []*model.Endpoint {
 	if len(user.Endpoints) > 0 {
 		var res []*model.Endpoint
 		for _, ep := range user.Endpoints {
-			if ep.IsActive && ep.Node != nil && ep.Node.IsActive {
+			if ep.IsActive && ep.Node != nil && ep.Node.IsActive && ep.Node.Protocol != "socks5" {
 				res = append(res, ep)
 			}
 		}
@@ -73,6 +73,9 @@ func getUserActiveEndpoints(user *model.User) []*model.Endpoint {
 
 	var res []*model.Endpoint
 	for i, n := range nodes {
+		if n.Protocol == "socks5" {
+			continue
+		}
 		tag := n.Tag
 		if tag == "" {
 			tag = n.NodeName
@@ -93,7 +96,7 @@ func getUserOrderedActiveNodes(user *model.User) []*model.Node {
 	orderedIDs := user.GetSortedNodeIDs()
 	activeMap := make(map[int64]*model.Node)
 	for _, n := range user.Nodes {
-		if n.IsActive {
+		if n.IsActive && n.Protocol != "socks5" {
 			activeMap[n.ID] = n
 		}
 	}
