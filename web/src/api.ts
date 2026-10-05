@@ -1,5 +1,5 @@
 // API 客户端：统一鉴权、错误处理、相对路径（兼容子路径反代）
-import type { DistFile, Node, TemplateBranch, User, UserDownload } from './types'
+import type { DistFile, Endpoint, Node, TemplateBranch, User, UserDownload } from './types'
 
 const base = import.meta.env.BASE_URL
 // dev 下 BASE_URL 为 '/'，build 后为 './'
@@ -98,6 +98,10 @@ export const api = {
     create: (body: Partial<User>) => request<User>('/api/users', { method: 'POST', body }),
     update: (id: number, body: Partial<User>) => request<User>(`/api/users/${id}`, { method: 'PUT', body }),
     remove: (id: number) => request<{ message: string }>(`/api/users/${id}`, { method: 'DELETE' }),
+    endpoints: (id: number) => request<Endpoint[]>(`/api/users/${id}/endpoints`),
+    addEndpoint: (id: number, body: Partial<Endpoint>) => request<Endpoint>(`/api/users/${id}/endpoints`, { method: 'POST', body }),
+    updateEndpoint: (endpointId: number, body: Partial<Endpoint>) => request<Endpoint>(`/api/users/0/endpoints/${endpointId}`, { method: 'PUT', body }),
+    removeEndpoint: (endpointId: number) => request<{ message: string }>(`/api/users/0/endpoints/${endpointId}`, { method: 'DELETE' }),
   },
   files: {
     list: () => request<DistFile[]>('/api/files'),

@@ -21,6 +21,19 @@ export interface Node {
   remark?: string | null
 }
 
+export interface Endpoint {
+  id?: number
+  user_id?: number
+  node_id: number
+  tag: string
+  uuid: string
+  password?: string | null
+  is_active?: boolean
+  sort_order?: number
+  remark?: string | null
+  node?: Node
+}
+
 export interface User {
   id: number
   name: string
@@ -31,6 +44,7 @@ export interface User {
   remark?: string | null
   config_override?: string | null
   node_ids: number[]
+  endpoints?: Endpoint[]
   template_branch_id?: number | null
   download_count: number
   last_download_at?: string | null

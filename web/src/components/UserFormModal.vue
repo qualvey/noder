@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 用户新增/编辑表单弹窗
-// 自包含：凭证生成 / 快捷提取 / 节点多选 / config_override
+// 包含：用户基础信息 / 快捷凭证提取 / 节点端点 (Endpoints) 灵活配置 / config_override
 // 契约：props { open, editing, nodes }，emits { close, saved }
 import { inject, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -28,6 +28,15 @@ const extractInput = ref('')
 const formInitialized = ref(false)
 const draftKey = () => `noder.user-form.${props.editing?.id ?? 'new'}`
 
+interface EndpointFormItem {
+  id?: number
+  node_id: number
+  tag: string
+  uuid: string
+  password?: string
+  is_active: boolean
+}
+
 const form = reactive({
   name: '',
   remark: '',
@@ -35,11 +44,19 @@ const form = reactive({
   uuid: '',
   password: '',
   config_override: '',
-  node_ids: [] as number[],
+  endpoints: [] as EndpointFormItem[],
 })
 
 function resetForm() {
-  Object.assign(form, { name: '', remark: '', token: '', uuid: '', password: '', config_override: '', node_ids: [] })
+  Object.assign(form, {
+    name: '',
+    remark: '',
+    token: '',
+    uuid: '',
+    password: '',
+    config_override: '',
+    endpoints: [],
+  })
   showExtract.value = false
   extractInput.value = ''
 }
@@ -50,9 +67,36 @@ function closeModal(clearDraft = false) {
 }
 
 function loadForm(u: User) {
+  let eps: EndpointFormItem[] = []
+  if (u.endpoints && u.endpoints.length) {
+    eps = u.endpoints.map(e => ({
+      id: e.id,
+      node_id: e.node_id,
+      tag: e.tag,
+      uuid: e.uuid,
+      password: e.password || '',
+      is_active: e.is_active ?? true,
+    }))
+  } else if (u.node_ids && u.node_ids.length) {
+    eps = u.node_ids.map(nid => {
+      const node = props.nodes.find(n => n.id === nid)
+      return {
+        node_id: nid,
+        tag: node?.node_name || node?.tag || `Node-${nid}`,
+        uuid: u.uuid || '',
+        password: u.password || '',
+        is_active: true,
+      }
+    })
+  }
   Object.assign(form, {
-    name: u.name, remark: u.remark || '', token: u.token, uuid: u.uuid || '',
-    password: u.password || '', config_override: u.config_override || '', node_ids: [...u.node_ids],
+    name: u.name,
+    remark: u.remark || '',
+    token: u.token,
+    uuid: u.uuid || '',
+    password: u.password || '',
+    config_override: u.config_override || '',
+    endpoints: eps,
   })
   showExtract.value = false
   extractInput.value = ''
@@ -84,43 +128,64 @@ watch(form, (value) => {
   if (props.open && formInitialized.value) localStorage.setItem(draftKey(), JSON.stringify(value))
 }, { deep: true })
 
-function toggleNode(id: number) {
-  const idx = form.node_ids.indexOf(id)
-  if (idx >= 0) {
-    form.node_ids.splice(idx, 1)
-  } else {
-    form.node_ids.push(id)
+function addEndpoint(nodeId?: number) {
+  let targetNode = props.nodes[0]
+  if (nodeId) {
+    const found = props.nodes.find(n => n.id === nodeId)
+    if (found) targetNode = found
+  }
+  if (!targetNode) return
+
+  form.endpoints.push({
+    node_id: targetNode.id,
+    tag: targetNode.node_name || targetNode.tag || `Node-${targetNode.id}`,
+    uuid: randomUUID(),
+    password: form.password || '',
+    is_active: true,
+  })
+}
+
+function addAllNodes() {
+  for (const n of props.nodes) {
+    form.endpoints.push({
+      node_id: n.id,
+      tag: n.node_name || n.tag || `Node-${n.id}`,
+      uuid: randomUUID(),
+      password: form.password || '',
+      is_active: true,
+    })
   }
 }
 
-function moveNodeToTop(index: number) {
-  if (index <= 0 || index >= form.node_ids.length) return
-  const [target] = form.node_ids.splice(index, 1)
-  form.node_ids.unshift(target)
+function onNodeChange(ep: EndpointFormItem) {
+  const node = props.nodes.find(n => n.id === ep.node_id)
+  if (node && !ep.tag) {
+    ep.tag = node.node_name || node.tag || `Node-${node.id}`
+  }
 }
 
-function moveNodeUp(index: number) {
+function moveEndpointToTop(index: number) {
+  if (index <= 0 || index >= form.endpoints.length) return
+  const [target] = form.endpoints.splice(index, 1)
+  form.endpoints.unshift(target)
+}
+
+function moveEndpointUp(index: number) {
   if (index <= 0) return
-  const temp = form.node_ids[index]
-  form.node_ids[index] = form.node_ids[index - 1]
-  form.node_ids[index - 1] = temp
+  const temp = form.endpoints[index]
+  form.endpoints[index] = form.endpoints[index - 1]
+  form.endpoints[index - 1] = temp
 }
 
-function moveNodeDown(index: number) {
-  if (index >= form.node_ids.length - 1) return
-  const temp = form.node_ids[index]
-  form.node_ids[index] = form.node_ids[index + 1]
-  form.node_ids[index + 1] = temp
+function moveEndpointDown(index: number) {
+  if (index >= form.endpoints.length - 1) return
+  const temp = form.endpoints[index]
+  form.endpoints[index] = form.endpoints[index + 1]
+  form.endpoints[index + 1] = temp
 }
 
-function getNodeDisplayName(id: number) {
-  const node = props.nodes.find((n) => n.id === id)
-  return node?.node_name || node?.tag || `#${id}`
-}
-
-function getNodeProtocol(id: number) {
-  const node = props.nodes.find((n) => n.id === id)
-  return node?.protocol?.toUpperCase() || ''
+function removeEndpoint(index: number) {
+  form.endpoints.splice(index, 1)
 }
 
 function applyExtract() {
@@ -138,7 +203,16 @@ async function saveUser() {
     token: form.token || undefined,
     uuid: form.uuid || undefined,
     password: form.password || undefined,
-    node_ids: form.node_ids,
+    endpoints: form.endpoints.map((ep, idx) => ({
+      id: ep.id,
+      node_id: ep.node_id,
+      tag: ep.tag.trim(),
+      uuid: ep.uuid.trim(), // 留空则后端自动生成
+      password: ep.password?.trim() || undefined,
+      is_active: ep.is_active,
+      sort_order: idx,
+    })),
+    node_ids: Array.from(new Set(form.endpoints.map(e => e.node_id))),
     is_active: true,
   }
   try {
@@ -160,7 +234,7 @@ async function saveUser() {
 
 <template>
   <div class="modal-overlay" :class="{ active: open }" @click.self="closeModal()">
-    <div class="modal">
+    <div class="modal modal-lg">
       <div class="modal-header">
         <div class="modal-title">{{ editing ? t('users.form.editTitle') : t('users.form.addTitle') }}</div>
         <button class="modal-close" @click="closeModal(true)">&times;</button>
@@ -207,78 +281,133 @@ async function saveUser() {
             <button type="button" class="btn btn-secondary" @click="form.password = randomPassword()">{{ t('users.form.randomPassword') }}</button>
           </div>
         </div>
-        <div class="form-group form-span">
+        <div class="form-group">
           <label>{{ t('users.form.configOverride') }}</label>
-          <textarea v-model="form.config_override" class="form-control" rows="4" style="font-family: var(--font-mono); font-size: 0.78rem"
+          <textarea v-model="form.config_override" class="form-control" rows="3" style="font-family: var(--font-mono); font-size: 0.78rem"
             :placeholder="t('users.form.configOverridePlaceholder')"></textarea>
           <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px">{{ t('users.form.configOverrideTip') }}</div>
         </div>
-        <div class="form-group form-span">
-          <label>{{ t('users.form.boundNodes') }}</label>
-          <div class="checkboxes-group">
-            <label v-for="node in nodes" :key="node.id" class="checkbox-label">
-              <input type="checkbox" :checked="form.node_ids.includes(node.id)" @change="toggleNode(node.id)" />
-              {{ node.node_name }} <span style="color: var(--text-muted); font-size: 0.72rem">({{ node.protocol }})</span>
-            </label>
-            <div v-if="!nodes.length" style="color: var(--text-muted); font-size: 0.8rem">{{ t('users.form.noNodes') }}</div>
-          </div>
-        </div>
 
-        <!-- 节点排序与置顶编排面板 (当选定节点时展示) -->
-        <div v-if="form.node_ids.length" class="form-group form-span ordered-nodes-container">
-          <div class="ordered-nodes-header">
-            <span class="ordered-nodes-title">{{ t('users.form.nodeOrdering') }}</span>
-            <span class="ordered-nodes-count">{{ form.node_ids.length }}</span>
+        <!-- 节点端点 (Endpoints) 区域 -->
+        <div class="form-group form-span endpoints-section">
+          <div class="endpoints-header">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="endpoints-title">{{ t('users.form.endpoints') }}</span>
+              <span class="endpoints-count">{{ form.endpoints.length }}</span>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button type="button" class="btn btn-secondary btn-sm" :disabled="!nodes.length" @click="addAllNodes">
+                {{ t('users.form.addAllNodes') }}
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" :disabled="!nodes.length" @click="addEndpoint()">
+                {{ t('users.form.addEndpoint') }}
+              </button>
+            </div>
           </div>
-          <div class="ordered-nodes-list">
+          <div class="endpoint-tip">{{ t('users.form.endpointTip') }}</div>
+
+          <div v-if="!form.endpoints.length" class="empty-endpoints">
+            {{ t('users.form.noEndpoints') }}
+          </div>
+
+          <div v-else class="endpoints-list">
             <div
-              v-for="(nid, idx) in form.node_ids"
-              :key="nid"
-              class="ordered-node-item"
+              v-for="(ep, idx) in form.endpoints"
+              :key="idx"
+              class="endpoint-card"
               :class="{ 'is-primary': idx === 0 }"
             >
-              <div class="node-info">
-                <span class="node-rank" :class="{ 'rank-first': idx === 0 }">#{{ idx + 1 }}</span>
-                <span v-if="idx === 0" class="primary-badge">{{ t('users.form.primaryNodeBadge') }}</span>
-                <span class="node-name">{{ getNodeDisplayName(nid) }}</span>
-                <span class="node-protocol">{{ getNodeProtocol(nid) }}</span>
+              <div class="endpoint-card-row1">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span class="endpoint-rank" :class="{ 'rank-first': idx === 0 }">#{{ idx + 1 }}</span>
+                  <span v-if="idx === 0" class="primary-badge">{{ t('users.form.primaryNodeBadge') }}</span>
+                </div>
+
+                <!-- 选择物理入口 -->
+                <div class="endpoint-node-select">
+                  <select v-model="ep.node_id" class="form-control form-control-sm" @change="onNodeChange(ep)">
+                    <option v-for="node in nodes" :key="node.id" :value="node.id">
+                      {{ node.node_name || node.tag }} ({{ node.protocol.toUpperCase() }})
+                    </option>
+                  </select>
+                </div>
+
+                <!-- 节点 Tag -->
+                <div class="endpoint-tag-input">
+                  <input
+                    v-model="ep.tag"
+                    class="form-control form-control-sm"
+                    :placeholder="t('users.form.endpointTagPlaceholder')"
+                    required
+                  />
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="endpoint-actions">
+                  <button
+                    v-if="idx > 0"
+                    type="button"
+                    class="btn-sort-action btn-pin"
+                    :title="t('users.form.pinToTop')"
+                    @click="moveEndpointToTop(idx)"
+                  >
+                    📌
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-sort-action"
+                    :disabled="idx === 0"
+                    :title="t('users.form.moveUp')"
+                    @click="moveEndpointUp(idx)"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-sort-action"
+                    :disabled="idx === form.endpoints.length - 1"
+                    :title="t('users.form.moveDown')"
+                    @click="moveEndpointDown(idx)"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-sort-action btn-remove"
+                    :title="t('users.form.removeNode')"
+                    @click="removeEndpoint(idx)"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
-              <div class="node-actions">
-                <button
-                  v-if="idx > 0"
-                  type="button"
-                  class="btn-sort-action btn-pin"
-                  :title="t('users.form.pinToTop')"
-                  @click="moveNodeToTop(idx)"
-                >
-                  📌 {{ t('users.form.pinToTop') }}
-                </button>
-                <button
-                  type="button"
-                  class="btn-sort-action"
-                  :disabled="idx === 0"
-                  :title="t('users.form.moveUp')"
-                  @click="moveNodeUp(idx)"
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  class="btn-sort-action"
-                  :disabled="idx === form.node_ids.length - 1"
-                  :title="t('users.form.moveDown')"
-                  @click="moveNodeDown(idx)"
-                >
-                  ↓
-                </button>
-                <button
-                  type="button"
-                  class="btn-sort-action btn-remove"
-                  :title="t('users.form.removeNode')"
-                  @click="toggleNode(nid)"
-                >
-                  ✕
-                </button>
+
+              <div class="endpoint-card-row2">
+                <div class="endpoint-uuid-wrap">
+                  <span class="field-label-sm">UUID</span>
+                  <input
+                    v-model="ep.uuid"
+                    class="form-control form-control-sm code-font"
+                    :placeholder="t('users.form.endpointUuidPlaceholder')"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm btn-dice"
+                    @click="ep.uuid = randomUUID()"
+                    :title="t('users.form.randomUuid')"
+                  >
+                    🎲
+                  </button>
+                </div>
+
+                <div class="endpoint-pwd-wrap">
+                  <span class="field-label-sm">PWD</span>
+                  <input
+                    v-model="ep.password"
+                    class="form-control form-control-sm code-font"
+                    :placeholder="t('users.form.endpointPassword')"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -294,7 +423,10 @@ async function saveUser() {
 </template>
 
 <style scoped>
-/* 凭证输入 + 随机按钮一行，输入框弹性伸缩 */
+.modal.modal-lg {
+  max-width: 780px;
+}
+
 .credential-row {
   display: flex;
   gap: 8px;
@@ -305,54 +437,31 @@ async function saveUser() {
   min-width: 0;
 }
 
-/* 节点多选：宽度充足时多列排布 */
-.checkboxes-group {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 6px;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
+/* 端点列表面板 */
+.endpoints-section {
+  background: rgba(15, 23, 42, 0.4);
   border: 1px solid var(--border-glass);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.82rem;
-  background: rgba(255, 255, 255, 0.02);
-  transition: all 0.2s ease;
-}
-
-.checkbox-label:hover {
-  background: rgba(59, 130, 246, 0.08);
-  border-color: rgba(59, 130, 246, 0.3);
-}
-
-/* 节点排序面板 */
-.ordered-nodes-container {
-  background: rgba(15, 23, 42, 0.35);
-  border: 1px solid var(--border-glass);
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 10px;
+  padding: 14px;
   margin-top: 4px;
 }
 
-.ordered-nodes-header {
+.endpoints-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.ordered-nodes-title {
-  font-size: 0.8rem;
+.endpoints-title {
+  font-size: 0.85rem;
   font-weight: 600;
   color: var(--primary);
 }
 
-.ordered-nodes-count {
+.endpoints-count {
   font-size: 0.72rem;
   background: rgba(59, 130, 246, 0.2);
   color: var(--primary);
@@ -361,50 +470,67 @@ async function saveUser() {
   font-weight: 600;
 }
 
-.ordered-nodes-list {
+.endpoint-tip {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.empty-endpoints {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
+
+.endpoints-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 220px;
+  gap: 10px;
+  max-height: 340px;
   overflow-y: auto;
   padding-right: 4px;
 }
 
-.ordered-node-item {
+.endpoint-card {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
-  border-radius: 6px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   transition: all 0.2s ease;
 }
 
-.ordered-node-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+.endpoint-card:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
-.ordered-node-item.is-primary {
-  border-color: rgba(59, 130, 246, 0.5);
-  background: rgba(59, 130, 246, 0.1);
+.endpoint-card.is-primary {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.07);
 }
 
-.node-info {
+.endpoint-card-row1 {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
+  flex-wrap: wrap;
 }
 
-.node-rank {
+.endpoint-rank {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
   width: 22px;
 }
 
-.node-rank.rank-first {
+.endpoint-rank.rank-first {
   color: var(--primary);
   font-weight: 700;
 }
@@ -419,26 +545,72 @@ async function saveUser() {
   white-space: nowrap;
 }
 
-.node-name {
-  font-size: 0.82rem;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.endpoint-node-select {
+  flex: 1.2;
+  min-width: 170px;
 }
 
-.node-protocol {
-  font-size: 0.7rem;
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.06);
-  padding: 1px 5px;
-  border-radius: 4px;
+.endpoint-tag-input {
+  flex: 1.3;
+  min-width: 170px;
 }
 
-.node-actions {
+.endpoint-actions {
   display: flex;
   align-items: center;
   gap: 4px;
+  margin-left: auto;
+}
+
+.endpoint-card-row2 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 4px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.05);
+  flex-wrap: wrap;
+}
+
+.endpoint-uuid-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1.8;
+  min-width: 240px;
+}
+
+.endpoint-pwd-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 130px;
+}
+
+.field-label-sm {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  width: 28px;
+  flex-shrink: 0;
+}
+
+.code-font {
+  font-family: var(--font-mono);
+  font-size: 0.75rem !important;
+}
+
+.form-control-sm {
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  height: 28px;
+}
+
+.btn-dice {
+  padding: 2px 7px;
+  font-size: 0.8rem;
+  height: 28px;
+  line-height: 1;
   flex-shrink: 0;
 }
 
@@ -449,6 +621,7 @@ async function saveUser() {
   border-radius: 4px;
   padding: 2px 7px;
   font-size: 0.75rem;
+  height: 26px;
   cursor: pointer;
   transition: all 0.15s ease;
 }

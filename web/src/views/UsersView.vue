@@ -227,6 +227,7 @@ const { searchQuery, filteredItems: filteredUsers, clear: clearSearch } = useFuz
   u.uuid,
   u.password,
   u.is_active ? t('common.enabled') : t('common.disabled'),
+  ...(u.endpoints || []).map((ep) => ep.tag || ep.node?.node_name || getNodeName(ep.node_id)),
   ...(u.node_ids || []).map((id) => getNodeName(id)),
 ])
 
@@ -409,23 +410,38 @@ onMounted(() => fetchData())
               </div>
             </td>
             <td style="text-align: center">
-              <div v-if="user.node_ids.length" class="nodes-hover-trigger">
+              <div v-if="(user.endpoints && user.endpoints.length) || user.node_ids.length" class="nodes-hover-trigger">
                 <span class="badge badge-nodes">
-                  {{ t('users.boundNodesCount', { count: user.node_ids.length }) }} ▾
+                  {{ t('users.boundNodesCount', { count: (user.endpoints && user.endpoints.length) || user.node_ids.length }) }} ▾
                 </span>
                 <!-- 悬浮弹出的节点列表 -->
                 <div class="nodes-popover-menu">
-                  <div class="nodes-popover-title">{{ t('users.colBoundNodes') }} ({{ user.node_ids.length }})</div>
+                  <div class="nodes-popover-title">{{ t('users.colBoundNodes') }} ({{ (user.endpoints && user.endpoints.length) || user.node_ids.length }})</div>
                   <div class="nodes-popover-list">
-                    <div
-                      v-for="(nid, nIdx) in user.node_ids"
-                      :key="nid"
-                      class="nodes-popover-item"
-                    >
-                      <span v-if="nIdx === 0" class="primary-star" :title="t('users.form.primaryNodeBadge')">★</span>
-                      <span class="node-name-text">{{ getNodeName(nid) }}</span>
-                      <span v-if="getNodeProtocol(nid)" class="badge-protocol">{{ getNodeProtocol(nid).toUpperCase() }}</span>
-                    </div>
+                    <template v-if="user.endpoints && user.endpoints.length">
+                      <div
+                        v-for="(ep, eIdx) in user.endpoints"
+                        :key="ep.id || eIdx"
+                        class="nodes-popover-item"
+                      >
+                        <span v-if="eIdx === 0" class="primary-star" :title="t('users.form.primaryNodeBadge')">★</span>
+                        <span class="node-name-text">{{ ep.tag || ep.node?.node_name || getNodeName(ep.node_id) }}</span>
+                        <span v-if="ep.node?.protocol || getNodeProtocol(ep.node_id)" class="badge-protocol">
+                          {{ (ep.node?.protocol || getNodeProtocol(ep.node_id)).toUpperCase() }}
+                        </span>
+                      </div>
+                    </template>
+                    <template v-else>
+                      <div
+                        v-for="(nid, nIdx) in user.node_ids"
+                        :key="nid"
+                        class="nodes-popover-item"
+                      >
+                        <span v-if="nIdx === 0" class="primary-star" :title="t('users.form.primaryNodeBadge')">★</span>
+                        <span class="node-name-text">{{ getNodeName(nid) }}</span>
+                        <span v-if="getNodeProtocol(nid)" class="badge-protocol">{{ getNodeProtocol(nid).toUpperCase() }}</span>
+                      </div>
+                    </template>
                   </div>
                 </div>
               </div>
