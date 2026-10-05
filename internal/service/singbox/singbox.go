@@ -206,15 +206,21 @@ func BuildSingboxOutbound(node *model.Node, user *model.User) (map[string]interf
 	})
 }
 
+const DefaultSingboxTemplateJSON = `{
+  "log": {"level": "info", "timestamp": true},
+  "outbounds": [
+    {"type": "direct", "tag": "direct"},
+    {"tag": "Proxy", "type": "selector", "outbounds": ["urltest"]},
+    {"tag": "urltest", "type": "urltest", "outbounds": []}
+  ]
+}`
+
 func LoadSingboxTemplate() (map[string]interface{}, error) {
 	data, err := os.ReadFile(config.SingBoxTemplatePath)
-	if err != nil {
-		log.Printf("Failed to read singbox template: %v", err)
-		return nil, err
-	}
-	if len(data) == 0 {
-		log.Printf("Singbox template file is empty")
-		return nil, errors.New("empty singbox template")
+	if err != nil || len(data) == 0 {
+		var res map[string]interface{}
+		_ = json.Unmarshal([]byte(DefaultSingboxTemplateJSON), &res)
+		return res, nil
 	}
 	var res map[string]interface{}
 	if err := json.Unmarshal(data, &res); err != nil {
@@ -224,7 +230,7 @@ func LoadSingboxTemplate() (map[string]interface{}, error) {
 	return res, nil
 }
 
-func GenerateSingboxConfigFromEndpoints(endpoints []*model.Endpoint, user *model.User) (map[string]interface{}, error) {
+func GenerateSingboxConfigFromTemplate(cfg map[string]interface{}, endpoints []*model.Endpoint, user *model.User) (map[string]interface{}, error) {
 	var activeEndpoints []*model.Endpoint
 	for _, ep := range endpoints {
 		if ep.IsActive && ep.Node != nil && ep.Node.IsActive {
@@ -241,11 +247,6 @@ func GenerateSingboxConfigFromEndpoints(endpoints []*model.Endpoint, user *model
 		}
 		nodeOutbounds = append(nodeOutbounds, ob)
 		nodeTags = append(nodeTags, ep.Tag)
-	}
-
-	cfg, err := LoadSingboxTemplate()
-	if err != nil {
-		return nil, err
 	}
 
 	var rawOutbounds []interface{}
@@ -303,6 +304,14 @@ func GenerateSingboxConfigFromEndpoints(endpoints []*model.Endpoint, user *model
 	}
 
 	return cfg, nil
+}
+
+func GenerateSingboxConfigFromEndpoints(endpoints []*model.Endpoint, user *model.User) (map[string]interface{}, error) {
+	cfg, err := LoadSingboxTemplate()
+	if err != nil {
+		return nil, err
+	}
+	return GenerateSingboxConfigFromTemplate(cfg, endpoints, user)
 }
 
 func GenerateSingboxConfig(nodes []*model.Node, user *model.User) (map[string]interface{}, error) {

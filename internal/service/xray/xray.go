@@ -12,14 +12,14 @@ import (
 	"noder/internal/model"
 )
 
+const DefaultXrayTemplateJSON = `{"outbounds": []}`
+
 func LoadXrayTemplate() (map[string]interface{}, error) {
 	data, err := os.ReadFile(config.XrayTemplatePath)
-	if err != nil {
-		log.Printf("Failed to read xray template: %v", err)
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, errors.New("empty xray template")
+	if err != nil || len(data) == 0 {
+		var cfg map[string]interface{}
+		_ = json.Unmarshal([]byte(DefaultXrayTemplateJSON), &cfg)
+		return cfg, nil
 	}
 	var cfg map[string]interface{}
 	if err := json.Unmarshal(data, &cfg); err != nil {
@@ -105,12 +105,7 @@ func BuildXrayOutbound(node *model.Node, user *model.User) (map[string]interface
 	})
 }
 
-func GenerateXrayConfigFromEndpoints(endpoints []*model.Endpoint, user *model.User) (map[string]interface{}, error) {
-	cfg, err := LoadXrayTemplate()
-	if err != nil {
-		return nil, err
-	}
-
+func GenerateXrayConfigFromTemplate(cfg map[string]interface{}, endpoints []*model.Endpoint, user *model.User) (map[string]interface{}, error) {
 	var outbounds []interface{}
 	seenTags := make(map[string]bool)
 	if raw, ok := cfg["outbounds"].([]interface{}); ok {
@@ -142,6 +137,14 @@ func GenerateXrayConfigFromEndpoints(endpoints []*model.Endpoint, user *model.Us
 
 	cfg["outbounds"] = outbounds
 	return cfg, nil
+}
+
+func GenerateXrayConfigFromEndpoints(endpoints []*model.Endpoint, user *model.User) (map[string]interface{}, error) {
+	cfg, err := LoadXrayTemplate()
+	if err != nil {
+		return nil, err
+	}
+	return GenerateXrayConfigFromTemplate(cfg, endpoints, user)
 }
 
 func GenerateXrayConfig(nodes []*model.Node, user *model.User) (map[string]interface{}, error) {
