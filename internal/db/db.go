@@ -54,6 +54,7 @@ func CreateDBAndTables(ctx context.Context) error {
 		(*model.UserDownloadLog)(nil),
 		(*model.Template)(nil),
 		(*model.TemplateHistory)(nil),
+		(*model.TemplateBranch)(nil),
 		(*model.AppSetting)(nil),
 	}
 
@@ -74,9 +75,9 @@ func CreateDBAndTables(ctx context.Context) error {
 	_, _ = DB.ExecContext(ctx, "UPDATE node SET tag = node_name WHERE tag IS NULL OR tag = ''")
 	_, _ = DB.ExecContext(ctx, "UPDATE node SET transport_type = NULL, path = NULL WHERE protocol = 'tuic'")
 
-	userCols := []string{"remark", "config_override", "node_order"}
+	userCols := []string{"remark", "config_override", "node_order", "template_branch_id"}
 	for _, col := range userCols {
-		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE user ADD COLUMN %s VARCHAR", col))
+		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE user ADD COLUMN %s BIGINT", col))
 	}
 
 	fileCols := []string{"source_url", "cached_at", "download_name"}

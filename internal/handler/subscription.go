@@ -10,6 +10,7 @@ import (
 	"noder/internal/model"
 	"noder/internal/service/mihomo"
 	"noder/internal/service/singbox"
+	"noder/internal/service/template"
 	"noder/internal/service/xray"
 )
 
@@ -57,6 +58,26 @@ func getUserOrderedActiveNodes(user *model.User) []*model.Node {
 	return res
 }
 
+// getKnownTokens 收集节点中已存在的 token，用于模板渲染时的兜底替换
+func getKnownTokens(nodes []*model.Node) []string {
+	var tokens []string
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		// 根据协议添加对应的 token
+		switch n.Protocol {
+		case "vless":
+			if n.Flow != nil && *n.Flow != "" {
+				tokens = append(tokens, *n.Flow)
+			}
+		case "tuic":
+			// TUIC 节点没有独立 token，使用用户的 uuid/password
+		}
+	}
+	return tokens
+}
+
 func GetSingboxConfig(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	user, err := getActiveUser(r.Context(), token)
@@ -69,6 +90,20 @@ func GetSingboxConfig(w http.ResponseWriter, r *http.Request) {
 	if len(activeNodes) == 0 {
 		RespondError(w, http.StatusNotFound, "No active nodes associated with this user")
 		return
+	}
+
+	// 如果用户有关联的模板分支，使用分支内容渲染
+	if user.TemplateBranchID != nil && *user.TemplateBranchID > 0 {
+		var branch model.TemplateBranch
+		if err := db.DB.NewSelect().Model(&branch).Where("id = ? AND is_active = ?", *user.TemplateBranchID, true).Scan(r.Context()); err == nil && branch.ID > 0 {
+			// 使用模板分支渲染
+			knownTokens := getKnownTokens(activeNodes)
+			rendered := template.RenderTemplateText(branch.Content, user, activeNodes, knownTokens)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(rendered))
+			return
+		}
 	}
 
 	cfg, err := singbox.GenerateSingboxConfig(activeNodes, user)
@@ -126,6 +161,20 @@ func GetMihomoConfig(w http.ResponseWriter, r *http.Request) {
 	if len(activeNodes) == 0 {
 		RespondError(w, http.StatusNotFound, "No active nodes associated with this user")
 		return
+	}
+
+	// 如果用户有关联的模板分支，使用分支内容渲染
+	if user.TemplateBranchID != nil && *user.TemplateBranchID > 0 {
+		var branch model.TemplateBranch
+		if err := db.DB.NewSelect().Model(&branch).Where("id = ? AND is_active = ?", *user.TemplateBranchID, true).Scan(r.Context()); err == nil && branch.ID > 0 {
+			// 使用模板分支渲染
+			knownTokens := getKnownTokens(activeNodes)
+			rendered := template.RenderTemplateText(branch.Content, user, activeNodes, knownTokens)
+			w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(rendered))
+			return
+		}
 	}
 
 	yamlBytes, err := mihomo.BuildMihomoConfigYAML(activeNodes, user)

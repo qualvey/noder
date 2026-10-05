@@ -31,8 +31,31 @@ export interface User {
   remark?: string | null
   config_override?: string | null
   node_ids: number[]
+  template_branch_id?: number | null
   download_count: number
   last_download_at?: string | null
+}
+
+export interface TemplateBranch {
+  id: number
+  name: string
+  target: string
+  content_format: string
+  content: string
+  remark?: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface Template {
+  id: number
+  name: string
+  target: string
+  content_format: string
+  content: string
+  version: number
+  updated_at: string
 }
 
 export interface UserDownload {

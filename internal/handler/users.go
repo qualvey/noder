@@ -64,29 +64,31 @@ func parseAndValidateConfigOverride(raw string) (*string, error) {
 }
 
 type UserCreateReq struct {
-	Name           string  `json:"name"`
-	IsActive       *bool   `json:"is_active"`
-	Token          *string `json:"token"`
-	UUID           *string `json:"uuid"`
-	Password       *string `json:"password"`
-	Remark         *string `json:"remark"`
-	ConfigOverride *string `json:"config_override"`
-	NodeIDs        []int64 `json:"node_ids"`
+	Name             string  `json:"name"`
+	IsActive         *bool   `json:"is_active"`
+	Token            *string `json:"token"`
+	UUID             *string `json:"uuid"`
+	Password         *string `json:"password"`
+	Remark           *string `json:"remark"`
+	ConfigOverride   *string `json:"config_override"`
+	NodeIDs          []int64 `json:"node_ids"`
+	TemplateBranchID *int64  `json:"template_branch_id"`
 }
 
 type UserReadResp struct {
-	ID             int64      `json:"id"`
-	Name           string     `json:"name"`
-	IsActive       bool       `json:"is_active"`
-	Token          string     `json:"token"`
-	UUID           *string    `json:"uuid"`
-	Password       *string    `json:"password"`
-	Remark         *string    `json:"remark"`
-	ConfigOverride *string    `json:"config_override"`
-	NodeOrder      *string    `json:"node_order"`
-	NodeIDs        []int64    `json:"node_ids"`
-	DownloadCount  int        `json:"download_count"`
-	LastDownloadAt *time.Time `json:"last_download_at,omitempty"`
+	ID               int64      `json:"id"`
+	Name             string     `json:"name"`
+	IsActive         bool       `json:"is_active"`
+	Token            string     `json:"token"`
+	UUID             *string    `json:"uuid"`
+	Password         *string    `json:"password"`
+	Remark           *string    `json:"remark"`
+	ConfigOverride   *string    `json:"config_override"`
+	NodeOrder        *string    `json:"node_order"`
+	NodeIDs          []int64    `json:"node_ids"`
+	TemplateBranchID *int64     `json:"template_branch_id,omitempty"`
+	DownloadCount    int        `json:"download_count"`
+	LastDownloadAt   *time.Time `json:"last_download_at,omitempty"`
 }
 
 type UserDownloadReadResp struct {
@@ -146,16 +148,17 @@ func toUserRead(u *model.User) UserReadResp {
 		sortedIDs = []int64{}
 	}
 	return UserReadResp{
-		ID:             u.ID,
-		Name:           u.Name,
-		IsActive:       u.IsActive,
-		Token:          u.Token,
-		UUID:           u.UUID,
-		Password:       u.Password,
-		Remark:         u.Remark,
-		ConfigOverride: u.ConfigOverride,
-		NodeOrder:      u.NodeOrder,
-		NodeIDs:        sortedIDs,
+		ID:               u.ID,
+		Name:             u.Name,
+		IsActive:         u.IsActive,
+		Token:            u.Token,
+		UUID:             u.UUID,
+		Password:         u.Password,
+		Remark:           u.Remark,
+		ConfigOverride:   u.ConfigOverride,
+		NodeOrder:        u.NodeOrder,
+		NodeIDs:          sortedIDs,
+		TemplateBranchID: u.TemplateBranchID,
 	}
 }
 
@@ -222,14 +225,15 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := &model.User{
-		Name:           req.Name,
-		Token:          token,
-		IsActive:       isActive,
-		UUID:           &userUUID,
-		Password:       &userPassword,
-		Remark:         req.Remark,
-		ConfigOverride: configOverride,
-		NodeOrder:      nodeOrder,
+		Name:             req.Name,
+		Token:            token,
+		IsActive:         isActive,
+		UUID:             &userUUID,
+		Password:         &userPassword,
+		Remark:           req.Remark,
+		ConfigOverride:   configOverride,
+		NodeOrder:        nodeOrder,
+		TemplateBranchID: req.TemplateBranchID,
 	}
 
 	if _, err := db.DB.NewInsert().Model(user).Exec(r.Context()); err != nil {
@@ -382,6 +386,26 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			user.ConfigOverride = norm
+		}
+	}
+
+	// 模板分支更新
+	if rawBranchID, exists := body["template_branch_id"]; exists {
+		if rawBranchID == nil {
+			user.TemplateBranchID = nil
+		} else if f, ok := rawBranchID.(float64); ok {
+			id := int64(f)
+			if id > 0 {
+				// 验证分支存在
+				exists, _ := db.DB.NewSelect().Model((*model.TemplateBranch)(nil)).Where("id = ?", id).Exists(r.Context())
+				if !exists {
+					RespondError(w, http.StatusBadRequest, "Template branch not found")
+					return
+				}
+				user.TemplateBranchID = &id
+			} else {
+				user.TemplateBranchID = nil
+			}
 		}
 	}
 

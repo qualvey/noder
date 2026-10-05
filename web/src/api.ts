@@ -1,5 +1,5 @@
 // API 客户端：统一鉴权、错误处理、相对路径（兼容子路径反代）
-import type { DistFile, Node, User, UserDownload } from './types'
+import type { DistFile, Node, TemplateBranch, User, UserDownload } from './types'
 
 const base = import.meta.env.BASE_URL
 // dev 下 BASE_URL 为 '/'，build 后为 './'
@@ -156,6 +156,26 @@ export const api = {
     getContent: (id: number) => request<{ content: string }>(`/api/files/${id}/content`),
     updateContent: (id: number, content_text: string) =>
       request<DistFile>(`/api/files/${id}/content`, { method: 'POST', body: { content_text } }),
+  },
+  templateBranches: {
+    list: () => request<TemplateBranch[]>('/api/template-branches'),
+    create: (body: {
+      name: string
+      base_template_id?: number
+      target: string
+      content_format: string
+      content: string
+      remark?: string
+    }) => request<TemplateBranch>('/api/template-branches', { method: 'POST', body }),
+    get: (id: number) => request<TemplateBranch>(`/api/template-branches/${id}`),
+    update: (id: number, body: {
+      name?: string
+      content?: string
+      content_format?: string
+      remark?: string
+      is_active?: boolean
+    }) => request<TemplateBranch>(`/api/template-branches/${id}`, { method: 'PUT', body }),
+    remove: (id: number) => request<{ message: string }>(`/api/template-branches/${id}`, { method: 'DELETE' }),
   },
   settings: {
     sharedToken: () => request<{ token: string }>('/api/settings/shared-token'),

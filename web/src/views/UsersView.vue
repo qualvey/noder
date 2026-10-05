@@ -6,6 +6,7 @@ import { api } from '../api'
 import type { DistFile, Node, User, UserDownload } from '../types'
 import { buildDownloadLink, buildMihomoLink, buildSubLink, copyText } from '../utils'
 import UserFormModal from '../components/UserFormModal.vue'
+import TemplateBranchModal from '../components/TemplateBranchModal.vue'
 import ContextMenu, { type ContextMenuItem } from '../components/ContextMenu.vue'
 import { ToastType } from '@/App.vue'
 import { useFuzzySearch } from '../composables'
@@ -27,6 +28,7 @@ const loading = ref(true)
 const downloadHistoryUser = ref<User | null>(null)
 const downloadHistory = ref<UserDownload[]>([])
 const loadingDownloadHistory = ref(false)
+const showTemplateBranchModal = ref(false)
 
 // 右键菜单：复制订阅链接
 function onRowContextMenu(e: MouseEvent, user: User) {
@@ -158,7 +160,13 @@ const ctxMenuItems = (): ContextMenuItem[] => {
       items.push({ label: t('users.menu.copyDl', { name: z.name }), icon: '🔗', onClick: () => copyZipLink(z) })
     }
   }
+  items.push({ label: t('users.menu.templateBranch') || '模板管理', icon: '📝', divider: true, onClick: openTemplateBranchModal })
   return items
+}
+
+function openTemplateBranchModal() {
+  closeCtxMenu()
+  showTemplateBranchModal.value = true
 }
 
 async function fetchData(silent = false) {
@@ -450,6 +458,8 @@ onMounted(() => fetchData())
 
   <UserFormModal :open="showModal" :editing="editingUser" :nodes="nodes" @close="showModal = false"
     @saved="() => fetchData(true)" />
+
+  <TemplateBranchModal :open="showTemplateBranchModal" @close="showTemplateBranchModal = false" />
 
   <ContextMenu v-if="ctxMenu" :x="ctxMenu.x" :y="ctxMenu.y" :title="ctxMenu.user.name" :items="ctxMenuItems()"
     @close="closeCtxMenu" />

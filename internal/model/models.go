@@ -48,15 +48,16 @@ type Node struct {
 type User struct {
 	bun.BaseModel `bun:"table:user"`
 
-	ID             int64   `bun:"id,pk,autoincrement" json:"id"`
-	Name           string  `bun:"name,notnull" json:"name"`
-	Token          string  `bun:"token,notnull,unique" json:"token"`
-	IsActive       bool    `bun:"is_active,notnull,default:true" json:"is_active"`
-	UUID           *string `bun:"uuid" json:"uuid,omitempty"`
-	Password       *string `bun:"password" json:"password,omitempty"`
-	Remark         *string `bun:"remark" json:"remark,omitempty"`
-	ConfigOverride *string `bun:"config_override" json:"config_override,omitempty"`
-	NodeOrder      *string `bun:"node_order" json:"node_order,omitempty"`
+	ID               int64   `bun:"id,pk,autoincrement" json:"id"`
+	Name             string  `bun:"name,notnull" json:"name"`
+	Token            string  `bun:"token,notnull,unique" json:"token"`
+	IsActive         bool    `bun:"is_active,notnull,default:true" json:"is_active"`
+	UUID             *string `bun:"uuid" json:"uuid,omitempty"`
+	Password         *string `bun:"password" json:"password,omitempty"`
+	Remark           *string `bun:"remark" json:"remark,omitempty"`
+	ConfigOverride   *string `bun:"config_override" json:"config_override,omitempty"`
+	NodeOrder        *string `bun:"node_order" json:"node_order,omitempty"`
+	TemplateBranchID *int64  `bun:"template_branch_id" json:"template_branch_id,omitempty"`
 
 	Nodes []*Node `bun:"m2m:usernodelink,join:User=Node" json:"-"`
 
@@ -160,6 +161,21 @@ type TemplateHistory struct {
 	Content    string    `bun:"content,notnull" json:"content"`
 	Remark     string    `bun:"remark" json:"remark"`
 	CreatedAt  time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+}
+
+// TemplateBranch 模板分支（独立副本，创建后与原模板无关）
+type TemplateBranch struct {
+	bun.BaseModel `bun:"table:template_branch"`
+
+	ID            int64     `bun:"id,pk,autoincrement" json:"id"`
+	Name          string    `bun:"name,notnull" json:"name"`
+	Target        string    `bun:"target,notnull" json:"target"` // sing-box | mihomo
+	ContentFormat string    `bun:"content_format,notnull" json:"content_format"` // json | yaml
+	Content       string    `bun:"content,notnull" json:"content"`
+	Remark        *string   `bun:"remark" json:"remark,omitempty"`
+	IsActive      bool      `bun:"is_active,default:true" json:"is_active"`
+	CreatedAt     time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt     time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
 }
 
 // AppSetting 全局设置模型
