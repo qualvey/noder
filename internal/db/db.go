@@ -31,7 +31,7 @@ func InitDB() (*bun.DB, error) {
 	sqldb.SetMaxOpenConns(1) // SQLite 单写入连接最佳实践
 
 	DB = bun.NewDB(sqldb, sqlitedialect.New())
-	DB.RegisterModel((*model.UserNodeLink)(nil), (*model.User)(nil), (*model.Node)(nil))
+	DB.RegisterModel((*model.UserNodeLink)(nil), (*model.User)(nil), (*model.Node)(nil), (*model.Endpoint)(nil))
 
 	ctx := context.Background()
 	if err := CreateDBAndTables(ctx); err != nil {
@@ -50,6 +50,7 @@ func CreateDBAndTables(ctx context.Context) error {
 		(*model.UserNodeLink)(nil),
 		(*model.Node)(nil),
 		(*model.User)(nil),
+		(*model.Endpoint)(nil),
 		(*model.DistFile)(nil),
 		(*model.UserDownloadLog)(nil),
 		(*model.Template)(nil),
@@ -66,6 +67,29 @@ func CreateDBAndTables(ctx context.Context) error {
 	if _, err := DB.NewCreateIndex().Model((*model.UserDownloadLog)(nil)).IfNotExists().Index("user_download_log_user_time_idx").Column("user_id", "downloaded_at").Exec(ctx); err != nil {
 		return err
 	}
+	if _, err := DB.NewCreateIndex().Model((*model.Endpoint)(nil)).IfNotExists().Index("endpoint_user_id_idx").Column("user_id").Exec(ctx); err != nil {
+		return err
+	}
+	if _, err := DB.NewCreateIndex().Model((*model.Endpoint)(nil)).IfNotExists().Index("endpoint_node_id_idx").Column("node_id").Exec(ctx); err != nil {
+		return err
+	}
+
+	// 存量数据平滑迁移：将 usernodelink 转为 endpoint
+	_, _ = DB.ExecContext(ctx, `
+		INSERT INTO endpoint (user_id, node_id, tag, uuid, password, is_active, sort_order)
+		SELECT l.user_id, l.node_id,
+		       COALESCE(NULLIF(n.tag, ''), n.node_name, 'Node-' || n.id),
+		       COALESCE(NULLIF(u.uuid, ''), lower(hex(randomblob(16)))),
+		       u.password,
+		       1,
+		       0
+		FROM usernodelink l
+		JOIN user u ON l.user_id = u.id
+		JOIN node n ON l.node_id = n.id
+		WHERE NOT EXISTS (
+			SELECT 1 FROM endpoint e WHERE e.user_id = l.user_id AND e.node_id = l.node_id
+		)
+	`)
 
 	// 兼容旧库迁移 (ALTER TABLE)
 	nodeCols := []string{"public_key", "short_id", "fingerprint", "flow", "remark", "tag", "congestion_control", "sort_order"}
@@ -183,6 +207,13 @@ func SeedDefaultData(ctx context.Context) error {
 		{UserID: testUser.ID, NodeID: anytlsNode.ID},
 	}
 	_, _ = DB.NewInsert().Model(&links).Exec(ctx)
+
+	endpoints := []*model.Endpoint{
+		{UserID: testUser.ID, NodeID: tuicNode.ID, Tag: tuicNode.Tag, UUID: *testUser.UUID, Password: testUser.Password, IsActive: true, SortOrder: 0},
+		{UserID: testUser.ID, NodeID: vlessNode.ID, Tag: vlessNode.Tag, UUID: *testUser.UUID, Password: testUser.Password, IsActive: true, SortOrder: 1},
+		{UserID: testUser.ID, NodeID: anytlsNode.ID, Tag: anytlsNode.Tag, UUID: *testUser.UUID, Password: testUser.Password, IsActive: true, SortOrder: 2},
+	}
+	_, _ = DB.NewInsert().Model(&endpoints).Exec(ctx)
 
 	// 默认模板
 	seedTemplates(ctx)

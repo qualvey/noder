@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"sort"
 	"strconv"
 	"time"
 
@@ -44,6 +45,27 @@ type Node struct {
 	Users []*User `bun:"m2m:usernodelink,join:Node=User" json:"-"`
 }
 
+// Endpoint 完整节点实体（入口节点 + 鉴权凭证 + 路由 Tag）
+type Endpoint struct {
+	bun.BaseModel `bun:"table:endpoint"`
+
+	ID        int64     `bun:"id,pk,autoincrement" json:"id"`
+	UserID    int64     `bun:"user_id,notnull" json:"user_id"`
+	User      *User     `bun:"rel:belongs-to,join:user_id=id" json:"-"`
+	NodeID    int64     `bun:"node_id,notnull" json:"node_id"`
+	Node      *Node     `bun:"rel:belongs-to,join:node_id=id" json:"node,omitempty"`
+
+	Tag       string    `bun:"tag,notnull" json:"tag"`
+	UUID      string    `bun:"uuid,notnull" json:"uuid"`
+	Password  *string   `bun:"password" json:"password,omitempty"`
+	IsActive  bool      `bun:"is_active,notnull,default:true" json:"is_active"`
+	SortOrder int       `bun:"sort_order,notnull,default:0" json:"sort_order"`
+	Remark    *string   `bun:"remark" json:"remark,omitempty"`
+
+	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
+}
+
 // User 用户模型
 type User struct {
 	bun.BaseModel `bun:"table:user"`
@@ -59,7 +81,8 @@ type User struct {
 	NodeOrder        *string `bun:"node_order" json:"node_order,omitempty"`
 	TemplateBranchID *int64  `bun:"template_branch_id" json:"template_branch_id,omitempty"`
 
-	Nodes []*Node `bun:"m2m:usernodelink,join:User=Node" json:"-"`
+	Endpoints []*Endpoint `bun:"rel:has-many,join:id=user_id" json:"endpoints,omitempty"`
+	Nodes     []*Node     `bun:"m2m:usernodelink,join:User=Node" json:"-"`
 
 	// 序列化时动态装配
 	NodeIDs []int64 `bun:"-" json:"node_ids"`
@@ -104,6 +127,20 @@ func (u *User) GetSortedNodeIDs() []int64 {
 		}
 	}
 	return result
+}
+
+// GetActiveEndpoints 返回该用户已启用且对应物理入口节点也启用的端点列表（按 SortOrder 排序）
+func (u *User) GetActiveEndpoints() []*Endpoint {
+	var res []*Endpoint
+	for _, ep := range u.Endpoints {
+		if ep.IsActive && ep.Node != nil && ep.Node.IsActive {
+			res = append(res, ep)
+		}
+	}
+	sort.SliceStable(res, func(i, j int) bool {
+		return res[i].SortOrder < res[j].SortOrder
+	})
+	return res
 }
 
 // DistFile 分发文件模型
