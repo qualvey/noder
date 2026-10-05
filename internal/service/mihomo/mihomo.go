@@ -1,6 +1,7 @@
 package mihomo
 
 import (
+	"errors"
 	"os"
 	"strings"
 
@@ -17,7 +18,11 @@ var NodeProxyTypes = map[string]bool{
 	"ssh": true, "shadowtls": true,
 }
 
-func BuildMihomoProxy(node *model.Node, user *model.User) (map[string]interface{}, error) {
+func BuildMihomoEndpointProxy(ep *model.Endpoint) (map[string]interface{}, error) {
+	if ep == nil || ep.Node == nil {
+		return nil, errors.New("endpoint and node are required")
+	}
+	node := ep.Node
 	proto := strings.ToLower(node.Protocol)
 	if proto == "" {
 		proto = "vless"
@@ -31,18 +36,18 @@ func BuildMihomoProxy(node *model.Node, user *model.User) (map[string]interface{
 		return nil, err
 	}
 
-	tag := node.Tag
+	tag := ep.Tag
 	if tag == "" {
-		tag = node.NodeName
+		tag = node.Tag
+		if tag == "" {
+			tag = node.NodeName
+		}
 	}
 
-	userUUID := user.Token
-	if user.UUID != nil && *user.UUID != "" {
-		userUUID = *user.UUID
-	}
-	userPassword := user.Token
-	if user.Password != nil && *user.Password != "" {
-		userPassword = *user.Password
+	userUUID := ep.UUID
+	userPassword := ""
+	if ep.Password != nil {
+		userPassword = *ep.Password
 	}
 
 	merged := map[string]interface{}{
@@ -142,6 +147,27 @@ func BuildMihomoProxy(node *model.Node, user *model.User) (map[string]interface{
 	return proxy, nil
 }
 
+func BuildMihomoProxy(node *model.Node, user *model.User) (map[string]interface{}, error) {
+	tag := node.Tag
+	if tag == "" {
+		tag = node.NodeName
+	}
+	userUUID := user.Token
+	if user.UUID != nil && *user.UUID != "" {
+		userUUID = *user.UUID
+	}
+	userPassword := user.Token
+	if user.Password != nil && *user.Password != "" {
+		userPassword = *user.Password
+	}
+	return BuildMihomoEndpointProxy(&model.Endpoint{
+		Node:     node,
+		Tag:      tag,
+		UUID:     userUUID,
+		Password: &userPassword,
+	})
+}
+
 func LoadMihomoTemplate() map[string]interface{} {
 	if data, err := os.ReadFile(config.MihomoTemplatePath); err == nil && len(data) > 0 {
 		var res map[string]interface{}
@@ -165,7 +191,7 @@ func LoadMihomoTemplate() map[string]interface{} {
 	}
 }
 
-func GenerateMihomoConfig(nodes []*model.Node, user *model.User) (map[string]interface{}, error) {
+func GenerateMihomoConfigFromEndpoints(endpoints []*model.Endpoint, user *model.User) (map[string]interface{}, error) {
 	cfg := LoadMihomoTemplate()
 
 	var tplProxies []interface{}
@@ -185,9 +211,9 @@ func GenerateMihomoConfig(nodes []*model.Node, user *model.User) (map[string]int
 
 	var realProxies []map[string]interface{}
 	var proxyNames []string
-	for _, n := range nodes {
-		if n.IsActive {
-			p, err := BuildMihomoProxy(n, user)
+	for _, ep := range endpoints {
+		if ep.IsActive && ep.Node != nil && ep.Node.IsActive {
+			p, err := BuildMihomoEndpointProxy(ep)
 			if err != nil {
 				return nil, err
 			}
@@ -263,6 +289,45 @@ func GenerateMihomoConfig(nodes []*model.Node, user *model.User) (map[string]int
 	}
 
 	return cfg, nil
+}
+
+func GenerateMihomoConfig(nodes []*model.Node, user *model.User) (map[string]interface{}, error) {
+	var endpoints []*model.Endpoint
+	userUUID := user.Token
+	if user.UUID != nil && *user.UUID != "" {
+		userUUID = *user.UUID
+	}
+	var pwd *string
+	if user.Password != nil && *user.Password != "" {
+		pwd = user.Password
+	} else if user.Token != "" {
+		pwd = &user.Token
+	}
+
+	for i, n := range nodes {
+		tag := n.Tag
+		if tag == "" {
+			tag = n.NodeName
+		}
+		endpoints = append(endpoints, &model.Endpoint{
+			Node:      n,
+			Tag:       tag,
+			UUID:      userUUID,
+			Password:  pwd,
+			IsActive:  n.IsActive,
+			SortOrder: i,
+		})
+	}
+
+	return GenerateMihomoConfigFromEndpoints(endpoints, user)
+}
+
+func BuildMihomoConfigYAMLFromEndpoints(endpoints []*model.Endpoint, user *model.User) ([]byte, error) {
+	cfg, err := GenerateMihomoConfigFromEndpoints(endpoints, user)
+	if err != nil {
+		return nil, err
+	}
+	return yaml.Marshal(cfg)
 }
 
 func BuildMihomoConfigYAML(nodes []*model.Node, user *model.User) ([]byte, error) {

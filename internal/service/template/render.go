@@ -19,27 +19,28 @@ import (
 
 const MihomoPlaceholder = "{{mihomo_proxies_yaml}}"
 
-func BuildTemplateContext(user *model.User, nodes []*model.Node, includeMihomo bool) map[string]string {
-	var activeNodes []*model.Node
-	for _, n := range nodes {
-		if n.IsActive {
-			activeNodes = append(activeNodes, n)
+func BuildTemplateContextFromEndpoints(user *model.User, endpoints []*model.Endpoint, includeMihomo bool) map[string]string {
+	var activeEndpoints []*model.Endpoint
+	for _, ep := range endpoints {
+		if ep.IsActive && ep.Node != nil && ep.Node.IsActive {
+			activeEndpoints = append(activeEndpoints, ep)
 		}
 	}
 
 	var nodeMeta []map[string]interface{}
-	for _, n := range activeNodes {
+	for _, ep := range activeEndpoints {
 		nodeMeta = append(nodeMeta, map[string]interface{}{
-			"node_name":   n.NodeName,
-			"protocol":    n.Protocol,
-			"server":      n.ServerAddress,
-			"server_port": n.ServerPort,
+			"tag":         ep.Tag,
+			"node_name":   ep.Node.NodeName,
+			"protocol":    ep.Node.Protocol,
+			"server":      ep.Node.ServerAddress,
+			"server_port": ep.Node.ServerPort,
 		})
 	}
 
 	var outbounds []map[string]interface{}
-	for _, n := range activeNodes {
-		if ob, err := singbox.BuildSingboxOutbound(n, user); err == nil {
+	for _, ep := range activeEndpoints {
+		if ob, err := singbox.BuildSingboxEndpointOutbound(ep); err == nil {
 			outbounds = append(outbounds, ob)
 		}
 	}
@@ -61,12 +62,16 @@ func BuildTemplateContext(user *model.User, nodes []*model.Node, includeMihomo b
 	}
 
 	uuidStr := ""
-	if user.UUID != nil {
+	if user.UUID != nil && *user.UUID != "" {
 		uuidStr = *user.UUID
+	} else if len(activeEndpoints) > 0 {
+		uuidStr = activeEndpoints[0].UUID
 	}
 	pwdStr := ""
-	if user.Password != nil {
+	if user.Password != nil && *user.Password != "" {
 		pwdStr = *user.Password
+	} else if len(activeEndpoints) > 0 && activeEndpoints[0].Password != nil {
+		pwdStr = *activeEndpoints[0].Password
 	}
 
 	ctx := map[string]string{
@@ -82,7 +87,7 @@ func BuildTemplateContext(user *model.User, nodes []*model.Node, includeMihomo b
 	}
 
 	if includeMihomo {
-		if mhBytes, err := mihomo.BuildMihomoConfigYAML(activeNodes, user); err == nil {
+		if mhBytes, err := mihomo.BuildMihomoConfigYAMLFromEndpoints(activeEndpoints, user); err == nil {
 			var mhObj map[string]interface{}
 			_ = yaml.Unmarshal(mhBytes, &mhObj)
 			if proxies, ok := mhObj["proxies"]; ok {
@@ -92,6 +97,36 @@ func BuildTemplateContext(user *model.User, nodes []*model.Node, includeMihomo b
 	}
 
 	return ctx
+}
+
+func BuildTemplateContext(user *model.User, nodes []*model.Node, includeMihomo bool) map[string]string {
+	var endpoints []*model.Endpoint
+	userUUID := user.Token
+	if user.UUID != nil && *user.UUID != "" {
+		userUUID = *user.UUID
+	}
+	var pwd *string
+	if user.Password != nil && *user.Password != "" {
+		pwd = user.Password
+	} else if user.Token != "" {
+		pwd = &user.Token
+	}
+
+	for i, n := range nodes {
+		tag := n.Tag
+		if tag == "" {
+			tag = n.NodeName
+		}
+		endpoints = append(endpoints, &model.Endpoint{
+			Node:      n,
+			Tag:       tag,
+			UUID:      userUUID,
+			Password:  pwd,
+			IsActive:  n.IsActive,
+			SortOrder: i,
+		})
+	}
+	return BuildTemplateContextFromEndpoints(user, endpoints, includeMihomo)
 }
 
 var keyedPattern = regexp.MustCompile(`(?i)(["']?[\w.\-]*?(?:token|uuid|password)["']?\s*[:=]\s*)(["']?)([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(["']?)`)
@@ -151,6 +186,10 @@ func zipEntryProgressWeight(f *zip.File, rendered bool) uint64 {
 
 func RenderTemplateText(text string, user *model.User, nodes []*model.Node, knownTokens []string) string {
 	return RenderTemplateTextWithContext(text, user, BuildTemplateContext(user, nodes, strings.Contains(text, MihomoPlaceholder)), knownTokens)
+}
+
+func RenderTemplateTextFromEndpoints(text string, user *model.User, endpoints []*model.Endpoint, knownTokens []string) string {
+	return RenderTemplateTextWithContext(text, user, BuildTemplateContextFromEndpoints(user, endpoints, strings.Contains(text, MihomoPlaceholder)), knownTokens)
 }
 
 func RenderTemplateTextWithContext(text string, user *model.User, ctx map[string]string, knownTokens []string) string {

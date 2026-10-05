@@ -29,10 +29,11 @@ func LoadXrayTemplate() (map[string]interface{}, error) {
 	return cfg, nil
 }
 
-func BuildXrayOutbound(node *model.Node, user *model.User) (map[string]interface{}, error) {
-	if node == nil || user == nil {
-		return nil, errors.New("node and user are required")
+func BuildXrayEndpointOutbound(ep *model.Endpoint) (map[string]interface{}, error) {
+	if ep == nil || ep.Node == nil {
+		return nil, errors.New("endpoint and node are required")
 	}
+	node := ep.Node
 	if node.Protocol != "vless" {
 		return nil, contract.NewBadRequest(fmt.Sprintf("Xray only supports vless, got '%s'", node.Protocol))
 	}
@@ -42,7 +43,7 @@ func BuildXrayOutbound(node *model.Node, user *model.User) (map[string]interface
 	if node.ServerAddress == "" || node.ServerPort <= 0 {
 		return nil, contract.NewBadRequest("Xray VLESS outbound requires server address and port")
 	}
-	if user.UUID == nil || *user.UUID == "" {
+	if ep.UUID == "" {
 		return nil, contract.NewBadRequest("Xray VLESS outbound requires user UUID")
 	}
 	if node.SNI == nil || *node.SNI == "" || node.PublicKey == nil || *node.PublicKey == "" ||
@@ -50,9 +51,12 @@ func BuildXrayOutbound(node *model.Node, user *model.User) (map[string]interface
 		return nil, contract.NewBadRequest("Xray VLESS Reality outbound requires sni, public_key, short_id and fingerprint")
 	}
 
-	tag := node.Tag
+	tag := ep.Tag
 	if tag == "" {
-		tag = node.NodeName
+		tag = node.Tag
+		if tag == "" {
+			tag = node.NodeName
+		}
 	}
 	if tag == "" {
 		return nil, contract.NewBadRequest("Xray VLESS outbound requires node tag")
@@ -61,7 +65,7 @@ func BuildXrayOutbound(node *model.Node, user *model.User) (map[string]interface
 	settings := map[string]interface{}{
 		"address":    node.ServerAddress,
 		"port":       node.ServerPort,
-		"id":         *user.UUID,
+		"id":         ep.UUID,
 		"encryption": "none",
 	}
 	if node.Flow != nil && *node.Flow != "" {
@@ -85,7 +89,23 @@ func BuildXrayOutbound(node *model.Node, user *model.User) (map[string]interface
 	}, nil
 }
 
-func GenerateXrayConfig(nodes []*model.Node, user *model.User) (map[string]interface{}, error) {
+func BuildXrayOutbound(node *model.Node, user *model.User) (map[string]interface{}, error) {
+	tag := node.Tag
+	if tag == "" {
+		tag = node.NodeName
+	}
+	userUUID := user.Token
+	if user.UUID != nil && *user.UUID != "" {
+		userUUID = *user.UUID
+	}
+	return BuildXrayEndpointOutbound(&model.Endpoint{
+		Node: node,
+		Tag:  tag,
+		UUID: userUUID,
+	})
+}
+
+func GenerateXrayConfigFromEndpoints(endpoints []*model.Endpoint, user *model.User) (map[string]interface{}, error) {
 	cfg, err := LoadXrayTemplate()
 	if err != nil {
 		return nil, err
@@ -104,11 +124,11 @@ func GenerateXrayConfig(nodes []*model.Node, user *model.User) (map[string]inter
 		}
 	}
 
-	for _, node := range nodes {
-		if !node.IsActive {
+	for _, ep := range endpoints {
+		if !ep.IsActive || ep.Node == nil || !ep.Node.IsActive {
 			continue
 		}
-		outbound, err := BuildXrayOutbound(node, user)
+		outbound, err := BuildXrayEndpointOutbound(ep)
 		if err != nil {
 			return nil, err
 		}
@@ -122,4 +142,26 @@ func GenerateXrayConfig(nodes []*model.Node, user *model.User) (map[string]inter
 
 	cfg["outbounds"] = outbounds
 	return cfg, nil
+}
+
+func GenerateXrayConfig(nodes []*model.Node, user *model.User) (map[string]interface{}, error) {
+	var endpoints []*model.Endpoint
+	userUUID := user.Token
+	if user.UUID != nil && *user.UUID != "" {
+		userUUID = *user.UUID
+	}
+	for i, n := range nodes {
+		tag := n.Tag
+		if tag == "" {
+			tag = n.NodeName
+		}
+		endpoints = append(endpoints, &model.Endpoint{
+			Node:      n,
+			Tag:       tag,
+			UUID:      userUUID,
+			IsActive:  n.IsActive,
+			SortOrder: i,
+		})
+	}
+	return GenerateXrayConfigFromEndpoints(endpoints, user)
 }

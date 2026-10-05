@@ -11,7 +11,11 @@ import (
 	"noder/internal/model"
 )
 
-func BuildSingboxOutbound(node *model.Node, user *model.User) (map[string]interface{}, error) {
+func BuildSingboxEndpointOutbound(ep *model.Endpoint) (map[string]interface{}, error) {
+	if ep == nil || ep.Node == nil {
+		return nil, errors.New("endpoint and node are required")
+	}
+	node := ep.Node
 	proto := node.Protocol
 	if proto == "" {
 		proto = "vless"
@@ -25,18 +29,18 @@ func BuildSingboxOutbound(node *model.Node, user *model.User) (map[string]interf
 		return nil, err
 	}
 
-	tag := node.Tag
+	tag := ep.Tag
 	if tag == "" {
-		tag = node.NodeName
+		tag = node.Tag
+		if tag == "" {
+			tag = node.NodeName
+		}
 	}
 
-	userUUID := user.Token
-	if user.UUID != nil && *user.UUID != "" {
-		userUUID = *user.UUID
-	}
-	userPassword := user.Token
-	if user.Password != nil && *user.Password != "" {
-		userPassword = *user.Password
+	userUUID := ep.UUID
+	userPassword := ""
+	if ep.Password != nil {
+		userPassword = *ep.Password
 	}
 
 	// 校验全量契约
@@ -181,6 +185,27 @@ func BuildSingboxOutbound(node *model.Node, user *model.User) (map[string]interf
 	return outbound, nil
 }
 
+func BuildSingboxOutbound(node *model.Node, user *model.User) (map[string]interface{}, error) {
+	tag := node.Tag
+	if tag == "" {
+		tag = node.NodeName
+	}
+	userUUID := user.Token
+	if user.UUID != nil && *user.UUID != "" {
+		userUUID = *user.UUID
+	}
+	userPassword := user.Token
+	if user.Password != nil && *user.Password != "" {
+		userPassword = *user.Password
+	}
+	return BuildSingboxEndpointOutbound(&model.Endpoint{
+		Node:     node,
+		Tag:      tag,
+		UUID:     userUUID,
+		Password: &userPassword,
+	})
+}
+
 func LoadSingboxTemplate() (map[string]interface{}, error) {
 	data, err := os.ReadFile(config.SingBoxTemplatePath)
 	if err != nil {
@@ -199,23 +224,23 @@ func LoadSingboxTemplate() (map[string]interface{}, error) {
 	return res, nil
 }
 
-func GenerateSingboxConfig(nodes []*model.Node, user *model.User) (map[string]interface{}, error) {
-	var activeNodes []*model.Node
-	for _, n := range nodes {
-		if n.IsActive {
-			activeNodes = append(activeNodes, n)
+func GenerateSingboxConfigFromEndpoints(endpoints []*model.Endpoint, user *model.User) (map[string]interface{}, error) {
+	var activeEndpoints []*model.Endpoint
+	for _, ep := range endpoints {
+		if ep.IsActive && ep.Node != nil && ep.Node.IsActive {
+			activeEndpoints = append(activeEndpoints, ep)
 		}
 	}
 
 	var nodeOutbounds []map[string]interface{}
 	var nodeTags []string
-	for _, n := range activeNodes {
-		ob, err := BuildSingboxOutbound(n, user)
+	for _, ep := range activeEndpoints {
+		ob, err := BuildSingboxEndpointOutbound(ep)
 		if err != nil {
 			return nil, err
 		}
 		nodeOutbounds = append(nodeOutbounds, ob)
-		nodeTags = append(nodeTags, n.Tag)
+		nodeTags = append(nodeTags, ep.Tag)
 	}
 
 	cfg, err := LoadSingboxTemplate()
@@ -266,7 +291,7 @@ func GenerateSingboxConfig(nodes []*model.Node, user *model.User) (map[string]in
 	cfg["outbounds"] = rawOutbounds
 
 	// 3. 应用 config_override
-	if user.ConfigOverride != nil && *user.ConfigOverride != "" {
+	if user != nil && user.ConfigOverride != nil && *user.ConfigOverride != "" {
 		var override map[string]interface{}
 		if err := json.Unmarshal([]byte(*user.ConfigOverride), &override); err == nil {
 			for k, v := range override {
@@ -278,4 +303,35 @@ func GenerateSingboxConfig(nodes []*model.Node, user *model.User) (map[string]in
 	}
 
 	return cfg, nil
+}
+
+func GenerateSingboxConfig(nodes []*model.Node, user *model.User) (map[string]interface{}, error) {
+	var endpoints []*model.Endpoint
+	userUUID := user.Token
+	if user.UUID != nil && *user.UUID != "" {
+		userUUID = *user.UUID
+	}
+	var pwd *string
+	if user.Password != nil && *user.Password != "" {
+		pwd = user.Password
+	} else if user.Token != "" {
+		pwd = &user.Token
+	}
+
+	for i, n := range nodes {
+		tag := n.Tag
+		if tag == "" {
+			tag = n.NodeName
+		}
+		endpoints = append(endpoints, &model.Endpoint{
+			Node:      n,
+			Tag:       tag,
+			UUID:      userUUID,
+			Password:  pwd,
+			IsActive:  n.IsActive,
+			SortOrder: i,
+		})
+	}
+
+	return GenerateSingboxConfigFromEndpoints(endpoints, user)
 }
