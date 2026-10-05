@@ -48,6 +48,63 @@ export function parseNodeJson(jsonStr: string): Partial<Record<string, unknown>>
   }
 }
 
+// 检测并解析 vless:// 链接
+export function parseVlessUrl(urlStr: string): Partial<Record<string, unknown>> | null {
+  const trimmed = urlStr.trim()
+  if (!trimmed.startsWith('vless://')) return null
+
+  try {
+    const url = new URL(trimmed)
+    if (url.protocol !== 'vless:') return null
+
+    const uuid = url.username
+    const server = url.hostname
+    const port = url.port ? parseInt(url.port, 10) : 443
+    const tag = url.hash ? decodeURIComponent(url.hash.substring(1)) : 'vless'
+
+    if (!uuid || !server) return null
+
+    const searchParams = url.searchParams
+    const flow = searchParams.get('flow') || ''
+    const security = searchParams.get('security') || 'reality'
+    const sni = searchParams.get('sni') || ''
+    const fp = searchParams.get('fp') || 'chrome'
+    const pbk = searchParams.get('pbk') || ''
+    const sid = searchParams.get('sid') || ''
+    const transportType = searchParams.get('type') || 'direct'
+    const path = searchParams.get('path') ? decodeURIComponent(searchParams.get('path')!) : ''
+
+    const tls: Record<string, unknown> = { enabled: true }
+    if (sni) tls.server_name = sni
+    if (fp) tls.utls = { enabled: true, fingerprint: fp }
+    if (security === 'reality' && pbk) {
+      tls.reality = { enabled: true, public_key: pbk, short_id: sid }
+    }
+
+    // 构建 transport 配置（与 sing-box JSON 格式对齐）
+    const transport: Record<string, unknown> = {}
+    if (transportType && transportType !== 'direct') {
+      transport.type = transportType
+      if (path) transport.path = path
+    }
+
+    const result: Record<string, unknown> = {
+      type: 'vless',
+      tag,
+      server,
+      server_port: port,
+      uuid,
+      flow,
+      tls,
+      transport,
+    }
+
+    return result
+  } catch {
+    return null
+  }
+}
+
 // 复制文本：优先 Clipboard API，非安全上下文（http://LAN IP）回落 execCommand
 import { apiBase } from './api'
 

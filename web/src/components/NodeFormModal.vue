@@ -6,7 +6,7 @@ import { inject, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { Node } from '../types'
-import { parseNodeJson } from '../utils'
+import { parseNodeJson, parseVlessUrl } from '../utils'
 import { TUIC_CONGESTION_CONTROLS, UTLS_FINGERPRINTS, VLESS_FLOWS, isEnumValue } from '../constants'
 
 const { t } = useI18n()
@@ -171,9 +171,12 @@ async function saveNode() {
   }
 }
 
-// JSON 导入：解析 outbound JSON 填充表单
+// JSON 导入：解析 outbound JSON 或 vless:// 链接填充表单
 function applyJsonImport() {
-  const obj = parseNodeJson(jsonInput.value)
+  // 先尝试解析 vless:// 链接
+  let obj = parseVlessUrl(jsonInput.value)
+  // 再尝试解析 JSON
+  if (!obj) obj = parseNodeJson(jsonInput.value)
   if (!obj) {
     toast(t('nodes.jsonError'), 'error')
     return
