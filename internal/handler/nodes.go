@@ -213,6 +213,7 @@ func DeleteNode(w http.ResponseWriter, r *http.Request) {
 
 	// 级联清理关联
 	_, _ = db.DB.NewDelete().Model((*model.UserNodeLink)(nil)).Where("node_id = ?", id).Exec(r.Context())
+	_, _ = db.DB.NewDelete().Model((*model.Endpoint)(nil)).Where("node_id = ?", id).Exec(r.Context())
 
 	RespondJSON(w, http.StatusOK, map[string]string{
 		"message": fmt.Sprintf("Node %d deleted successfully", id),

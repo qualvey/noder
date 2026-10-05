@@ -26,6 +26,10 @@ func RegisterUserRoutes(r chi.Router) {
 		r.Post("/", CreateUser)
 		r.Get("/", ListUsers)
 		r.Get("/{id}/downloads", ListUserDownloads)
+		r.Get("/{id}/endpoints", ListUserEndpoints)
+		r.Post("/{id}/endpoints", AddUserEndpoint)
+		r.Put("/{id}/endpoints/{epId}", UpdateUserEndpoint)
+		r.Delete("/{id}/endpoints/{epId}", DeleteUserEndpoint)
 		r.Get("/{id}", GetUser)
 		r.Put("/{id}", UpdateUser)
 		r.Delete("/{id}", DeleteUser)
@@ -63,32 +67,80 @@ func parseAndValidateConfigOverride(raw string) (*string, error) {
 	return &normStr, nil
 }
 
+type EndpointInput struct {
+	ID        *int64  `json:"id,omitempty"`
+	NodeID    int64   `json:"node_id"`
+	Tag       string  `json:"tag"`
+	UUID      *string `json:"uuid,omitempty"`
+	Password  *string `json:"password,omitempty"`
+	IsActive  *bool   `json:"is_active,omitempty"`
+	SortOrder *int    `json:"sort_order,omitempty"`
+	Remark    *string `json:"remark,omitempty"`
+}
+
+type EndpointReadResp struct {
+	ID        int64       `json:"id"`
+	UserID    int64       `json:"user_id"`
+	NodeID    int64       `json:"node_id"`
+	Tag       string      `json:"tag"`
+	UUID      string      `json:"uuid"`
+	Password  *string     `json:"password,omitempty"`
+	IsActive  bool        `json:"is_active"`
+	SortOrder int         `json:"sort_order"`
+	Remark    *string     `json:"remark,omitempty"`
+	Node      *model.Node `json:"node,omitempty"`
+}
+
+func resolveEndpointUUID(rawUUID *string) string {
+	if rawUUID != nil && strings.TrimSpace(*rawUUID) != "" {
+		return strings.TrimSpace(*rawUUID)
+	}
+	return uuid.New().String()
+}
+
+func toEndpointRead(ep *model.Endpoint) EndpointReadResp {
+	return EndpointReadResp{
+		ID:        ep.ID,
+		UserID:    ep.UserID,
+		NodeID:    ep.NodeID,
+		Tag:       ep.Tag,
+		UUID:      ep.UUID,
+		Password:  ep.Password,
+		IsActive:  ep.IsActive,
+		SortOrder: ep.SortOrder,
+		Remark:    ep.Remark,
+		Node:      ep.Node,
+	}
+}
+
 type UserCreateReq struct {
-	Name             string  `json:"name"`
-	IsActive         *bool   `json:"is_active"`
-	Token            *string `json:"token"`
-	UUID             *string `json:"uuid"`
-	Password         *string `json:"password"`
-	Remark           *string `json:"remark"`
-	ConfigOverride   *string `json:"config_override"`
-	NodeIDs          []int64 `json:"node_ids"`
-	TemplateBranchID *int64  `json:"template_branch_id"`
+	Name             string          `json:"name"`
+	IsActive         *bool           `json:"is_active"`
+	Token            *string         `json:"token"`
+	UUID             *string         `json:"uuid"`
+	Password         *string         `json:"password"`
+	Remark           *string         `json:"remark"`
+	ConfigOverride   *string         `json:"config_override"`
+	NodeIDs          []int64         `json:"node_ids"`
+	Endpoints        []EndpointInput `json:"endpoints"`
+	TemplateBranchID *int64          `json:"template_branch_id"`
 }
 
 type UserReadResp struct {
-	ID               int64      `json:"id"`
-	Name             string     `json:"name"`
-	IsActive         bool       `json:"is_active"`
-	Token            string     `json:"token"`
-	UUID             *string    `json:"uuid"`
-	Password         *string    `json:"password"`
-	Remark           *string    `json:"remark"`
-	ConfigOverride   *string    `json:"config_override"`
-	NodeOrder        *string    `json:"node_order"`
-	NodeIDs          []int64    `json:"node_ids"`
-	TemplateBranchID *int64     `json:"template_branch_id,omitempty"`
-	DownloadCount    int        `json:"download_count"`
-	LastDownloadAt   *time.Time `json:"last_download_at,omitempty"`
+	ID               int64              `json:"id"`
+	Name             string             `json:"name"`
+	IsActive         bool               `json:"is_active"`
+	Token            string             `json:"token"`
+	UUID             *string            `json:"uuid"`
+	Password         *string            `json:"password"`
+	Remark           *string            `json:"remark"`
+	ConfigOverride   *string            `json:"config_override"`
+	NodeOrder        *string            `json:"node_order"`
+	NodeIDs          []int64            `json:"node_ids"`
+	Endpoints        []EndpointReadResp `json:"endpoints"`
+	TemplateBranchID *int64             `json:"template_branch_id,omitempty"`
+	DownloadCount    int                `json:"download_count"`
+	LastDownloadAt   *time.Time         `json:"last_download_at,omitempty"`
 }
 
 type UserDownloadReadResp struct {
@@ -147,6 +199,13 @@ func toUserRead(u *model.User) UserReadResp {
 	if sortedIDs == nil {
 		sortedIDs = []int64{}
 	}
+	var epResps []EndpointReadResp
+	for _, ep := range u.Endpoints {
+		epResps = append(epResps, toEndpointRead(ep))
+	}
+	if epResps == nil {
+		epResps = []EndpointReadResp{}
+	}
 	return UserReadResp{
 		ID:               u.ID,
 		Name:             u.Name,
@@ -158,6 +217,7 @@ func toUserRead(u *model.User) UserReadResp {
 		ConfigOverride:   u.ConfigOverride,
 		NodeOrder:        u.NodeOrder,
 		NodeIDs:          sortedIDs,
+		Endpoints:        epResps,
 		TemplateBranchID: u.TemplateBranchID,
 	}
 }
@@ -241,24 +301,109 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 绑定节点
-	if req.NodeIDs != nil && len(req.NodeIDs) > 0 {
+	// 绑定节点与端点
+	if req.Endpoints != nil && len(req.Endpoints) > 0 {
+		var endpoints []*model.Endpoint
+		var nodeIDs []int64
+		nodeSeen := make(map[int64]bool)
+		for idx, epIn := range req.Endpoints {
+			tag := strings.TrimSpace(epIn.Tag)
+			if tag == "" {
+				var n model.Node
+				if err := db.DB.NewSelect().Model(&n).Where("id = ?", epIn.NodeID).Scan(r.Context()); err == nil {
+					tag = n.Tag
+					if tag == "" {
+						tag = n.NodeName
+					}
+				}
+			}
+			epUUID := resolveEndpointUUID(epIn.UUID)
+			epActive := true
+			if epIn.IsActive != nil {
+				epActive = *epIn.IsActive
+			}
+			sortOrder := idx
+			if epIn.SortOrder != nil {
+				sortOrder = *epIn.SortOrder
+			}
+			endpoints = append(endpoints, &model.Endpoint{
+				UserID:    user.ID,
+				NodeID:    epIn.NodeID,
+				Tag:       tag,
+				UUID:      epUUID,
+				Password:  epIn.Password,
+				IsActive:  epActive,
+				SortOrder: sortOrder,
+				Remark:    epIn.Remark,
+			})
+			if !nodeSeen[epIn.NodeID] {
+				nodeIDs = append(nodeIDs, epIn.NodeID)
+				nodeSeen[epIn.NodeID] = true
+			}
+		}
+		if len(endpoints) > 0 {
+			_, _ = db.DB.NewInsert().Model(&endpoints).Exec(r.Context())
+		}
+		if len(nodeIDs) > 0 {
+			var links []*model.UserNodeLink
+			for _, nid := range nodeIDs {
+				links = append(links, &model.UserNodeLink{UserID: user.ID, NodeID: nid})
+			}
+			_, _ = db.DB.NewInsert().Model(&links).Exec(r.Context())
+			b, _ := json.Marshal(nodeIDs)
+			s := string(b)
+			user.NodeOrder = &s
+			_, _ = db.DB.NewUpdate().Model(user).Column("node_order").Where("id = ?", user.ID).Exec(r.Context())
+		}
+	} else if req.NodeIDs != nil && len(req.NodeIDs) > 0 {
 		var links []*model.UserNodeLink
-		for _, nid := range req.NodeIDs {
+		var endpoints []*model.Endpoint
+		for idx, nid := range req.NodeIDs {
 			links = append(links, &model.UserNodeLink{UserID: user.ID, NodeID: nid})
+			var n model.Node
+			tag := fmt.Sprintf("Node-%d", nid)
+			if err := db.DB.NewSelect().Model(&n).Where("id = ?", nid).Scan(r.Context()); err == nil {
+				tag = n.Tag
+				if tag == "" {
+					tag = n.NodeName
+				}
+			}
+			endpoints = append(endpoints, &model.Endpoint{
+				UserID:    user.ID,
+				NodeID:    nid,
+				Tag:       tag,
+				UUID:      userUUID,
+				Password:  &userPassword,
+				IsActive:  true,
+				SortOrder: idx,
+			})
 		}
 		_, _ = db.DB.NewInsert().Model(&links).Exec(r.Context())
+		_, _ = db.DB.NewInsert().Model(&endpoints).Exec(r.Context())
 	}
 
-	// 重新加载节点用于组装返回值
-	_ = db.DB.NewSelect().Model(user).Relation("Nodes").Where("id = ?", user.ID).Scan(r.Context())
+	// 重新加载节点与端点用于组装返回值
+	_ = db.DB.NewSelect().Model(user).
+		Relation("Nodes").
+		Relation("Endpoints", func(q *bun.SelectQuery) *bun.SelectQuery {
+			return q.Order("endpoint.sort_order ASC", "endpoint.id ASC")
+		}).
+		Relation("Endpoints.Node").
+		Where("id = ?", user.ID).
+		Scan(r.Context())
 
 	RespondJSON(w, http.StatusOK, toUserRead(user))
 }
 
 func ListUsers(w http.ResponseWriter, r *http.Request) {
 	var users []*model.User
-	err := db.DB.NewSelect().Model(&users).Relation("Nodes").Scan(r.Context())
+	err := db.DB.NewSelect().Model(&users).
+		Relation("Nodes").
+		Relation("Endpoints", func(q *bun.SelectQuery) *bun.SelectQuery {
+			return q.Order("endpoint.sort_order ASC", "endpoint.id ASC")
+		}).
+		Relation("Endpoints.Node").
+		Scan(r.Context())
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -284,7 +429,14 @@ func GetUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user model.User
-	err = db.DB.NewSelect().Model(&user).Relation("Nodes").Where("user.id = ?", id).Scan(r.Context())
+	err = db.DB.NewSelect().Model(&user).
+		Relation("Nodes").
+		Relation("Endpoints", func(q *bun.SelectQuery) *bun.SelectQuery {
+			return q.Order("endpoint.sort_order ASC", "endpoint.id ASC")
+		}).
+		Relation("Endpoints.Node").
+		Where("user.id = ?", id).
+		Scan(r.Context())
 	if err != nil {
 		RespondError(w, http.StatusNotFound, "User not found")
 		return
@@ -409,10 +561,106 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 节点更新
-	if rawNodeIDs, exists := body["node_ids"]; exists {
+	// 端点与节点更新
+	if rawEndpoints, exists := body["endpoints"]; exists {
+		_, _ = db.DB.NewDelete().Model((*model.Endpoint)(nil)).Where("user_id = ?", id).Exec(r.Context())
+		_, _ = db.DB.NewDelete().Model((*model.UserNodeLink)(nil)).Where("user_id = ?", id).Exec(r.Context())
+		user.NodeOrder = nil
+
+		if epList, ok := rawEndpoints.([]interface{}); ok && len(epList) > 0 {
+			var endpoints []*model.Endpoint
+			var nodeIDs []int64
+			nodeSeen := make(map[int64]bool)
+
+			for idx, item := range epList {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				var nodeID int64
+				if f, ok := m["node_id"].(float64); ok {
+					nodeID = int64(f)
+				}
+				if nodeID <= 0 {
+					continue
+				}
+
+				tag, _ := m["tag"].(string)
+				tag = strings.TrimSpace(tag)
+				if tag == "" {
+					var n model.Node
+					if err := db.DB.NewSelect().Model(&n).Where("id = ?", nodeID).Scan(r.Context()); err == nil {
+						tag = n.Tag
+						if tag == "" {
+							tag = n.NodeName
+						}
+					}
+				}
+
+				var rawUUID *string
+				if uStr, ok := m["uuid"].(string); ok && strings.TrimSpace(uStr) != "" {
+					trimmed := strings.TrimSpace(uStr)
+					rawUUID = &trimmed
+				}
+				epUUID := resolveEndpointUUID(rawUUID)
+
+				var epPwd *string
+				if pStr, ok := m["password"].(string); ok && strings.TrimSpace(pStr) != "" {
+					trimmed := strings.TrimSpace(pStr)
+					epPwd = &trimmed
+				}
+
+				isActive := true
+				if act, ok := m["is_active"].(bool); ok {
+					isActive = act
+				}
+
+				sortOrder := idx
+				if so, ok := m["sort_order"].(float64); ok {
+					sortOrder = int(so)
+				}
+
+				var epRemark *string
+				if rm, ok := m["remark"].(string); ok && strings.TrimSpace(rm) != "" {
+					trimmed := strings.TrimSpace(rm)
+					epRemark = &trimmed
+				}
+
+				endpoints = append(endpoints, &model.Endpoint{
+					UserID:    id,
+					NodeID:    nodeID,
+					Tag:       tag,
+					UUID:      epUUID,
+					Password:  epPwd,
+					IsActive:  isActive,
+					SortOrder: sortOrder,
+					Remark:    epRemark,
+				})
+
+				if !nodeSeen[nodeID] {
+					nodeIDs = append(nodeIDs, nodeID)
+					nodeSeen[nodeID] = true
+				}
+			}
+
+			if len(endpoints) > 0 {
+				_, _ = db.DB.NewInsert().Model(&endpoints).Exec(r.Context())
+			}
+			if len(nodeIDs) > 0 {
+				var links []*model.UserNodeLink
+				for _, nid := range nodeIDs {
+					links = append(links, &model.UserNodeLink{UserID: id, NodeID: nid})
+				}
+				_, _ = db.DB.NewInsert().Model(&links).Exec(r.Context())
+				b, _ := json.Marshal(nodeIDs)
+				s := string(b)
+				user.NodeOrder = &s
+			}
+		}
+	} else if rawNodeIDs, exists := body["node_ids"]; exists {
 		if rawNodeIDs == nil {
 			_, _ = db.DB.NewDelete().Model((*model.UserNodeLink)(nil)).Where("user_id = ?", id).Exec(r.Context())
+			_, _ = db.DB.NewDelete().Model((*model.Endpoint)(nil)).Where("user_id = ?", id).Exec(r.Context())
 			user.NodeOrder = nil
 		} else if idsList, ok := rawNodeIDs.([]interface{}); ok {
 			var newIDs []int64
@@ -422,14 +670,38 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			// 重建 UserNodeLink
+			// 重建 UserNodeLink 与 Endpoint
 			_, _ = db.DB.NewDelete().Model((*model.UserNodeLink)(nil)).Where("user_id = ?", id).Exec(r.Context())
+			_, _ = db.DB.NewDelete().Model((*model.Endpoint)(nil)).Where("user_id = ?", id).Exec(r.Context())
 			if len(newIDs) > 0 {
 				var links []*model.UserNodeLink
-				for _, nid := range newIDs {
+				var endpoints []*model.Endpoint
+				uUUID := user.Token
+				if user.UUID != nil && *user.UUID != "" {
+					uUUID = *user.UUID
+				}
+				for idx, nid := range newIDs {
 					links = append(links, &model.UserNodeLink{UserID: id, NodeID: nid})
+					var n model.Node
+					tag := fmt.Sprintf("Node-%d", nid)
+					if err := db.DB.NewSelect().Model(&n).Where("id = ?", nid).Scan(r.Context()); err == nil {
+						tag = n.Tag
+						if tag == "" {
+							tag = n.NodeName
+						}
+					}
+					endpoints = append(endpoints, &model.Endpoint{
+						UserID:    id,
+						NodeID:    nid,
+						Tag:       tag,
+						UUID:      uUUID,
+						Password:  user.Password,
+						IsActive:  true,
+						SortOrder: idx,
+					})
 				}
 				_, _ = db.DB.NewInsert().Model(&links).Exec(r.Context())
+				_, _ = db.DB.NewInsert().Model(&endpoints).Exec(r.Context())
 				b, _ := json.Marshal(newIDs)
 				s := string(b)
 				user.NodeOrder = &s
@@ -445,7 +717,14 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 重新拉取关系
-	_ = db.DB.NewSelect().Model(&user).Relation("Nodes").Where("user.id = ?", id).Scan(r.Context())
+	_ = db.DB.NewSelect().Model(&user).
+		Relation("Nodes").
+		Relation("Endpoints", func(q *bun.SelectQuery) *bun.SelectQuery {
+			return q.Order("endpoint.sort_order ASC", "endpoint.id ASC")
+		}).
+		Relation("Endpoints.Node").
+		Where("user.id = ?", id).
+		Scan(r.Context())
 	response := []UserReadResp{toUserRead(&user)}
 	attachDownloadStats(r.Context(), []*model.User{&user}, response)
 	RespondJSON(w, http.StatusOK, response[0])
@@ -472,7 +751,173 @@ func DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _ = db.DB.NewDelete().Model((*model.UserNodeLink)(nil)).Where("user_id = ?", id).Exec(r.Context())
+	_, _ = db.DB.NewDelete().Model((*model.Endpoint)(nil)).Where("user_id = ?", id).Exec(r.Context())
 	RespondJSON(w, http.StatusOK, map[string]string{
 		"message": fmt.Sprintf("User %d deleted successfully", id),
+	})
+}
+
+func ListUserEndpoints(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+	var endpoints []*model.Endpoint
+	err = db.DB.NewSelect().Model(&endpoints).
+		Relation("Node").
+		Where("user_id = ?", id).
+		Order("sort_order ASC", "id ASC").
+		Scan(r.Context())
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var res []EndpointReadResp
+	for _, ep := range endpoints {
+		res = append(res, toEndpointRead(ep))
+	}
+	if res == nil {
+		res = []EndpointReadResp{}
+	}
+	RespondJSON(w, http.StatusOK, res)
+}
+
+func AddUserEndpoint(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	userID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	var req EndpointInput
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+
+	if req.NodeID <= 0 {
+		RespondError(w, http.StatusBadRequest, "node_id is required")
+		return
+	}
+
+	var node model.Node
+	if err := db.DB.NewSelect().Model(&node).Where("id = ?", req.NodeID).Scan(r.Context()); err != nil {
+		RespondError(w, http.StatusBadRequest, "Node not found")
+		return
+	}
+
+	tag := strings.TrimSpace(req.Tag)
+	if tag == "" {
+		tag = node.Tag
+		if tag == "" {
+			tag = node.NodeName
+		}
+	}
+
+	epUUID := resolveEndpointUUID(req.UUID)
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+	sortOrder := 0
+	if req.SortOrder != nil {
+		sortOrder = *req.SortOrder
+	} else {
+		count, _ := db.DB.NewSelect().Model((*model.Endpoint)(nil)).Where("user_id = ?", userID).Count(r.Context())
+		sortOrder = count
+	}
+
+	ep := &model.Endpoint{
+		UserID:    userID,
+		NodeID:    req.NodeID,
+		Tag:       tag,
+		UUID:      epUUID,
+		Password:  req.Password,
+		IsActive:  isActive,
+		SortOrder: sortOrder,
+		Remark:    req.Remark,
+	}
+
+	if _, err := db.DB.NewInsert().Model(ep).Exec(r.Context()); err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	_ = db.DB.NewSelect().Model(ep).Relation("Node").Where("endpoint.id = ?", ep.ID).Scan(r.Context())
+	RespondJSON(w, http.StatusOK, toEndpointRead(ep))
+}
+
+func UpdateUserEndpoint(w http.ResponseWriter, r *http.Request) {
+	epIDStr := chi.URLParam(r, "epId")
+	epID, err := strconv.ParseInt(epIDStr, 10, 64)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "Invalid endpoint ID")
+		return
+	}
+
+	var ep model.Endpoint
+	if err := db.DB.NewSelect().Model(&ep).Where("id = ?", epID).Scan(r.Context()); err != nil {
+		RespondError(w, http.StatusNotFound, "Endpoint not found")
+		return
+	}
+
+	var body map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		RespondError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+
+	if tag, ok := body["tag"].(string); ok && strings.TrimSpace(tag) != "" {
+		ep.Tag = strings.TrimSpace(tag)
+	}
+	if u, ok := body["uuid"].(string); ok && strings.TrimSpace(u) != "" {
+		ep.UUID = strings.TrimSpace(u)
+	}
+	if pwd, ok := body["password"].(string); ok {
+		ep.Password = &pwd
+	}
+	if active, ok := body["is_active"].(bool); ok {
+		ep.IsActive = active
+	}
+	if so, ok := body["sort_order"].(float64); ok {
+		ep.SortOrder = int(so)
+	}
+	if r, ok := body["remark"].(string); ok {
+		ep.Remark = &r
+	}
+
+	if _, err := db.DB.NewUpdate().Model(&ep).Where("id = ?", epID).Exec(r.Context()); err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	_ = db.DB.NewSelect().Model(&ep).Relation("Node").Where("endpoint.id = ?", epID).Scan(r.Context())
+	RespondJSON(w, http.StatusOK, toEndpointRead(&ep))
+}
+
+func DeleteUserEndpoint(w http.ResponseWriter, r *http.Request) {
+	epIDStr := chi.URLParam(r, "epId")
+	epID, err := strconv.ParseInt(epIDStr, 10, 64)
+	if err != nil {
+		RespondError(w, http.StatusBadRequest, "Invalid endpoint ID")
+		return
+	}
+
+	res, err := db.DB.NewDelete().Model((*model.Endpoint)(nil)).Where("id = ?", epID).Exec(r.Context())
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		RespondError(w, http.StatusNotFound, "Endpoint not found")
+		return
+	}
+
+	RespondJSON(w, http.StatusOK, map[string]string{
+		"message": fmt.Sprintf("Endpoint %d deleted successfully", epID),
 	})
 }

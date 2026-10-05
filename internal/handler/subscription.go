@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/uptrace/bun"
 	"noder/internal/contract"
 	"noder/internal/db"
 	"noder/internal/model"
@@ -31,6 +32,10 @@ func getActiveUser(ctx context.Context, token string) (*model.User, error) {
 	var user model.User
 	err := db.DB.NewSelect().
 		Model(&user).
+		Relation("Endpoints", func(q *bun.SelectQuery) *bun.SelectQuery {
+			return q.Order("endpoint.sort_order ASC", "endpoint.id ASC")
+		}).
+		Relation("Endpoints.Node").
 		Relation("Nodes").
 		Where("user.token = ?", token).
 		Scan(ctx)
@@ -38,6 +43,50 @@ func getActiveUser(ctx context.Context, token string) (*model.User, error) {
 		return nil, &contract.APIError{StatusCode: http.StatusUnauthorized, Detail: "Invalid or inactive user token"}
 	}
 	return &user, nil
+}
+
+func getUserActiveEndpoints(user *model.User) []*model.Endpoint {
+	if len(user.Endpoints) > 0 {
+		var res []*model.Endpoint
+		for _, ep := range user.Endpoints {
+			if ep.IsActive && ep.Node != nil && ep.Node.IsActive {
+				res = append(res, ep)
+			}
+		}
+		if len(res) > 0 {
+			return res
+		}
+	}
+
+	// 兜底：兼容只有 usernodelink 的存量情况
+	nodes := getUserOrderedActiveNodes(user)
+	userUUID := user.Token
+	if user.UUID != nil && *user.UUID != "" {
+		userUUID = *user.UUID
+	}
+	var pwd *string
+	if user.Password != nil && *user.Password != "" {
+		pwd = user.Password
+	} else if user.Token != "" {
+		pwd = &user.Token
+	}
+
+	var res []*model.Endpoint
+	for i, n := range nodes {
+		tag := n.Tag
+		if tag == "" {
+			tag = n.NodeName
+		}
+		res = append(res, &model.Endpoint{
+			Node:      n,
+			Tag:       tag,
+			UUID:      userUUID,
+			Password:  pwd,
+			IsActive:  n.IsActive,
+			SortOrder: i,
+		})
+	}
+	return res
 }
 
 func getUserOrderedActiveNodes(user *model.User) []*model.Node {
@@ -59,17 +108,16 @@ func getUserOrderedActiveNodes(user *model.User) []*model.Node {
 }
 
 // getKnownTokens 收集节点中已存在的 token，用于模板渲染时的兜底替换
-func getKnownTokens(nodes []*model.Node) []string {
+func getKnownTokens(endpoints []*model.Endpoint) []string {
 	var tokens []string
-	for _, n := range nodes {
-		if n == nil {
+	for _, ep := range endpoints {
+		if ep == nil || ep.Node == nil {
 			continue
 		}
-		// 根据协议添加对应的 token
-		switch n.Protocol {
+		switch ep.Node.Protocol {
 		case "vless":
-			if n.Flow != nil && *n.Flow != "" {
-				tokens = append(tokens, *n.Flow)
+			if ep.Node.Flow != nil && *ep.Node.Flow != "" {
+				tokens = append(tokens, *ep.Node.Flow)
 			}
 		case "tuic":
 			// TUIC 节点没有独立 token，使用用户的 uuid/password
@@ -86,8 +134,8 @@ func GetSingboxConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activeNodes := getUserOrderedActiveNodes(user)
-	if len(activeNodes) == 0 {
+	activeEndpoints := getUserActiveEndpoints(user)
+	if len(activeEndpoints) == 0 {
 		RespondError(w, http.StatusNotFound, "No active nodes associated with this user")
 		return
 	}
@@ -97,8 +145,8 @@ func GetSingboxConfig(w http.ResponseWriter, r *http.Request) {
 		var branch model.TemplateBranch
 		if err := db.DB.NewSelect().Model(&branch).Where("id = ? AND is_active = ?", *user.TemplateBranchID, true).Scan(r.Context()); err == nil && branch.ID > 0 {
 			// 使用模板分支渲染
-			knownTokens := getKnownTokens(activeNodes)
-			rendered := template.RenderTemplateText(branch.Content, user, activeNodes, knownTokens)
+			knownTokens := getKnownTokens(activeEndpoints)
+			rendered := template.RenderTemplateTextFromEndpoints(branch.Content, user, activeEndpoints, knownTokens)
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(rendered))
@@ -106,7 +154,7 @@ func GetSingboxConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	cfg, err := singbox.GenerateSingboxConfig(activeNodes, user)
+	cfg, err := singbox.GenerateSingboxConfigFromEndpoints(activeEndpoints, user)
 	if err != nil {
 		HandleAPIError(w, err)
 		return
@@ -123,25 +171,27 @@ func GetUserNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activeNodes := getUserOrderedActiveNodes(user)
-	if len(activeNodes) == 0 {
+	activeEndpoints := getUserActiveEndpoints(user)
+	if len(activeEndpoints) == 0 {
 		RespondError(w, http.StatusNotFound, "No active nodes associated with this user")
 		return
 	}
 
 	var items []map[string]interface{}
-	for _, n := range activeNodes {
-		ob, err := singbox.BuildSingboxOutbound(n, user)
+	for _, ep := range activeEndpoints {
+		ob, err := singbox.BuildSingboxEndpointOutbound(ep)
 		if err != nil {
 			HandleAPIError(w, err)
 			return
 		}
 		items = append(items, map[string]interface{}{
-			"id":             n.ID,
-			"node_name":      n.NodeName,
-			"protocol":       n.Protocol,
-			"server_address": n.ServerAddress,
-			"server_port":    n.ServerPort,
+			"id":             ep.ID,
+			"node_id":        ep.NodeID,
+			"tag":            ep.Tag,
+			"node_name":      ep.Node.NodeName,
+			"protocol":       ep.Node.Protocol,
+			"server_address": ep.Node.ServerAddress,
+			"server_port":    ep.Node.ServerPort,
 			"outbound":       ob,
 		})
 	}
@@ -157,8 +207,8 @@ func GetMihomoConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activeNodes := getUserOrderedActiveNodes(user)
-	if len(activeNodes) == 0 {
+	activeEndpoints := getUserActiveEndpoints(user)
+	if len(activeEndpoints) == 0 {
 		RespondError(w, http.StatusNotFound, "No active nodes associated with this user")
 		return
 	}
@@ -168,8 +218,8 @@ func GetMihomoConfig(w http.ResponseWriter, r *http.Request) {
 		var branch model.TemplateBranch
 		if err := db.DB.NewSelect().Model(&branch).Where("id = ? AND is_active = ?", *user.TemplateBranchID, true).Scan(r.Context()); err == nil && branch.ID > 0 {
 			// 使用模板分支渲染
-			knownTokens := getKnownTokens(activeNodes)
-			rendered := template.RenderTemplateText(branch.Content, user, activeNodes, knownTokens)
+			knownTokens := getKnownTokens(activeEndpoints)
+			rendered := template.RenderTemplateTextFromEndpoints(branch.Content, user, activeEndpoints, knownTokens)
 			w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(rendered))
@@ -177,7 +227,7 @@ func GetMihomoConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	yamlBytes, err := mihomo.BuildMihomoConfigYAML(activeNodes, user)
+	yamlBytes, err := mihomo.BuildMihomoConfigYAMLFromEndpoints(activeEndpoints, user)
 	if err != nil {
 		HandleAPIError(w, err)
 		return
@@ -196,13 +246,13 @@ func GetXrayConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activeNodes := getUserOrderedActiveNodes(user)
-	if len(activeNodes) == 0 {
+	activeEndpoints := getUserActiveEndpoints(user)
+	if len(activeEndpoints) == 0 {
 		RespondError(w, http.StatusNotFound, "No active nodes associated with this user")
 		return
 	}
 
-	cfg, err := xray.GenerateXrayConfig(activeNodes, user)
+	cfg, err := xray.GenerateXrayConfigFromEndpoints(activeEndpoints, user)
 	if err != nil {
 		HandleAPIError(w, err)
 		return
@@ -219,26 +269,28 @@ func VerifyUserToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activeNodes := getUserOrderedActiveNodes(user)
-	if len(activeNodes) == 0 {
+	activeEndpoints := getUserActiveEndpoints(user)
+	if len(activeEndpoints) == 0 {
 		RespondError(w, http.StatusNotFound, "用户绑定的节点不存在或已被禁用")
 		return
 	}
 
-	cfg, err := singbox.GenerateSingboxConfig(activeNodes, user)
+	cfg, err := singbox.GenerateSingboxConfigFromEndpoints(activeEndpoints, user)
 	if err != nil {
 		HandleAPIError(w, err)
 		return
 	}
 
-	var nodeIDs []int64
-	var nodesSummary []map[string]interface{}
-	for _, n := range activeNodes {
-		nodeIDs = append(nodeIDs, n.ID)
-		nodesSummary = append(nodesSummary, map[string]interface{}{
-			"id":        n.ID,
-			"node_name": n.NodeName,
-			"protocol":  n.Protocol,
+	var endpointIDs []int64
+	var endpointsSummary []map[string]interface{}
+	for _, ep := range activeEndpoints {
+		endpointIDs = append(endpointIDs, ep.ID)
+		endpointsSummary = append(endpointsSummary, map[string]interface{}{
+			"id":        ep.ID,
+			"node_id":   ep.NodeID,
+			"tag":       ep.Tag,
+			"node_name": ep.Node.NodeName,
+			"protocol":  ep.Node.Protocol,
 		})
 	}
 
@@ -246,8 +298,8 @@ func VerifyUserToken(w http.ResponseWriter, r *http.Request) {
 		"valid":          true,
 		"user_name":      user.Name,
 		"token":          user.Token,
-		"node_ids":       nodeIDs,
-		"nodes":          nodesSummary,
+		"endpoint_ids":   endpointIDs,
+		"endpoints":      endpointsSummary,
 		"singbox_config": cfg,
 	}
 
@@ -262,15 +314,15 @@ func GetNodesForUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activeNodes := getUserOrderedActiveNodes(user)
-	if len(activeNodes) == 0 {
+	activeEndpoints := getUserActiveEndpoints(user)
+	if len(activeEndpoints) == 0 {
 		RespondError(w, http.StatusNotFound, "No active nodes associated with this user")
 		return
 	}
 
 	var outbounds []map[string]interface{}
-	for _, n := range activeNodes {
-		ob, err := singbox.BuildSingboxOutbound(n, user)
+	for _, ep := range activeEndpoints {
+		ob, err := singbox.BuildSingboxEndpointOutbound(ep)
 		if err != nil {
 			HandleAPIError(w, err)
 			return
