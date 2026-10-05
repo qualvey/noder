@@ -61,6 +61,7 @@ func main() {
 	handler.RegisterFileRoutes(r)
 	handler.RegisterDownloadRoutes(r)
 	handler.RegisterSubscriptionRoutes(r)
+	handler.RegisterServiceRoutes(r)
 
 	// 挂载 SPA 前端静态资源
 	mountSPA(r)
