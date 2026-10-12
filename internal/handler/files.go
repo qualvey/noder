@@ -53,25 +53,40 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mrFile, header, err := r.FormFile("file")
-	if err != nil {
-		RespondError(w, http.StatusBadRequest, "Missing 'file' field")
-		return
+	// The endpoint accepts either a normal multipart file or text content.
+	// Text uploads are used by the admin UI and do not include a `file` part.
+	mrFile, header, fileErr := r.FormFile("file")
+	var content []byte
+	var originalName string
+	fileType := r.FormValue("file_type")
+	if fileErr == nil {
+		defer mrFile.Close()
+		content, fileErr = io.ReadAll(mrFile)
+		if fileErr != nil {
+			RespondError(w, http.StatusInternalServerError, "Failed to read file: "+fileErr.Error())
+			return
+		}
+		originalName = header.Filename
+	} else {
+		text := r.FormValue("content_text")
+		if text == "" {
+			RespondError(w, http.StatusBadRequest, "Missing 'file' or 'content_text' field")
+			return
+		}
+		content = []byte(text)
+		fileType = "text"
+		originalName = r.FormValue("name")
+		if originalName == "" {
+			originalName = "text.txt"
+		} else if filepath.Ext(originalName) == "" {
+			originalName += ".txt"
+		}
 	}
-	defer mrFile.Close()
 
-	content, err := io.ReadAll(mrFile)
-	if err != nil {
-		RespondError(w, http.StatusInternalServerError, "Failed to read file: "+err.Error())
-		return
-	}
-
-	originalName := header.Filename
 	name := r.FormValue("name")
 	if name == "" {
 		name = originalName
 	}
-	fileType := r.FormValue("file_type")
 	if fileType == "auto" || fileType == "" {
 		fileType = file.DetectFileType(originalName)
 	}
