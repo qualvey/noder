@@ -1,5 +1,8 @@
 name = "noder"
-compatibility_date = "2026-10-01"
+compatibility_date = "2025-03-01"
+pages_build_output_dir = "./pages-dist"
 
-[assets]
-directory = "./pages-dist"
+# 部署前请在 Cloudflare 控制台创建 KV namespace，并将下面的 id 替换为实际 ID。
+[[kv_namespaces]]
+binding = "SUBSCRIPTIONS"
+id = "a22f0cbf3ed74ca8a0044f44239ced6a"

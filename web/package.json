@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "build:pages": "vue-tsc --noEmit && vite build --config vite.pages.config.ts",
+    "deploy:pages": "pnpm run build:pages && pnpm dlx wrangler pages deploy pages-dist --project-name noder --commit-dirty=true",
     "preview": "vite preview"
   },
   "dependencies": {

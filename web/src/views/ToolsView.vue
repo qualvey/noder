@@ -3,11 +3,13 @@ import { ref } from "vue";
 import WatermarkTool from "../tools/WatermarkTool.vue";
 import NodeTransferTool from "../tools/NodeTransferTool.vue";
 import QRCodeTool from "../tools/QRCodeTool.vue";
+import SubscriptionTool from "../tools/SubscriptionTool.vue";
 
-type ToolKey = "watermark" | "transfer" | "qrcode";
-const activeTool = ref<ToolKey>("watermark");
+type ToolKey = "subscription" | "watermark" | "transfer" | "qrcode";
+const activeTool = ref<ToolKey>("subscription");
 
 const tools = [
+  { key: "subscription" as const, icon: "↗", label: "短期订阅", hint: "生成临时链接" },
   { key: "watermark" as const, icon: "✦", label: "图片水印", hint: "编辑图片" },
   { key: "transfer" as const, icon: "⇄", label: "节点转换", hint: "转换配置" },
   { key: "qrcode" as const, icon: "⌁", label: "二维码", hint: "生成与解析" },
@@ -33,7 +35,8 @@ const tools = [
     </nav>
 
     <main class="tools-content">
-      <WatermarkTool v-if="activeTool === 'watermark'" />
+      <SubscriptionTool v-if="activeTool === 'subscription'" />
+      <WatermarkTool v-else-if="activeTool === 'watermark'" />
       <NodeTransferTool v-else-if="activeTool === 'transfer'" />
       <QRCodeTool v-else />
     </main>
@@ -42,6 +45,9 @@ const tools = [
 
 <style scoped>
 .tools-page {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 18px;
   min-width: 0;
   color: var(--text-main);
 }
@@ -89,9 +95,11 @@ const tools = [
 }
 .tools-nav {
   display: flex;
-  justify-content: center;
+  align-self: start;
+  flex-direction: column;
   gap: 6px;
-  margin-bottom: 16px;
+  position: sticky;
+  top: 18px;
   padding: 5px;
   border: 1px solid var(--border-glass);
   border-radius: 12px;
@@ -101,7 +109,7 @@ const tools = [
   display: flex;
   align-items: center;
   gap: 9px;
-  min-width: 150px;
+  width: 100%;
   padding: 8px 12px;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -156,12 +164,18 @@ const tools = [
   box-shadow: var(--shadow-lg);
 }
 @media (max-width: 600px) {
+  .tools-page {
+    display: block;
+  }
   .tools-header {
     align-items: flex-start;
     flex-direction: column;
   }
   .tools-nav {
+    position: static;
+    flex-direction: row;
     gap: 3px;
+    margin-bottom: 12px;
   }
   .tools-nav button {
     min-width: 0;

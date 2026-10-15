@@ -30,10 +30,10 @@ provide('toast', showToast)
         <span class="brand-icon">✦</span>
         <div>
           <strong>Noder 工具箱</strong>
-          <small>浏览器本地处理，数据不会上传</small>
+            <small>本地工具与短期订阅</small>
         </div>
       </div>
-      <span class="tools-shell-status"><i /> Local-only</span>
+      <span class="tools-shell-status"><i /> Tools</span>
     </header>
 
     <main class="tools-shell-main">
