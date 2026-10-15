@@ -26,6 +26,7 @@ export default {
     empty: 'No data available',
     clearFilter: 'Clear Search',
     networkError: 'Network error, please try again',
+    noResults: 'No results',
   },
   nav: {
     nodes: 'Nodes',
@@ -210,6 +211,7 @@ export default {
       addEndpoint: '+ Add Endpoint',
       addAllNodes: '⚡ Add All Entry Nodes',
       endpointNode: 'Entry Node',
+      endpointNodePlaceholder: 'Search by name, tag, protocol, or address',
       endpointTag: 'Node Tag',
       endpointTagPlaceholder: 'e.g. 🇭🇰 HK 01 - Direct',
       endpointUuid: 'Outbound UUID',

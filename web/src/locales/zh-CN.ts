@@ -26,6 +26,7 @@ export default {
     empty: '暂无数据',
     clearFilter: '清除搜索',
     networkError: '网络异常，请重试',
+    noResults: '无匹配结果',
   },
   nav: {
     nodes: '节点管理',
@@ -213,6 +214,7 @@ export default {
       addEndpoint: '+ 添加端点',
       addAllNodes: '⚡ 一键添加所有入口',
       endpointNode: '入口节点',
+      endpointNodePlaceholder: '输入节点名称、Tag、协议或地址搜索',
       endpointTag: '节点标识 (Tag)',
       endpointTagPlaceholder: '如：🇭🇰 香港 01 - 直连',
       endpointUuid: '出站 UUID',
