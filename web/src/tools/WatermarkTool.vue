@@ -18,6 +18,21 @@ const previewContainer = ref<HTMLElement | null>(null)
 const isPreviewExpanded = ref(false)
 const mosaicCanvas = ref<HTMLCanvasElement | null>(null)
 const isMosaicMode = ref(false)
+const isRectangleMode = ref(false)
+const rectangleColor = ref('#ef4444')
+const rectangleWidth = ref(4)
+const isDrawingRectangle = ref(false)
+const rectangleStart = ref<{ x: number; y: number } | null>(null)
+const rectanglePreview = ref<{ x: number; y: number; width: number; height: number } | null>(null)
+
+interface RectangleMark {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+const rectangleMarks = ref<RectangleMark[]>([])
 const isPaintingMosaic = ref(false)
 // PS 式笔刷调整：Ctrl + 右键拖拽（横向=笔刷大小，纵向=方格密度）
 const isResizingBrush = ref(false)
@@ -141,6 +156,20 @@ const updateMosaicPointerPosition = (event: PointerEvent) => {
     y: Math.min(Math.max(y, 0), rect.height),
   }
 }
+
+const selectEditTool = (tool: 'none' | 'mosaic' | 'rectangle') => {
+  isMosaicMode.value = tool === 'mosaic'
+  isRectangleMode.value = tool === 'rectangle'
+  mosaicBrushPosition.value = null
+  rectanglePreview.value = null
+}
+
+const normalizeRectangle = (start: { x: number; y: number }, end: { x: number; y: number }) => ({
+  x: Math.min(start.x, end.x),
+  y: Math.min(start.y, end.y),
+  width: Math.abs(end.x - start.x),
+  height: Math.abs(end.y - start.y),
+})
 
 const getMosaicCanvasSize = () => {
   const canvas = mosaicCanvas.value
@@ -313,12 +342,26 @@ const renderMosaicOverlay = () => {
   if (!ctx) return
 
   ctx.clearRect(0, 0, canvas.width, canvas.height)
-  if (!mosaicLayer || !originalImage.value || !isMosaicMode.value) return
+  if (mosaicLayer && originalImage.value && isMosaicMode.value) {
+    ctx.imageSmoothingEnabled = false
+    ctx.filter = `blur(${getMosaicBlurPx(canvas.width)}px)`
+    ctx.drawImage(mosaicLayer, 0, 0, canvas.width, canvas.height)
+    ctx.filter = 'none'
+  }
 
-  ctx.imageSmoothingEnabled = false
-  ctx.filter = `blur(${getMosaicBlurPx(canvas.width)}px)`
-  ctx.drawImage(mosaicLayer, 0, 0, canvas.width, canvas.height)
-  ctx.filter = 'none'
+  // 标记图层使用预览坐标绘制，保证拖拽时即时反馈。
+  if (isRectangleMode.value || rectangleMarks.value.length) {
+    ctx.strokeStyle = rectangleColor.value
+    ctx.lineWidth = rectangleWidth.value
+    for (const mark of rectangleMarks.value) {
+      ctx.strokeRect(mark.x * canvas.width, mark.y * canvas.height, mark.width * canvas.width, mark.height * canvas.height)
+    }
+    if (rectanglePreview.value) {
+      const mark = rectanglePreview.value
+      ctx.strokeStyle = rectangleColor.value
+      ctx.strokeRect(mark.x * canvas.width, mark.y * canvas.height, mark.width * canvas.width, mark.height * canvas.height)
+    }
+  }
 }
 
 // 涂抹结束后把马赛克图层叠加进合成图（原图 -> 马赛克 -> 水印）
@@ -455,23 +498,103 @@ const endBrushResize = (event: PointerEvent) => {
 
 // canvas 指针事件统一入口：先判断是否笔刷调整，否则走涂抹
 const onCanvasPointerDown = (event: PointerEvent) => {
+  if (isRectangleMode.value) {
+    startRectangle(event)
+    return
+  }
   startBrushResize(event)
   if (!isResizingBrush.value) startMosaicPaint(event)
 }
 
 const onCanvasPointerMove = (event: PointerEvent) => {
+  if (isRectangleMode.value) {
+    moveRectangle(event)
+    return
+  }
   if (isResizingBrush.value) moveBrushResize(event)
   else moveMosaicPaint(event)
 }
 
 const onCanvasPointerUp = (event: PointerEvent) => {
+  if (isRectangleMode.value) {
+    finishRectangle(event)
+    return
+  }
   endBrushResize(event)
   stopMosaicPaint()
 }
 
 const onCanvasPointerCancel = (event: PointerEvent) => {
+  if (isRectangleMode.value) {
+    cancelRectangle(event)
+    return
+  }
   endBrushResize(event)
   stopMosaicPaint()
+}
+
+const getCanvasPoint = (event: PointerEvent) => {
+  const canvas = mosaicCanvas.value
+  if (!canvas) return null
+  const rect = canvas.getBoundingClientRect()
+  return {
+    x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+    y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
+  }
+}
+
+const startRectangle = (event: PointerEvent) => {
+  if (event.button !== 0 || !mosaicCanvas.value) return
+  const point = getCanvasPoint(event)
+  if (!point) return
+  event.preventDefault()
+  rectangleStart.value = point
+  rectanglePreview.value = { x: point.x, y: point.y, width: 0, height: 0 }
+  isDrawingRectangle.value = true
+  mosaicCanvas.value.setPointerCapture(event.pointerId)
+  renderMosaicOverlay()
+}
+
+const moveRectangle = (event: PointerEvent) => {
+  if (!isDrawingRectangle.value || !rectangleStart.value) return
+  const point = getCanvasPoint(event)
+  if (!point) return
+  rectanglePreview.value = normalizeRectangle(rectangleStart.value, point)
+  renderMosaicOverlay()
+}
+
+const finishRectangle = (event: PointerEvent) => {
+  if (!isDrawingRectangle.value || !rectangleStart.value) return
+  const point = getCanvasPoint(event)
+  const mark = point ? normalizeRectangle(rectangleStart.value, point) : null
+  if (mark && mark.width > 0.005 && mark.height > 0.005) rectangleMarks.value.push(mark)
+  isDrawingRectangle.value = false
+  rectangleStart.value = null
+  rectanglePreview.value = null
+  if (mosaicCanvas.value?.hasPointerCapture(event.pointerId)) mosaicCanvas.value.releasePointerCapture(event.pointerId)
+  renderMosaicOverlay()
+  generateWatermark()
+}
+
+const cancelRectangle = (event: PointerEvent) => {
+  isDrawingRectangle.value = false
+  rectangleStart.value = null
+  rectanglePreview.value = null
+  if (mosaicCanvas.value?.hasPointerCapture(event.pointerId)) mosaicCanvas.value.releasePointerCapture(event.pointerId)
+  renderMosaicOverlay()
+}
+
+const undoRectangle = () => {
+  if (!rectangleMarks.value.length) return
+  rectangleMarks.value.pop()
+  renderMosaicOverlay()
+  generateWatermark()
+}
+
+const clearRectangles = () => {
+  rectangleMarks.value = []
+  renderMosaicOverlay()
+  generateWatermark()
 }
 
 const startMosaicPaint = (event: PointerEvent) => {
@@ -594,6 +717,7 @@ const processFile = (file: File) => {
   }
   originalFileName.value = file.name
   mosaicStrokes.value = []
+  rectangleMarks.value = []
 
   const reader = new FileReader()
   reader.onload = (e) => {
@@ -631,6 +755,17 @@ const generateWatermark = () => {
 
   // 2. 马赛克独立图层（位于水印文字之下：涂抹区域水印文字仍清晰可见）
   applyMosaicToCanvas(canvas, ctx)
+
+  // 3. 矩形标记图层，使用原图坐标导出，线宽随输出尺寸等比缩放。
+  if (rectangleMarks.value.length) {
+    ctx.save()
+    ctx.strokeStyle = rectangleColor.value
+    ctx.lineWidth = rectangleWidth.value
+    for (const mark of rectangleMarks.value) {
+      ctx.strokeRect(mark.x * canvas.width, mark.y * canvas.height, mark.width * canvas.width, mark.height * canvas.height)
+    }
+    ctx.restore()
+  }
 
   if (watermarkEnabled.value) {
     // 配置文字格式
@@ -706,6 +841,11 @@ watch([blindEnabled, blindText, blindBits], () => {
   }
 })
 
+watch([rectangleColor, rectangleWidth, isRectangleMode], () => {
+  renderMosaicOverlay()
+  if (originalImage.value) generateWatermark()
+})
+
 // 从图片源提取盲水印（真盲提取，不需要原图）
 const extractBlindFromSource = async (src: string): Promise<string | null> => {
   const img = new Image()
@@ -757,6 +897,7 @@ watch(watermarkedImageSrc, () => {
   // 合成图更新后，清掉预览覆盖层（马赛克已含在合成图内），避免遮挡水印
   const canvas = mosaicCanvas.value
   canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height)
+  if (isRectangleMode.value) renderMosaicOverlay()
 })
 
 // 下载水印图片
@@ -779,6 +920,7 @@ const clearImage = () => {
   originalFileName.value = ''
   watermarkedImageSrc.value = ''
   mosaicStrokes.value = []
+  rectangleMarks.value = []
   mosaicLayer?.getContext('2d')?.clearRect(0, 0, mosaicLayer.width, mosaicLayer.height)
   if (fileInput.value) {
     fileInput.value.value = ''
@@ -798,15 +940,16 @@ const clearImage = () => {
           <span class="upload-mark">↑</span><strong>拖拽图片到这里</strong><p>或点击选择图片，也可以直接粘贴</p><small>支持 PNG、JPG、WEBP 等常见格式</small>
         </div>
         <template v-else>
-          <div ref="previewContainer" class="image-stage" :class="{ painting: isMosaicMode }" @pointermove="updateMosaicPointerPosition">
+           <div ref="previewContainer" class="image-stage" :class="{ painting: isMosaicMode || isRectangleMode }" @pointermove="updateMosaicPointerPosition">
             <div class="image-frame" :style="previewBox ? { width: `${previewBox.w}px`, height: `${previewBox.h}px` } : undefined">
               <img class="preview-image" :src="watermarkedImageSrc" alt="水印预览" @dblclick="togglePreviewFullscreen" />
               <canvas ref="mosaicCanvas" class="mosaic-layer" @pointerdown="onCanvasPointerDown" @pointermove="onCanvasPointerMove" @pointerup="onCanvasPointerUp" @pointercancel="onCanvasPointerCancel" @pointerleave="stopMosaicPaint"></canvas>
               <span v-if="mosaicBrushPosition && isMosaicMode" class="brush-cursor" :style="{ left: `${mosaicBrushPosition.x}px`, top: `${mosaicBrushPosition.y}px`, width: `${mosaicBrushSize}px`, height: `${mosaicBrushSize}px` }"></span>
             </div>
-            <div v-if="isMosaicMode" class="painting-tip">拖动涂抹马赛克 · 松开完成</div>
+             <div v-if="isMosaicMode" class="painting-tip">拖动涂抹马赛克 · 松开完成</div>
+             <div v-else-if="isRectangleMode" class="painting-tip">拖动添加矩形标记 · 松开完成</div>
           </div>
-          <div class="preview-footer"><span>{{ originalFileName }}</span><div><button v-if="mosaicStrokes.length" @click="undoMosaic">撤销涂抹</button><button v-if="mosaicStrokes.length" @click="clearMosaic">清除马赛克</button><button class="primary" @click="downloadImage">下载图片</button></div></div>
+           <div class="preview-footer"><span>{{ originalFileName }}</span><div><button v-if="mosaicStrokes.length" @click="undoMosaic">撤销涂抹</button><button v-if="mosaicStrokes.length" @click="clearMosaic">清除马赛克</button><button v-if="rectangleMarks.length" @click="undoRectangle">撤销标记</button><button v-if="rectangleMarks.length" @click="clearRectangles">清除标记</button><button class="primary" @click="downloadImage">下载图片</button></div></div>
         </template>
       </section>
 
@@ -816,7 +959,7 @@ const clearImage = () => {
         <div class="setting-block"><div class="setting-label"><label>字体样式</label><select v-model="fontStyle"><option value="normal">常规</option><option value="bold">粗体</option><option value="italic">斜体</option></select></div><div class="range-row"><label>大小 <b>{{ fontSize }}px</b></label><input v-model.number="fontSize" type="range" min="12" max="120" /></div><div class="range-row"><label>透明度 <b>{{ Math.round(opacity * 100) }}%</b></label><input v-model.number="opacity" type="range" min="0.05" max="1" step="0.05" /></div><div class="range-row"><label>旋转角度 <b>{{ angle }}°</b></label><input v-model.number="angle" type="range" min="-90" max="90" /></div></div>
         <div class="setting-block"><div class="setting-label"><label>水印颜色</label><span class="color-value"><input v-model="textColor" type="color" />{{ textColor }}</span></div><div class="color-list"><button v-for="color in colorPresets" :key="color.value" :title="color.name" :style="{ background: color.value }" :class="{ selected: textColor === color.value }" @click="textColor = color.value"></button></div></div>
         <div class="setting-block"><div class="setting-label"><label>盲水印</label><button class="toggle" :class="{ on: blindEnabled }" @click="blindEnabled = !blindEnabled"><i></i></button></div><input v-model="blindText" class="text-input" :disabled="!blindEnabled" placeholder="嵌入不可见的文字" /><div class="range-row"><label>嵌入强度 <b>{{ blindBits }} bit</b></label><input v-model.number="blindBits" type="range" min="1" max="2" :disabled="!blindEnabled" /></div></div>
-        <div class="setting-block mosaic-block"><div class="setting-label"><label>马赛克涂抹</label><button class="toggle" :class="{ on: isMosaicMode }" @click="isMosaicMode = !isMosaicMode"><i></i></button></div><div v-if="isMosaicMode" class="range-row"><label>笔刷大小 <b>{{ mosaicBrushSize }}px</b></label><input v-model.number="mosaicBrushSize" type="range" min="8" max="100" /></div></div>
+         <div class="setting-block edit-tools-block"><div class="setting-label"><label>编辑工具</label><button v-if="isMosaicMode || isRectangleMode" class="tool-reset" @click="selectEditTool('none')">退出工具</button></div><div class="edit-tool-buttons"><button :class="{ selected: isMosaicMode }" @click="selectEditTool(isMosaicMode ? 'none' : 'mosaic')">马赛克</button><button :class="{ selected: isRectangleMode }" @click="selectEditTool(isRectangleMode ? 'none' : 'rectangle')">矩形标记</button></div><div v-if="isMosaicMode" class="range-row"><label>笔刷大小 <b>{{ mosaicBrushSize }}px</b></label><input v-model.number="mosaicBrushSize" type="range" min="8" max="100" /></div><template v-if="isRectangleMode"><div class="setting-label"><label>标记颜色</label><span class="color-value"><input v-model="rectangleColor" type="color" />{{ rectangleColor }}</span></div><div class="range-row"><label>线框粗细 <b>{{ rectangleWidth }}px</b></label><input v-model.number="rectangleWidth" type="range" min="1" max="16" /></div></template></div>
         <div class="extract-block"><div class="setting-label"><label>提取盲水印</label></div><div class="extract-actions"><button @click="extractFromPreview" :disabled="!watermarkedImageSrc">从当前图提取</button><button @click="extractFileInput?.click()">选择文件</button><input ref="extractFileInput" type="file" accept="image/*" hidden @change="onExtractFile" /></div><p v-if="extractedText !== null" class="extract-result">{{ extractedText || '未检测到盲水印' }}</p></div>
       </aside>
     </div>
@@ -828,6 +971,7 @@ const clearImage = () => {
 .upload-zone { display: grid; min-height: 420px; place-items: center; align-content: center; gap: 9px; border: 1px dashed var(--border-glass); border-radius: 14px; background: var(--bg-panel); text-align: center; cursor: pointer; transition: .2s; }.upload-zone:hover, .upload-zone.dragging { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 7%, var(--bg-panel)); }.upload-mark { display: grid; place-items: center; width: 58px; height: 58px; border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border-glass)); border-radius: 16px; color: var(--primary); font-size: 2rem; }.upload-zone strong { font-size: .9rem; }.upload-zone p, .upload-zone small { margin: 0; color: var(--text-muted); font-size: .72rem; }.upload-zone small { color: var(--text-dim); font-size: .64rem; }
 .watermark-layout { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 16px; align-items: start; }.preview-panel, .settings-panel { min-width: 0; border: 1px solid var(--border-glass); border-radius: 14px; background: var(--bg-panel); }.preview-panel { overflow: hidden; }.panel-top, .preview-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 17px; }.panel-top { border-bottom: 1px solid var(--border-glass); }.panel-top h3, .settings-heading h3 { margin: 4px 0 0; font-size: .9rem; }.preview-actions, .preview-footer > div { display: flex; gap: 6px; }.preview-actions button, .preview-footer button, .extract-actions button { border: 1px solid var(--border-glass); border-radius: 7px; padding: 7px 9px; background: transparent; color: var(--text-muted); cursor: pointer; font: inherit; font-size: .65rem; font-weight: 700; }.preview-actions button:hover, .preview-footer button:hover, .extract-actions button:hover { border-color: var(--primary); color: var(--primary); }.preview-footer { border-top: 1px solid var(--border-glass); color: var(--text-dim); font: .64rem var(--font-mono); }.preview-footer button.primary { border-color: var(--primary); background: var(--primary); color: white; }.image-stage { position: relative; display: grid; min-height: 540px; place-items: center; overflow: hidden; padding: 22px; background: repeating-conic-gradient(color-mix(in srgb, var(--bg-input) 80%, white) 0 25%, var(--bg-input) 0 50%) 50% / 20px 20px; }.image-frame { position: relative; max-width: 100%; max-height: 100%; }.preview-image { display: block; width: 100%; height: 100%; object-fit: contain; }.mosaic-layer { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }.image-stage:not(.painting) .mosaic-layer { pointer-events: none; }.brush-cursor { position: absolute; z-index: 2; transform: translate(-50%, -50%); border: 1px solid white; border-radius: 50%; box-shadow: 0 0 0 1px #111; pointer-events: none; }.painting-tip { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); padding: 5px 8px; border-radius: 6px; background: rgba(2,8,23,.72); color: white; font-size: .65rem; }
 .settings-panel { padding: 17px; }.settings-heading { margin-bottom: 17px; }.setting-block, .extract-block { display: grid; gap: 10px; padding: 15px 0; border-top: 1px solid var(--border-glass); }.setting-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.setting-label label { color: var(--text-main); font-size: .72rem; font-weight: 700; }.toggle { width: 31px; height: 18px; padding: 2px; border: 0; border-radius: 20px; background: var(--text-dim); cursor: pointer; }.toggle i { display: block; width: 14px; height: 14px; border-radius: 50%; background: white; transition: .2s; }.toggle.on { background: var(--primary); }.toggle.on i { transform: translateX(13px); }.text-input, .setting-label select { min-width: 0; border: 1px solid var(--border-glass); border-radius: 7px; padding: 8px 9px; outline: none; background: var(--bg-input); color: var(--text-main); font: inherit; font-size: .7rem; }.text-input:focus, .setting-label select:focus { border-color: var(--primary); }.preset-list { display: flex; flex-wrap: wrap; gap: 5px; }.preset-list button { border: 1px solid var(--border-glass); border-radius: 5px; padding: 4px 6px; background: transparent; color: var(--text-muted); cursor: pointer; font-size: .6rem; }.range-row { display: grid; gap: 6px; }.range-row label { display: flex; justify-content: space-between; color: var(--text-muted); font-size: .65rem; }.range-row b { color: var(--text-main); font-weight: 600; }.range-row input[type=range] { width: 100%; accent-color: var(--primary); }.color-value { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font: .62rem var(--font-mono); }.color-value input { width: 22px; height: 22px; padding: 0; border: 0; background: transparent; cursor: pointer; }.color-list { display: flex; gap: 8px; }.color-list button { width: 22px; height: 22px; border: 2px solid transparent; border-radius: 50%; cursor: pointer; }.color-list button.selected { border-color: var(--primary); box-shadow: 0 0 0 2px var(--bg-panel); outline: 1px solid var(--primary); }.extract-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }.extract-result { margin: 0; padding: 8px; border-radius: 6px; background: color-mix(in srgb, var(--accent-emerald) 10%, transparent); color: var(--accent-emerald); font-size: .66rem; overflow-wrap: anywhere; }
-@media (max-width: 900px) { .watermark-layout { grid-template-columns: 1fr; }.settings-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }.settings-heading { grid-column: 1 / -1; }.extract-block { grid-column: 1 / -1; } }
+ .edit-tool-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }.edit-tool-buttons button, .tool-reset { border: 1px solid var(--border-glass); border-radius: 7px; padding: 7px 8px; background: transparent; color: var(--text-muted); cursor: pointer; font: inherit; font-size: .65rem; font-weight: 700; }.edit-tool-buttons button.selected, .edit-tool-buttons button:hover, .tool-reset:hover { border-color: var(--primary); color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, transparent); }
+ @media (max-width: 900px) { .watermark-layout { grid-template-columns: 1fr; }.settings-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }.settings-heading { grid-column: 1 / -1; }.extract-block { grid-column: 1 / -1; } }
 @media (max-width: 600px) { .tool-intro { align-items: flex-start; flex-direction: column; }.watermark-layout { display: flex; flex-direction: column; }.settings-panel { display: block; width: 100%; box-sizing: border-box; }.image-stage { min-height: 360px; padding: 12px; }.panel-top, .preview-footer { align-items: flex-start; flex-direction: column; }.preview-footer > div { width: 100%; }.preview-footer button { flex: 1; } }
 </style>
