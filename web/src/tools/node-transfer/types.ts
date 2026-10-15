@@ -8,6 +8,26 @@ export interface BaseOutboundConfig {
   [key: string]: unknown
 }
 
+/**
+ * 与具体配置格式无关的节点元数据。
+ * Sing-box、Xray 和分享链接都从这个模型生成，避免格式之间互相转换。
+ */
+export interface NodeMeta {
+  protocol: ProtocolType
+  tag?: string
+  server: string
+  serverPort: number
+  uuid?: string
+  password?: string
+  flow?: string
+  security?: 'reality' | 'tls' | 'none'
+  serverName?: string
+  fingerprint?: string
+  publicKey?: string
+  shortId?: string
+  transport?: TransportConfig
+}
+
 export interface TlsConfig {
   enabled?: boolean
   server_name?: string

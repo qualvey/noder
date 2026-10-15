@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject } from 'vue'
+import { inject, ref } from 'vue'
 import QrcodeVue from 'qrcode.vue'
 import { useNodeTransfer } from '../composables/useNodeTransfer'
 
@@ -22,10 +22,26 @@ const {
   handleFormat,
   handleCopy,
   handleCopyAll,
+  allXrayJsonText,
+  allSingBoxJsonText,
+  parseWarnings,
 } = useNodeTransfer({
   onSuccess: (msg) => toast?.(msg, 'success'),
   onError: (msg) => toast?.(msg, 'error'),
 })
+
+const activeOutputTab = ref<'primary' | 'xray'>('primary')
+
+function downloadSingBox() {
+  if (!allSingBoxJsonText.value) return
+  const blob = new Blob([allSingBoxJsonText.value], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'sing-box-config.json'
+  link.click()
+  URL.revokeObjectURL(url)
+}
 </script>
 
 <template>
@@ -53,6 +69,11 @@ const {
       </div>
       <div class="flex-1"></div>
     </header>
+
+    <div v-if="parseWarnings.length" class="parse-warning" role="status">
+      <strong>{{ parseWarnings.length }} 条输入未处理</strong>
+      <span v-for="warning in parseWarnings" :key="warning">{{ warning }}</span>
+    </div>
 
     <div
       v-if="parseError"
@@ -131,12 +152,39 @@ const {
               {{ nodeCount > 1 ? `共 ${nodeCount} 个节点` : '已识别' }}
             </span>
           </div>
-          <div v-if="nodeCount > 1 && !parseError" class="card-actions">
-            <button class="copy-all-btn" @click="handleCopyAll">
-              复制全部 ({{ nodeCount }})
+          <div v-if="nodeCount > 0 && !parseError" class="card-actions">
+            <button class="copy-all-btn" @click="handleCopy(allSingBoxJsonText, '已复制完整 sing-box 配置')">
+              复制完整配置
+            </button>
+            <button class="copy-all-btn" @click="downloadSingBox">下载 JSON</button>
+            <button
+              v-if="nodeCount > 1"
+              class="copy-all-btn"
+              @click="
+                activeOutputTab === 'xray'
+                  ? handleCopy(allXrayJsonText, `已复制全部 Xray 配置`)
+                  : handleCopyAll()
+              "
+            >
+              复制{{ activeOutputTab === 'xray' ? '全部 Xray 配置' : `全部 (${nodeCount})` }}
             </button>
           </div>
         </div>
+
+        <nav v-if="nodeCount > 0 && !parseError" class="output-tabs" aria-label="转换结果格式">
+          <button
+            :class="{ active: activeOutputTab === 'primary' }"
+            @click="activeOutputTab = 'primary'"
+          >
+            {{ conversionDirection === 'json2link' ? '分享链接' : 'Sing-box JSON' }}
+          </button>
+          <button
+            :class="{ active: activeOutputTab === 'xray' }"
+            @click="activeOutputTab = 'xray'"
+          >
+            Xray VLESS
+          </button>
+        </nav>
 
         <!-- 多节点结果列表 (每个节点：文本 + 二维码分开) -->
         <div v-if="nodeCount > 0 && !parseError" class="node-results-list">
@@ -165,14 +213,25 @@ const {
               <div class="node-text-col">
                 <textarea
                   readonly
-                  :value="conversionDirection === 'json2link' ? item.shareLink : item.shareJson"
+                  :value="
+                    activeOutputTab === 'xray'
+                      ? item.xrayJson || item.xrayError
+                      : conversionDirection === 'json2link'
+                        ? item.shareLink
+                        : item.shareJson
+                  "
                 ></textarea>
                 <button
                   class="node-copy-btn"
                   title="复制此节点"
+                  v-if="activeOutputTab !== 'xray' || item.xrayJson"
                   @click.stop="
                     handleCopy(
-                      conversionDirection === 'json2link' ? item.shareLink : item.shareJson,
+                      activeOutputTab === 'xray'
+                        ? item.xrayJson
+                        : conversionDirection === 'json2link'
+                          ? item.shareLink
+                          : item.shareJson,
                       `已复制节点 #${item.index}`,
                     )
                   "
@@ -190,7 +249,7 @@ const {
                     level="L"
                     render-as="svg"
                   />
-                  <small>扫码导入</small>
+                  <small>{{ activeOutputTab === 'xray' ? '分享链接二维码' : '扫码导入' }}</small>
                 </div>
               </div>
             </div>
@@ -379,6 +438,48 @@ const {
 .card-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.4;
+}
+
+.output-tabs {
+  display: flex;
+  gap: 4px;
+  margin: -3px 0 12px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.parse-warning {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-amber) 55%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
+  color: var(--accent-amber);
+  font-size: 0.75rem;
+}
+
+.parse-warning span { color: var(--text-muted); }
+
+.output-tabs button {
+  flex: 1;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.output-tabs button.active {
+  background: var(--bg-panel);
+  color: var(--primary);
+  box-shadow: 0 1px 4px rgba(2, 8, 23, 0.12);
 }
 
 .editor-wrap {

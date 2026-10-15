@@ -30,6 +30,7 @@ TODO.md
 /noder.exe
 *.exe~
 dist/
+web/pages-dist/
 *.log
 .aider*
 
