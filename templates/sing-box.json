@@ -1,7 +1,7 @@
 {
     "log": {
-        "level": "info",
-        "timestamp": false
+        "level": "warn",
+        "timestamp": true
     },
     "experimental": {
         "clash_api": {
@@ -17,55 +17,19 @@
             "store_dns": true
         }
     },
-    "services": [
-        {
-            "type": "api",
-            "listen": "::",
-            "listen_port": 9900,
-            "access_control_allow_origin": [
-                "*"
-            ],
-            "access_control_allow_private_network": true,
-            "dashboard": {
-                "enabled": true
-            }
-        }
-    ],
-    "ntp": {
-        "enabled": true,
-        "server": "time.cloudflare.com",
-        "server_port": 123,
-        "interval": "30m"
-    },
-    "certificate": {
-        "store": "mozilla"
-    },
     "http_clients": [
         {
             "tag": "Proxy",
             "detour": "Proxy"
         }
     ],
-    "endpoints": [
-        {
-            "type": "tailscale",
-            "tag": "ts-ep",
-            "auth_key": "tskey-auth-YOUR_TAILSCALE_KEY"
-        }
-    ],
     "dns": {
         "servers": [
             {
                 "tag": "google",
-                "type": "https",
+                "type": "udp",
                 "server": "8.8.8.8",
                 "detour": "Proxy"
-            },
-            {
-                "tag": "h3-ali",
-                "type": "h3",
-                "server": "dns.alidns.com",
-                "domain_resolver": "local"
             },
             {
                 "tag": "ali",
@@ -77,37 +41,39 @@
                 "tag": "fakeip",
                 "inet4_range": "198.18.0.0/15",
                 "inet6_range": "fc00::/18"
-            },
-            {
-                "type": "local",
-                "tag": "local"
             }
         ],
         "rules": [
-            {
-                "domain": [
-                    "crs.cr.adobe.com",
-                    "ims-prod06.adobelogin.com",
-                    "cc-api-data.adobe.io",
-                    "lcs-cops.adobe.io",
-                    "hbrt.adobe.com",
-                    "cctypekit.adobe.io",
-                    "udps.adobe.com",
-                    "ims-na1.adobelogin.com",
-                    "p13n.adobe.io",
-                    "assets.adobedtm.com",
-                    "ic.adobe.io",
-                    "adobeid-na1.services.adobe.com",
-                    "cc-cdn.adobe.com"
-                ],
-                "action": "reject",
-                "method": "drop"
-            },
             {
                 "rule_set": [
                     "category-ads-all"
                 ],
                 "action": "reject"
+            },
+            {
+                "query_type": [
+                    "SVCB",
+                    "HTTPS",
+                    "PTR"
+                ],
+                "action": "reject"
+            },
+            {
+                "domain": [
+                      "abs.twimg.com",
+                      "pbs.twimg.com"
+
+                ],
+                "server": "fakeip"
+            },
+            {
+                "domain": [
+                        "pbs.twimg.com.cdn.cloudflare.net",
+                        "abs.twimg.com.cdn.cloudflare.net"
+
+                ],
+                "client_subnet": "118.160.0.0/24",
+                "server": "google"
             },
             {
                 "clash_mode": "global",
@@ -127,14 +93,13 @@
                         "clash_mode": "direct"
                     }
                 ],
-                "server": "h3-ali"
+                "server": "ali"
             },
             {
                 "rule_set": [
-                    "geosite-geolocation-cn",
-                    "geosite-cn"
+                    "geosite-geolocation-cn"
                 ],
-                "server": "h3-ali"
+                "server": "ali"
             }
         ],
         "strategy": "ipv4_only",
@@ -147,15 +112,15 @@
             "type": "mixed",
             "tag": "mixed",
             "listen": "127.0.0.1",
-            "listen_port": 8080,
-            "set_system_proxy": false
+            "listen_port": 8080
         },
         {
             "tag": "tun-in",
             "interface_name": "sing-tun",
             "type": "tun",
             "address": [
-                "172.19.0.0/30"
+                "172.19.0.0/30",
+                "fdfe:dcba:9876::1/126"
             ],
             "mtu": 1400,
             "auto_route": true,
@@ -226,18 +191,21 @@
                 "action": "hijack-dns"
             },
             {
-                "domain_suffix": [
-                    "adobe.com",
-                    "adobe.io"
-                ],
-                "outbound": "reject"
+                "domain": "pbs.twimg.com",
+                "action": "route-options",
+                 "override_address": "pbs.twimg.com.cdn.cloudflare.net"
+            },
+                        {
+                "domain": "abs.twimg.com",
+                "action": "route-options",
+                 "override_address": "abs.twimg.com.cdn.cloudflare.net"
             },
             {
                 "clash_mode": "direct",
                 "action": "bypass",
                 "outbound": "direct"
             },
-                        {
+            {
                 "type": "logical",
                 "mode": "and",
                 "rules": [
@@ -248,7 +216,7 @@
                         ]
                     }
                 ],
-                "action": "reject"
+                "outbound": "Proxy"
             },
             {
                 "protocol": "bittorrent",
@@ -267,15 +235,6 @@
             {
                 "clash_mode": "global",
                 "outbound": "Proxy"
-            },
-
-            {
-                "domain_suffix": [
-                    "example.com",
-                    "example.com"
-                ],
-                "action": "bypass",
-                "outbound": "direct"
             },
             {
                 "rule_set": "gfw-site",

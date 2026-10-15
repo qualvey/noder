@@ -2,7 +2,7 @@
 // 用户新增/编辑表单弹窗
 // 包含：用户基础信息 / 快捷凭证提取 / 节点端点 (Endpoints) 灵活配置 / config_override
 // 契约：props { open, editing, nodes }，emits { close, saved }
-import { inject, reactive, ref, watch } from 'vue'
+import { computed, inject, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { Node, User } from '../types'
@@ -22,6 +22,11 @@ const emit = defineEmits<{
 }>()
 
 const toast = inject('toast') as (msg: string, type?: 'info' | 'error') => void
+
+// 用户页可能在节点管理页之后才打开，不能只依赖父组件首次加载的节点快照。
+const availableNodes = ref<Node[]>([...props.nodes])
+const activeNodeSelector = ref<string | null>(null)
+const nodeSearch = reactive<Record<string, string>>({})
 
 const showExtract = ref(false)
 const extractInput = ref('')
@@ -59,6 +64,53 @@ function resetForm() {
   })
   showExtract.value = false
   extractInput.value = ''
+}
+
+function endpointKey(ep: EndpointFormItem, index: number) {
+  return String(ep.id ?? `new-${index}`)
+}
+
+function nodeLabel(node: Node) {
+  return `${node.node_name || node.tag || `Node-${node.id}`} (${node.protocol.toUpperCase()})`
+}
+
+function filteredNodes(ep: EndpointFormItem, index: number) {
+  const query = (nodeSearch[endpointKey(ep, index)] || '').trim().toLowerCase()
+  if (!query) return availableNodes.value
+  return availableNodes.value.filter(node => [
+    node.node_name,
+    node.tag,
+    node.protocol,
+    node.server_address,
+    node.server_port,
+  ].some(value => String(value ?? '').toLowerCase().includes(query)))
+}
+
+function selectedNodeLabel(ep: EndpointFormItem) {
+  const node = availableNodes.value.find(n => n.id === ep.node_id)
+  return node ? nodeLabel(node) : `Node-${ep.node_id}`
+}
+
+function focusNodeSelector(ep: EndpointFormItem, index: number) {
+  const key = endpointKey(ep, index)
+  activeNodeSelector.value = key
+  nodeSearch[key] = ''
+}
+
+function chooseNode(ep: EndpointFormItem, node: Node, index: number) {
+  ep.node_id = node.id
+  onNodeChange(ep)
+  nodeSearch[endpointKey(ep, index)] = ''
+  activeNodeSelector.value = null
+}
+
+async function refreshNodes() {
+  try {
+    availableNodes.value = await api.nodes.list()
+  } catch {
+    // 父组件已有节点列表时仍可正常编辑，不因刷新失败阻断表单。
+    availableNodes.value = [...props.nodes]
+  }
 }
 
 function closeModal(clearDraft = false) {
@@ -105,8 +157,9 @@ function loadForm(u: User) {
 // 打开弹窗时初始化表单（编辑回填 / 新增重置）
 watch(
   () => props.open,
-  (open) => {
+  async (open) => {
     if (!open) return
+    await refreshNodes()
     const draft = localStorage.getItem(draftKey())
     if (draft) {
       try {
@@ -124,14 +177,18 @@ watch(
   },
 )
 
+watch(() => props.nodes, (nodes) => {
+  availableNodes.value = [...nodes]
+}, { deep: true })
+
 watch(form, (value) => {
   if (props.open && formInitialized.value) localStorage.setItem(draftKey(), JSON.stringify(value))
 }, { deep: true })
 
 function addEndpoint(nodeId?: number) {
-  let targetNode = props.nodes[0]
+  let targetNode = availableNodes.value[0]
   if (nodeId) {
-    const found = props.nodes.find(n => n.id === nodeId)
+    const found = availableNodes.value.find(n => n.id === nodeId)
     if (found) targetNode = found
   }
   if (!targetNode) return
@@ -146,7 +203,7 @@ function addEndpoint(nodeId?: number) {
 }
 
 function addAllNodes() {
-  for (const n of props.nodes) {
+  for (const n of availableNodes.value) {
     form.endpoints.push({
       node_id: n.id,
       tag: n.node_name || n.tag || `Node-${n.id}`,
@@ -158,7 +215,7 @@ function addAllNodes() {
 }
 
 function onNodeChange(ep: EndpointFormItem) {
-  const node = props.nodes.find(n => n.id === ep.node_id)
+  const node = availableNodes.value.find(n => n.id === ep.node_id)
   if (node && !ep.tag) {
     ep.tag = node.node_name || node.tag || `Node-${node.id}`
   }
@@ -296,10 +353,10 @@ async function saveUser() {
               <span class="endpoints-count">{{ form.endpoints.length }}</span>
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <button type="button" class="btn btn-secondary btn-sm" :disabled="!nodes.length" @click="addAllNodes">
+              <button type="button" class="btn btn-secondary btn-sm" :disabled="!availableNodes.length" @click="addAllNodes">
                 {{ t('users.form.addAllNodes') }}
               </button>
-              <button type="button" class="btn btn-primary btn-sm" :disabled="!nodes.length" @click="addEndpoint()">
+              <button type="button" class="btn btn-primary btn-sm" :disabled="!availableNodes.length" @click="addEndpoint()">
                 {{ t('users.form.addEndpoint') }}
               </button>
             </div>
@@ -324,12 +381,31 @@ async function saveUser() {
                 </div>
 
                 <!-- 选择物理入口 -->
-                <div class="endpoint-node-select">
-                  <select v-model="ep.node_id" class="form-control form-control-sm" @change="onNodeChange(ep)">
-                    <option v-for="node in nodes" :key="node.id" :value="node.id">
-                      {{ node.node_name || node.tag }} ({{ node.protocol.toUpperCase() }})
-                    </option>
-                  </select>
+                <div class="endpoint-node-select" @keydown.esc="activeNodeSelector = null">
+                  <input
+                    class="form-control form-control-sm"
+                    :value="activeNodeSelector === endpointKey(ep, idx) ? (nodeSearch[endpointKey(ep, idx)] || '') : selectedNodeLabel(ep)"
+                    :placeholder="t('users.form.endpointNodePlaceholder')"
+                    @focus="focusNodeSelector(ep, idx)"
+                    @input="nodeSearch[endpointKey(ep, idx)] = ($event.target as HTMLInputElement).value"
+                  />
+                  <div
+                    v-if="activeNodeSelector === endpointKey(ep, idx)"
+                    class="endpoint-node-options"
+                  >
+                    <button
+                      v-for="node in filteredNodes(ep, idx)"
+                      :key="node.id"
+                      type="button"
+                      class="endpoint-node-option"
+                      @mousedown.prevent="chooseNode(ep, node, idx)"
+                    >
+                      {{ nodeLabel(node) }}
+                    </button>
+                    <span v-if="!filteredNodes(ep, idx).length" class="endpoint-node-empty">
+                      {{ t('common.noResults') }}
+                    </span>
+                  </div>
                 </div>
 
                 <!-- 节点 Tag -->
@@ -548,6 +624,46 @@ async function saveUser() {
 .endpoint-node-select {
   flex: 1.2;
   min-width: 170px;
+  position: relative;
+}
+
+.endpoint-node-options {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 3px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border-glass);
+  border-radius: 6px;
+  background: var(--bg-card, #172033);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+.endpoint-node-option {
+  display: block;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.endpoint-node-option:hover {
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.endpoint-node-empty {
+  display: block;
+  padding: 8px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
 }
 
 .endpoint-tag-input {
