@@ -1,4 +1,5 @@
 // 通用工具函数
+import { normalizeTransportType } from './constants'
 
 export function escapeHtml(str: unknown): string {
   return String(str ?? '').replace(/[&<>"']/g, (c) => {
@@ -71,7 +72,7 @@ export function parseVlessUrl(urlStr: string): Partial<Record<string, unknown>> 
     const fp = searchParams.get('fp') || 'chrome'
     const pbk = searchParams.get('pbk') || ''
     const sid = searchParams.get('sid') || ''
-    const transportType = searchParams.get('type') || 'direct'
+    const transportType = normalizeTransportType(searchParams.get('type'))
     const path = searchParams.get('path') ? decodeURIComponent(searchParams.get('path')!) : ''
 
     const tls: Record<string, unknown> = { enabled: true }
@@ -83,7 +84,7 @@ export function parseVlessUrl(urlStr: string): Partial<Record<string, unknown>> 
 
     // 构建 transport 配置（与 sing-box JSON 格式对齐）
     const transport: Record<string, unknown> = {}
-    if (transportType && transportType !== 'direct') {
+    if (transportType !== 'direct') {
       transport.type = transportType
       if (path) transport.path = path
     }

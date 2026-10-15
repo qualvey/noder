@@ -7,7 +7,7 @@ import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { Node } from '../types'
 import { parseNodeJson, parseVlessUrl } from '../utils'
-import { TUIC_CONGESTION_CONTROLS, UTLS_FINGERPRINTS, VLESS_FLOWS, isEnumValue } from '../constants'
+import { TUIC_CONGESTION_CONTROLS, UTLS_FINGERPRINTS, VLESS_FLOWS, isEnumValue, normalizeTransportType } from '../constants'
 
 const { t } = useI18n()
 
@@ -88,7 +88,7 @@ function loadForm(n: Node) {
   Object.assign(form, {
     tag: n.tag || '', node_name: n.node_name || '', protocol: n.protocol, server_address: n.server_address,
     server_port: n.server_port, security: n.security || 'tls', sni: n.sni || '',
-    transport_type: n.transport_type || 'direct', path: n.path || '',
+    transport_type: normalizeTransportType(n.transport_type), path: n.path || '',
     public_key: n.public_key || '', short_id: n.short_id || '',
     // 老数据可能含契约外取值，回填时归一到白名单（后端保存时会再次拒绝非法值）
     fingerprint: isEnumValue(UTLS_FINGERPRINTS, n.fingerprint) ? n.fingerprint : 'chrome',
@@ -136,6 +136,7 @@ async function saveNode() {
   const isTuic = form.protocol === 'tuic'
   const isReality = form.security === 'reality'
   const isVless = form.protocol === 'vless'
+  const transportType = normalizeTransportType(form.transport_type)
 
   const payload: Partial<Node> = {
     tag: form.tag.trim(),
@@ -145,7 +146,7 @@ async function saveNode() {
     server_port: Number(form.server_port),
     security: form.security,
     sni: form.sni.trim() || null,
-    transport_type: isTuic ? null : form.transport_type,
+    transport_type: isTuic ? null : transportType,
     path: isTuic ? null : (form.path.trim() || null),
     public_key: isReality ? (form.public_key.trim() || null) : null,
     short_id: isReality ? (form.short_id.trim() || null) : null,
@@ -203,7 +204,7 @@ function applyJsonImport() {
   form.flow = isEnumValue(VLESS_FLOWS, importedFlow) ? importedFlow : 'xtls-rprx-vision'
   const importedCc = String(obj.congestion_control ?? '')
   form.congestion_control = isEnumValue(TUIC_CONGESTION_CONTROLS, importedCc) ? importedCc : 'bbr'
-  form.transport_type = String(transport.type || 'direct')
+  form.transport_type = normalizeTransportType(transport.type)
   form.path = String(transport.path || '')
   onProtocolChange()
   toast(t('nodes.jsonSuccess'))
@@ -325,6 +326,8 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
             <option value="ws">WebSocket (ws)</option>
             <option value="grpc">gRPC</option>
             <option value="http">HTTP</option>
+            <option value="quic">QUIC</option>
+            <option value="httpupgrade">HTTPUpgrade</option>
           </select>
         </div>
         <div v-if="['vless', 'anytls'].includes(form.protocol)" class="form-group">

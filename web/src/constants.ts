@@ -10,6 +10,15 @@ export const VLESS_FLOWS = ['', 'xtls-rprx-vision'] as const
 
 export const TUIC_CONGESTION_CONTROLS = ['bbr', 'cubic', 'new_reno'] as const
 
+// Sing-box V2Ray transport types. direct means the default transport and is
+// intentionally omitted from generated sing-box JSON.
+export const TRANSPORT_TYPES = ['http', 'ws', 'quic', 'grpc', 'httpupgrade'] as const
+
+export function normalizeTransportType(value: unknown): string {
+  const transport = String(value ?? '').trim().toLowerCase()
+  return (TRANSPORT_TYPES as readonly string[]).includes(transport) ? transport : 'direct'
+}
+
 export function isEnumValue<T extends readonly string[]>(list: T, value: string | null | undefined): value is T[number] {
   return value !== null && value !== undefined && (list as readonly string[]).includes(value)
 }

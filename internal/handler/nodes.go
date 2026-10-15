@@ -62,9 +62,8 @@ func CreateNode(w http.ResponseWriter, r *http.Request) {
 		delete(body, "security")
 	} else {
 		delete(body, "congestion_control")
-		if _, ok := body["transport_type"]; !ok {
-			body["transport_type"] = "direct"
-		}
+		transport, _ := body["transport_type"].(string)
+		body["transport_type"] = contract.NormalizeTransportType(transport)
 		if _, ok := body["security"]; !ok {
 			body["security"] = "tls"
 		}
@@ -187,9 +186,8 @@ func UpdateNode(w http.ResponseWriter, r *http.Request) {
 		merged["security"] = ""
 	} else {
 		merged["congestion_control"] = nil
-		if t, ok := merged["transport_type"].(string); !ok || t == "" {
-			merged["transport_type"] = "direct"
-		}
+		t, _ := merged["transport_type"].(string)
+		merged["transport_type"] = contract.NormalizeTransportType(t)
 	}
 
 	if err := contract.ValidateNodeContract(merged, proto, true); err != nil {

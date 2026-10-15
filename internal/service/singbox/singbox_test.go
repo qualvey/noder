@@ -35,6 +35,55 @@ func TestBuildSingboxOutbound(t *testing.T) {
 	}
 }
 
+func TestBuildSingboxOutboundDoesNotEmitTCPTransport(t *testing.T) {
+	node := &model.Node{
+		Tag:           "vless-tcp",
+		Protocol:      "vless",
+		ServerAddress: "1.2.3.4",
+		ServerPort:    443,
+		Security:      "reality",
+		SNI:           strPtr("example.com"),
+		PublicKey:     strPtr("public-key"),
+		ShortID:       strPtr("short-id"),
+		Fingerprint:   strPtr("chrome"),
+		TransportType: "tcp",
+		IsActive:      true,
+	}
+	user := &model.User{Token: "test-token"}
+
+	ob, err := BuildSingboxOutbound(node, user)
+	if err != nil {
+		t.Fatalf("BuildSingboxOutbound failed: %v", err)
+	}
+	if _, exists := ob["transport"]; exists {
+		t.Fatalf("sing-box outbound must not contain a tcp transport: %v", ob["transport"])
+	}
+}
+
+func TestBuildSingboxOutboundDoesNotEmitUnsupportedTransport(t *testing.T) {
+	node := &model.Node{
+		Tag:           "vless-invalid-transport",
+		Protocol:      "vless",
+		ServerAddress: "1.2.3.4",
+		ServerPort:    443,
+		Security:      "reality",
+		SNI:           strPtr("example.com"),
+		PublicKey:     strPtr("public-key"),
+		ShortID:       strPtr("short-id"),
+		Fingerprint:   strPtr("chrome"),
+		TransportType: "kcp",
+		IsActive:      true,
+	}
+
+	ob, err := BuildSingboxOutbound(node, &model.User{Token: "test-token"})
+	if err != nil {
+		t.Fatalf("BuildSingboxOutbound failed: %v", err)
+	}
+	if _, exists := ob["transport"]; exists {
+		t.Fatalf("sing-box outbound must not contain an unsupported transport: %v", ob["transport"])
+	}
+}
+
 func TestVlessRealityValidation(t *testing.T) {
 	// 缺少 reality 依赖字段测试
 	node := &model.Node{

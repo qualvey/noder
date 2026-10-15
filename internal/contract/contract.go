@@ -41,7 +41,25 @@ var (
 	UtlsFingerprints       = []string{"chrome", "firefox", "edge", "safari", "360", "qq", "ios", "android", "random", "randomized"}
 	VlessFlows             = []string{"", "xtls-rprx-vision"}
 	TuicCongestionControls = []string{"bbr", "cubic", "new_reno"}
+	// Sing-box V2Ray transport types. "direct" is the internal sentinel for
+	// the default TCP transport and must not be emitted as a transport object.
+	TransportTypes = []string{"http", "ws", "quic", "grpc", "httpupgrade"}
 )
+
+// NormalizeTransportType returns a supported transport type or "direct" so
+// invalid/legacy values cannot leak into generated sing-box configurations.
+func NormalizeTransportType(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "direct" {
+		return value
+	}
+	for _, supported := range TransportTypes {
+		if value == supported {
+			return value
+		}
+	}
+	return "direct"
+}
 
 var ProtocolContracts = map[string]*NodeContract{
 	"tuic": {

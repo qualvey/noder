@@ -1,8 +1,8 @@
 package singbox
 
 import (
-	"errors"
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 
@@ -172,9 +172,10 @@ func BuildSingboxEndpointOutbound(ep *model.Endpoint) (map[string]interface{}, e
 		}
 	}
 
-	if node.TransportType != "" && node.TransportType != "direct" {
+	transportType := contract.NormalizeTransportType(node.TransportType)
+	if transportType != "direct" {
 		trans := map[string]interface{}{
-			"type": node.TransportType,
+			"type": transportType,
 		}
 		if node.Path != nil && *node.Path != "" {
 			trans["path"] = *node.Path
