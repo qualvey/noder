@@ -4,6 +4,7 @@ import {
   type TransferDirection,
   type BaseOutboundConfig,
   type ConfigDetailItem,
+  type NodeMeta,
   detectDirection,
   tryParseJsonWithArrayFallback,
   parseJsonConfigs,
@@ -13,13 +14,20 @@ import {
   extractConfigDetails,
   getAllHandlers,
   getHandlerByProtocol,
+  toNodeMeta,
+  toSingBoxConfig,
+  buildSingBoxConfig,
+  toXrayConfig,
 } from '../tools/node-transfer'
 
 export interface TransferNodeResult {
   index: number
   config: BaseOutboundConfig
+  meta: NodeMeta
   shareLink: string
   shareJson: string
+  xrayJson: string
+  xrayError: string
   details: ConfigDetailItem[]
 }
 
@@ -46,20 +54,21 @@ export function useNodeTransfer(options: UseNodeTransferOptions = {}) {
   const parseResult = computed(() => {
     const text = inputText.value.trim()
     if (!text) {
-      return { configs: [], error: '' }
+      return { configs: [], error: '', warnings: [] as string[] }
     }
 
     if (conversionDirection.value === 'json2link') {
-      const { configs, error } = parseJsonConfigs(text)
-      return { configs, error: error || '' }
+      const { configs, error, warnings } = parseJsonConfigs(text)
+      return { configs, error: error || '', warnings }
     } else {
-      const { configs, error } = parseLinksToConfigs(text)
-      return { configs, error: error || '' }
+      const { configs, error, warnings } = parseLinksToConfigs(text)
+      return { configs, error: error || '', warnings }
     }
   })
 
   const parsedConfigs = computed(() => parseResult.value.configs)
   const parseError = computed(() => parseResult.value.error)
+  const parseWarnings = computed(() => parseResult.value.warnings)
   const nodeCount = computed(() => parsedConfigs.value.length)
 
   // 当解析出的节点数量变化时，确保 activeNodeIndex 不越界
@@ -75,13 +84,25 @@ export function useNodeTransfer(options: UseNodeTransferOptions = {}) {
   // 每个独立节点的转换结果（文本 + 二维码 + 详情）
   const nodeResults = computed<TransferNodeResult[]>(() => {
     if (parsedConfigs.value.length === 0 || parseError.value) return []
-    return parsedConfigs.value.map((cfg, idx) => ({
-      index: idx + 1,
-      config: cfg,
-      shareLink: buildShareLink(cfg),
-      shareJson: JSON.stringify(cfg, null, 2),
-      details: extractConfigDetails(cfg),
-    }))
+    return parsedConfigs.value.map((cfg, idx) => {
+      const meta = toNodeMeta(cfg)
+      const singBoxConfig = toSingBoxConfig(meta)
+      return {
+        index: idx + 1,
+        config: singBoxConfig,
+        meta,
+        shareLink: buildShareLink(singBoxConfig),
+        shareJson: JSON.stringify(singBoxConfig, null, 2),
+        ...(() => {
+        try {
+          return { xrayJson: JSON.stringify(toXrayConfig(meta), null, 2), xrayError: '' }
+        } catch (e: any) {
+          return { xrayJson: '', xrayError: e.message || '无法生成 Xray 配置' }
+        }
+      })(),
+        details: extractConfigDetails(singBoxConfig),
+      }
+    })
   })
 
   // 当前激活选中的节点（用于底部查看完整参数列表）
@@ -103,6 +124,30 @@ export function useNodeTransfer(options: UseNodeTransferOptions = {}) {
       return JSON.stringify(parsedConfigs.value[0], null, 2)
     }
     return JSON.stringify(parsedConfigs.value, null, 2)
+  })
+
+  const allXrayJsonText = computed(() => {
+    if (nodeResults.value.length === 0 || parseError.value) return ''
+    const outbounds: unknown[] = []
+    for (const result of nodeResults.value) {
+      if (!result.xrayJson) continue
+      try {
+        const config = JSON.parse(result.xrayJson)
+        outbounds.push(...(config.outbounds || []))
+      } catch {
+        // 单节点错误已展示在结果项中，这里跳过即可。
+      }
+    }
+    return outbounds.length ? JSON.stringify({ outbounds }, null, 2) : ''
+  })
+
+  const allSingBoxJsonText = computed(() => {
+    if (nodeResults.value.length === 0 || parseError.value) return ''
+    return JSON.stringify(
+      buildSingBoxConfig(nodeResults.value.map((result) => result.config)),
+      null,
+      2,
+    )
   })
 
   // 当前选中节点的配置参数详情
@@ -172,6 +217,9 @@ export function useNodeTransfer(options: UseNodeTransferOptions = {}) {
     parseError,
     allShareLinksText,
     allShareJsonText,
+    allXrayJsonText,
+    allSingBoxJsonText,
+    parseWarnings,
     configDetails,
     handlePasteSample,
     handleClear,

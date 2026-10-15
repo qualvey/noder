@@ -2,7 +2,7 @@
 // 用户新增/编辑表单弹窗
 // 包含：用户基础信息 / 快捷凭证提取 / 节点端点 (Endpoints) 灵活配置 / config_override
 // 契约：props { open, editing, nodes }，emits { close, saved }
-import { inject, reactive, ref, watch } from 'vue'
+import { computed, inject, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { Node, User } from '../types'

@@ -1,0 +1,335 @@
+//dns和route全量替换
+{
+    "dns": {
+        "final": "google",
+        "optimistic": true,
+        "reverse_mapping": true,
+        "rules": [
+            {
+                "action": "reject",
+                "rule_set": [
+                    "category-ads-all"
+                ]
+            },
+            {
+                "action": "reject",
+                "query_type": [
+                    "SVCB",
+                    "HTTPS",
+                    "PTR"
+                ]
+            },
+                  {
+        "preferred_by": "hosts",
+        "action": "route",
+        "server": "hosts"
+      },
+            // {
+            //     "domain": [
+            //         "abs.twimg.com",
+            //         "pbs.twimg.com",
+            //         "video.twimg.com"
+            //     ],
+            //     "server": "fakeip"
+            // },
+            // {
+            //     "client_subnet": "118.160.0.0/24",
+            //     "domain": [
+            //         "pbs.twimg.com.cdn.cloudflare.net",
+            //         "abs.twimg.com.cdn.cloudflare.net",
+            //         "video.twimg.com.cdn.cloudflare.net"
+            //     ],
+            //     "server": "google"
+            // },
+            {
+                "clash_mode": "global",
+                "server": "google"
+            },
+            {
+                "mode": "and",
+                "rules": [
+                    {
+                        "invert": true,
+                        "rule_set": [
+                            "gfw-site"
+                        ]
+                    },
+                    {
+                        "clash_mode": "direct"
+                    }
+                ],
+                "server": "ali",
+                "type": "logical"
+            },
+            {
+                "rule_set": [
+                    "geosite-geolocation-cn"
+                ],
+                "server": "ali"
+            }
+        ],
+        "servers": [
+            {
+                "detour": "Proxy",
+                "server": "8.8.8.8",
+                "tag": "google",
+                "type": "udp"
+            },
+            {
+                "server": "223.5.5.5",
+                "tag": "ali",
+                "type": "udp"
+            },
+            {
+                "inet4_range": "198.18.0.0/15",
+                "inet6_range": "fc00::/18",
+                "tag": "fakeip",
+                "type": "fakeip"
+            },
+            {
+                "type": "hosts",
+                "tag": "hosts",
+                "predefined": {
+                    "pbs.twimg.com.cdn.cloudflare.net": [
+                        "172.64.150.129",
+                        "104.18.37.127"
+                    ],
+                    "abs.twimg.com.cdn.cloudflare.net": [
+                        "172.64.150.129",
+                        "104.18.37.127"
+                    ],
+                    "video.twimg.com.cdn.cloudflare.net": [
+                        "172.64.150.129",
+                        "104.18.37.127"
+                    ],
+                                        "abs.twimg.com": [
+                        "172.64.150.129",
+                        "104.18.37.127"
+                    ],
+                    "pbs.twimg.com": [
+                        "172.64.150.129",
+                        "104.18.37.127"
+                    ],
+                    "video.twimg.com": [
+                        "172.64.150.129",
+                        "104.18.37.127"
+                    ]
+                }
+            }
+        ],
+        "strategy": "ipv4_only"
+    },
+    "route": {
+        "auto_detect_interface": true,
+        "default_domain_resolver": {
+            "server": "ali"
+        },
+        "final": "Proxy",
+        "rule_set": [
+            {
+                "format": "binary",
+                "http_client": "Proxy",
+                "tag": "geoip-cn",
+                "type": "remote",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs"
+            },
+            {
+                "format": "binary",
+                "http_client": "Proxy",
+                "tag": "geosite-geolocation-cn",
+                "type": "remote",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs"
+            },
+            {
+                "format": "binary",
+                "http_client": "Proxy",
+                "tag": "geosite-geolocation-!cn",
+                "type": "remote",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs"
+            },
+            {
+                "format": "binary",
+                "http_client": "Proxy",
+                "tag": "geosite-cn",
+                "type": "remote",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs"
+            },
+            {
+                "format": "binary",
+                "tag": "douyin",
+                "type": "remote",
+                "url": "https://github.com/SagerNet/sing-geosite/raw/refs/heads/rule-set/geosite-douyin.srs"
+            },
+            {
+                "format": "binary",
+                "http_client": "Proxy",
+                "tag": "category-ads-all",
+                "type": "remote",
+                "url": "https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs"
+            },
+            {
+                "format": "binary",
+                "tag": "binance",
+                "type": "remote",
+                "url": "https://github.com/SagerNet/sing-geosite/raw/refs/heads/rule-set/geosite-binance.srs"
+            },
+            {
+                "format": "binary",
+                "tag": "tiktok",
+                "type": "remote",
+                "url": "https://github.com/SagerNet/sing-geosite/raw/refs/heads/rule-set/geosite-tiktok.srs"
+            },
+            {
+                "format": "binary",
+                "tag": "geosite-game!cn",
+                "type": "remote",
+                "url": "https://github.com/SagerNet/sing-geosite/raw/refs/heads/rule-set/geosite-category-games-!cn.srs"
+            },
+            {
+                "format": "binary",
+                "tag": "geosite-bytedance!cn",
+                "type": "remote",
+                "url": "https://github.com/SagerNet/sing-geosite/raw/refs/heads/rule-set/geosite-bytedance@!cn.srs"
+            },
+            {
+                "format": "binary",
+                "tag": "geosite-ebay",
+                "type": "remote",
+                "url": "https://github.com/SagerNet/sing-geosite/raw/refs/heads/rule-set/geosite-ebay.srs"
+            },
+            {
+                "format": "binary",
+                "tag": "rednote",
+                "type": "remote",
+                "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-xiaohongshu.srs"
+            },
+            {
+                "tag": "gfw-site",
+                "type": "remote",
+                "url": "https://raw.githubusercontent.com/qualvey/rule-set/refs/heads/ruleset/singbox/version5/gfw-site.srs"
+            },
+            {
+                "tag": "gfw-ip",
+                "type": "remote",
+                "url": "https://raw.githubusercontent.com/qualvey/rule-set/refs/heads/ruleset/singbox/version5/gfw-ip.srs"
+            }
+        ],
+        "rules": [
+            {
+                "action": "reject",
+                "port": 853
+            },
+            {
+                "action": "sniff"
+            },
+            {
+                "action": "reject",
+                "no_drop": true,
+                "rule_set": [
+                    "category-ads-all"
+                ]
+            },
+            {
+                "action": "bypass",
+                "outbound": "direct",
+                "protocol": "ssh"
+            },
+            {
+                "action": "hijack-dns",
+                "mode": "or",
+                "rules": [
+                    {
+                        "port": 53
+                    },
+                    {
+                        "protocol": "dns"
+                    }
+                ],
+                "type": "logical"
+            },
+            // {
+            //     "action": "route-options",
+            //     "domain": "pbs.twimg.com",
+            //     "override_address": "pbs.twimg.com.cdn.cloudflare.net"
+            // },
+            // {
+            //     "action": "route-options",
+            //     "domain": "abs.twimg.com",
+            //     "override_address": "abs.twimg.com.cdn.cloudflare.net"
+            // },
+            // {
+            //     "action": "route-options",
+            //     "domain": "video.twimg.com",
+            //     "override_address": "video.twimg.com.cdn.cloudflare.net"
+            // },
+            {
+                "action": "bypass",
+                "clash_mode": "direct",
+                "outbound": "direct"
+            },
+            {
+                "mode": "and",
+                "outbound": "Proxy",
+                "rules": [
+                    {
+                        "protocol": [
+                            "stun",
+                            "dtls"
+                        ]
+                    }
+                ],
+                "type": "logical"
+            },
+            {
+                "action": "bypass",
+                "outbound": "direct",
+                "protocol": "bittorrent"
+            },
+            {
+                "outbound": "direct",
+                "protocol": "ntp"
+            },
+            {
+                "action": "bypass",
+                "ip_is_private": true,
+                "outbound": "direct"
+            },
+            {
+                "clash_mode": "global",
+                "outbound": "Proxy"
+            },
+            {
+                "outbound": "Proxy",
+                "rule_set": "gfw-site"
+            },
+            {
+                "action": "bypass",
+                "outbound": "direct",
+                "rule_set": [
+                    "geosite-geolocation-cn",
+                    "geosite-cn"
+                ]
+            },
+            {
+                "action": "bypass",
+                "outbound": "direct",
+                "rule_set": "geoip-cn"
+            },
+            {
+                "action": "bypass",
+                "mode": "and",
+                "outbound": "direct",
+                "rules": [
+                    {
+                        "rule_set": "geoip-cn"
+                    },
+                    {
+                        "invert": true,
+                        "rule_set": "geosite-geolocation-!cn"
+                    }
+                ],
+                "type": "logical"
+            }
+        ]
+    }
+}

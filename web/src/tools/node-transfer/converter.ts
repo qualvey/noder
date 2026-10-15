@@ -51,17 +51,18 @@ export function tryParseJsonWithArrayFallback(text: string): unknown {
 export function parseJsonConfigs(jsonStr: string): {
   configs: BaseOutboundConfig[]
   error: string | null
+  warnings: string[]
 } {
   const trimmed = jsonStr.trim()
   if (!trimmed) {
-    return { configs: [], error: null }
+    return { configs: [], error: null, warnings: [] }
   }
 
   let raw: unknown
   try {
     raw = tryParseJsonWithArrayFallback(trimmed)
   } catch (e: any) {
-    return { configs: [], error: `JSON 解析错误: ${e.message}` }
+    return { configs: [], error: `JSON 解析错误: ${e.message}`, warnings: [] }
   }
 
   const supportedHandlers = getAllHandlers()
@@ -75,11 +76,11 @@ export function parseJsonConfigs(jsonStr: string): {
   } else if (raw && typeof raw === 'object') {
     candidates = [raw]
   } else {
-    return { configs: [], error: '配置必须是一个 JSON 对象或对象数组' }
+    return { configs: [], error: '配置必须是一个 JSON 对象或对象数组', warnings: [] }
   }
 
   if (candidates.length === 0) {
-    return { configs: [], error: '未在输入中找到任何节点配置' }
+    return { configs: [], error: '未在输入中找到任何节点配置', warnings: [] }
   }
 
   const configs: BaseOutboundConfig[] = []
@@ -120,10 +121,11 @@ export function parseJsonConfigs(jsonStr: string): {
     return {
       configs: [],
       error: errors.length > 0 ? errors[0] : `未找到有效且支持的节点配置 (支持: ${supportedProtocols.join(', ')})`,
+      warnings: [],
     }
   }
 
-  return { configs, error: null }
+  return { configs: normalizeTags(configs), error: null, warnings: errors }
 }
 
 /**
@@ -173,10 +175,11 @@ export function parseLinkToConfig(link: string): BaseOutboundConfig {
 export function parseLinksToConfigs(linksStr: string): {
   configs: BaseOutboundConfig[]
   error: string | null
+  warnings: string[]
 } {
   const trimmed = linksStr.trim()
   if (!trimmed) {
-    return { configs: [], error: null }
+    return { configs: [], error: null, warnings: [] }
   }
 
   const lines = trimmed
@@ -185,24 +188,36 @@ export function parseLinksToConfigs(linksStr: string): {
     .filter(Boolean)
 
   if (lines.length === 0) {
-    return { configs: [], error: null }
+    return { configs: [], error: null, warnings: [] }
   }
 
   const configs: BaseOutboundConfig[] = []
+  const warnings: string[] = []
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     try {
       const cfg = parseLinkToConfig(line)
       configs.push(cfg)
     } catch (e: any) {
-      return {
-        configs: [],
-        error: lines.length > 1 ? `第 ${i + 1} 行链接解析失败: ${e.message}` : `链接解析错误: ${e.message}`,
-      }
+      warnings.push(lines.length > 1 ? `第 ${i + 1} 行链接解析失败: ${e.message}` : `链接解析错误: ${e.message}`)
     }
   }
 
-  return { configs, error: null }
+  if (configs.length === 0) return { configs: [], error: warnings[0] || '未找到有效链接', warnings }
+  return { configs: normalizeTags(configs), error: null, warnings }
+}
+
+/** 确保 sing-box outbound 的 tag 唯一，同时尽量保留用户提供的原始 tag。 */
+export function normalizeTags(configs: BaseOutboundConfig[]): BaseOutboundConfig[] {
+  const used = new Set<string>()
+  return configs.map((config, index) => {
+    const base = (config.tag || `${config.type || 'node'}-${config.server || index + 1}`).trim() || `node-${index + 1}`
+    let tag = base
+    let suffix = 2
+    while (used.has(tag)) tag = `${base}-${suffix++}`
+    used.add(tag)
+    return { ...config, tag }
+  })
 }
 
 /**
