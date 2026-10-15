@@ -33,4 +33,5 @@ dist/
 web/pages-dist/
 *.log
 .aider*
+/web/.wrangler/tmp/
 
