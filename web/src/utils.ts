@@ -148,7 +148,10 @@ export function buildMihomoLink(token: string): string {
   return `${location.origin}${apiLinkPrefix()}/mihomo?token=${encodeURIComponent(token)}`
 }
 
+export function buildXrayLink(token: string): string {
+  return `${location.origin}${apiLinkPrefix()}/xray?token=${encodeURIComponent(token)}`
+}
+
 export function buildDownloadLink(fileId: number, token: string): string {
   return `${location.origin}${apiLinkPrefix()}/dl/${fileId}?token=${encodeURIComponent(token)}`
 }
-

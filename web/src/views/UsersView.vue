@@ -4,7 +4,7 @@ import { computed, inject, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { DistFile, Node, User, UserDownload } from '../types'
-import { buildDownloadLink, buildMihomoLink, buildSubLink, copyText } from '../utils'
+import { buildDownloadLink, buildMihomoLink, buildSubLink, buildXrayLink, copyText } from '../utils'
 import UserFormModal from '../components/UserFormModal.vue'
 import TemplateBranchModal from '../components/TemplateBranchModal.vue'
 import ContextMenu, { type ContextMenuItem } from '../components/ContextMenu.vue'
@@ -55,6 +55,15 @@ function copyMihomoLink() {
   if (!user) return
   copyText(buildMihomoLink(user.token)).then((ok) => {
     toast(ok ? t('users.mihomoLinkCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
+  })
+  closeCtxMenu()
+}
+
+function copyXrayLink() {
+  const user = ctxMenu.value?.user
+  if (!user) return
+  copyText(buildXrayLink(user.token)).then((ok) => {
+    toast(ok ? t('users.xrayLinkCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
   })
   closeCtxMenu()
 }
@@ -151,6 +160,7 @@ const ctxMenuItems = (): ContextMenuItem[] => {
     { label: t('users.menu.copyToken'), icon: '🔑', onClick: copyToken },
     { label: t('users.menu.copySingbox'), icon: '📋', onClick: copySubLink },
     { label: t('users.menu.copyMihomo'), icon: '🔄', onClick: copyMihomoLink },
+    { label: t('users.menu.copyXray'), icon: '⚡', onClick: copyXrayLink },
     { label: t('users.menu.copyNodes'), icon: '📄', onClick: copyNodes },
     { label: t('users.menu.copyUser'), icon: '👤', onClick: copyUser }
   ]

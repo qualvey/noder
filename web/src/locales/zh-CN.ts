@@ -143,6 +143,7 @@ export default {
     copiedToClipboard: '{label} 已复制到剪贴板',
     subLinkCopied: 'Sing-Box 订阅链接已复制',
     mihomoLinkCopied: 'Mihomo 订阅链接已复制',
+    xrayLinkCopied: 'Xray 订阅链接已复制',
     nodesJsonCopied: '节点列表（JSON）已经复制到剪贴板',
     userCopied: '用户凭证信息已复制到剪贴板',
     downloadLinkCopied: '{name} 下载链接已复制到剪贴板',
@@ -164,6 +165,7 @@ export default {
       copyClash: '复制 Clash 订阅链接',
       copySingbox: '复制 Sing-Box 链接',
       copyMihomo: '复制 Mihomo (Clash) 链接',
+      copyXray: '复制 Xray 链接',
       copyNodes: '复制 节点列表 (JSON)',
       copyUser: '复制 用户凭证 (JSON)',
       configDlHeader: '配置文件下载',
@@ -363,4 +365,3 @@ export default {
     vlessNote: '系统已全面兼容 doc/vless.md 定义的 VLESS REALITY 规格：支持 <code>public_key</code>、<code>short_id</code>、<code>flow: xtls-rprx-vision</code> 与 <code>uTLS: chrome</code> 指纹！',
   },
 }
-

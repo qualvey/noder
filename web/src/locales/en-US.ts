@@ -140,6 +140,7 @@ export default {
     copiedToClipboard: '{label} copied to clipboard',
     subLinkCopied: 'Sing-Box subscription link copied',
     mihomoLinkCopied: 'Mihomo subscription link copied',
+    xrayLinkCopied: 'Xray subscription link copied',
     nodesJsonCopied: 'Nodes list (JSON) copied to clipboard',
     userCopied: 'User credentials copied to clipboard',
     downloadLinkCopied: '{name} download link copied to clipboard',
@@ -161,6 +162,7 @@ export default {
       copyClash: 'Copy Clash Sub Link',
       copySingbox: 'Copy Sing-Box Link',
       copyMihomo: 'Copy Mihomo (Clash) Link',
+      copyXray: 'Copy Xray Link',
       copyNodes: 'Copy Node List (JSON)',
       copyUser: 'Copy User Credentials (JSON)',
       configDlHeader: 'Config Package Download',
@@ -360,4 +362,3 @@ export default {
     vlessNote: 'Fully compliant with VLESS REALITY spec in doc/vless.md: supports <code>public_key</code>, <code>short_id</code>, <code>flow: xtls-rprx-vision</code> and <code>uTLS: chrome</code> fingerprints!',
   },
 }
-
