@@ -187,7 +187,7 @@ async function handleCreateFromTemplate(templateId: string) {
   }
 }
 
-function onOverlayClick(e: MouseEvent) {
+function onOverlayMouseDown(e: MouseEvent) {
   if ((e.target as HTMLElement).classList.contains('modal-overlay')) {
     emit('close')
   }
@@ -210,7 +210,7 @@ watch(() => props.open, (val) => {
 </script>
 
 <template>
-  <div v-if="open" class="modal-overlay active" @click="onOverlayClick">
+  <div v-if="open" class="modal-overlay active" @mousedown="onOverlayMouseDown">
     <div class="modal" style="max-width: 900px; width: 90vw;">
       <div class="modal-header">
         <div class="modal-title">{{ t('templateBranch.title') || '模板分支管理' }}</div>

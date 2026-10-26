@@ -229,7 +229,7 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
 </script>
 
 <template>
-  <div class="modal-overlay" :class="{ active: open }" @click.self="closeModal()">
+  <div class="modal-overlay" :class="{ active: open }" @mousedown.self="closeModal()">
     <div class="modal">
       <div class="modal-header">
         <div class="modal-title">{{ editing ? t('nodes.form.editTitle') : t('nodes.form.addTitle') }}</div>

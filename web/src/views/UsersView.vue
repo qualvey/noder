@@ -100,6 +100,19 @@ async function copyUser() {
   }
 }
 
+// Copy the credential object accepted by Xray VLESS users/clients.
+async function copyXrayUser() {
+  const user = ctxMenu.value?.user
+  if (!user) return
+  closeCtxMenu()
+  const payload = {
+    id: user.uuid ?? '',
+    email: user.name,
+  }
+  const ok = await copyText(JSON.stringify(payload, null, 2))
+  toast(ok ? t('users.xrayUserCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
+}
+
 function copyValue(val: string | undefined | null, label: string) {
   if (!val || val === '-') return
   copyText(val).then((ok) => {
@@ -162,7 +175,8 @@ const ctxMenuItems = (): ContextMenuItem[] => {
     { label: t('users.menu.copyMihomo'), icon: '🔄', onClick: copyMihomoLink },
     { label: t('users.menu.copyXray'), icon: '⚡', onClick: copyXrayLink },
     { label: t('users.menu.copyNodes'), icon: '📄', onClick: copyNodes },
-    { label: t('users.menu.copyUser'), icon: '👤', onClick: copyUser }
+    { label: t('users.menu.copyUser'), icon: '👤', onClick: copyUser },
+    { label: t('users.menu.copyXrayUser'), icon: '🛠️', onClick: copyXrayUser }
   ]
   if (zipFiles.value.length) {
     items.push({ label: t('users.menu.configDlHeader'), icon: '📦', divider: true, onClick: () => { } })
@@ -490,7 +504,7 @@ onMounted(() => fetchData())
   <ContextMenu v-if="ctxMenu" :x="ctxMenu.x" :y="ctxMenu.y" :title="ctxMenu.user.name" :items="ctxMenuItems()"
     @close="closeCtxMenu" />
 
-  <div v-if="downloadHistoryUser" class="modal-overlay active" @click.self="downloadHistoryUser = null">
+  <div v-if="downloadHistoryUser" class="modal-overlay active" @mousedown.self="downloadHistoryUser = null">
     <div class="modal download-history-modal">
       <div class="modal-header">
         <div class="modal-title">{{ t('users.downloadHistoryTitle', { name: downloadHistoryUser.name }) }}</div>

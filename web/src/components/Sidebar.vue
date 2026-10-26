@@ -267,7 +267,7 @@ const navItems = computed(() => [
     </div>
 
     <!-- Admin Token 设置小弹窗 -->
-    <div v-if="isTokenModalOpen" class="token-popover-mask" @click.self="isTokenModalOpen = false">
+    <div v-if="isTokenModalOpen" class="token-popover-mask" @mousedown.self="isTokenModalOpen = false">
       <div class="token-popover-card">
         <div class="token-popover-header">
           <h4>{{ t('nav.adminTokenTitle') }}</h4>

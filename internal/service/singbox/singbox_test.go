@@ -1,6 +1,7 @@
 package singbox
 
 import (
+	"encoding/json"
 	"testing"
 
 	"noder/internal/model"
@@ -160,6 +161,52 @@ func TestBuildSingboxEndpointOutbound_MultipleRoutesSameNode(t *testing.T) {
 	if ob1["server"] != "hk.example.com" || ob2["server"] != "hk.example.com" {
 		t.Errorf("Expected server hk.example.com")
 	}
+}
+
+func TestGenerateSingboxConfig_IndependentNodeExcludedFromURLTest(t *testing.T) {
+	node1 := &model.Node{
+		ID: 1, Tag: "node-1", Protocol: "vless", ServerAddress: "one.example.com", ServerPort: 443,
+		Security: "reality", SNI: strPtr("one.example.com"), PublicKey: strPtr("public-key-1"),
+		ShortID: strPtr("0001"), Fingerprint: strPtr("chrome"), IsActive: true,
+	}
+	node2 := &model.Node{
+		ID: 2, Tag: "node-2", Protocol: "vless", ServerAddress: "two.example.com", ServerPort: 443,
+		Security: "reality", SNI: strPtr("two.example.com"), PublicKey: strPtr("public-key-2"),
+		ShortID: strPtr("0002"), Fingerprint: strPtr("chrome"), IsActive: true,
+	}
+
+	independentIDs := "[2]"
+	cfg := map[string]interface{}{
+		"outbounds": []interface{}{
+			map[string]interface{}{"type": "selector", "tag": "Proxy", "outbounds": []interface{}{}},
+			map[string]interface{}{"type": "urltest", "tag": "urltest", "outbounds": []interface{}{}},
+		},
+	}
+	result, err := GenerateSingboxConfigFromTemplate(cfg, []*model.Endpoint{
+		{NodeID: &node1.ID, Node: node1, Tag: node1.Tag, UUID: "uuid-1", IsActive: true},
+		{NodeID: &node2.ID, Node: node2, Tag: node2.Tag, UUID: "uuid-2", IsActive: true},
+	}, &model.User{IndependentNodeIDs: &independentIDs})
+	if err != nil {
+		t.Fatalf("GenerateSingboxConfigFromTemplate failed: %v", err)
+	}
+
+	ob, ok := result["outbounds"].([]interface{})
+	if !ok || len(ob) != 4 {
+		t.Fatalf("unexpected outbounds: %#v", result["outbounds"])
+	}
+	selector := ob[0].(map[string]interface{})["outbounds"]
+	urltest := ob[1].(map[string]interface{})["outbounds"]
+	if got, want := mustJSON(selector), `["node-1","node-2"]`; got != want {
+		t.Errorf("selector outbounds = %s, want %s", got, want)
+	}
+	if got, want := mustJSON(urltest), `["node-1"]`; got != want {
+		t.Errorf("urltest outbounds = %s, want %s", got, want)
+	}
+}
+
+func mustJSON(value interface{}) string {
+	b, _ := json.Marshal(value)
+	return string(b)
 }
 
 func strPtr(s string) *string {

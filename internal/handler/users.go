@@ -97,9 +97,12 @@ type EndpointReadResp struct {
 	Node      *model.Node `json:"node,omitempty"`
 }
 
-func resolveEndpointUUID(rawUUID *string) string {
+func resolveEndpointUUID(rawUUID *string, defaultUUID string) string {
 	if rawUUID != nil && strings.TrimSpace(*rawUUID) != "" {
 		return strings.TrimSpace(*rawUUID)
+	}
+	if trimmed := strings.TrimSpace(defaultUUID); trimmed != "" {
+		return trimmed
 	}
 	return uuid.New().String()
 }
@@ -369,7 +372,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			epUUID := resolveEndpointUUID(epIn.UUID)
+			epUUID := resolveEndpointUUID(epIn.UUID, userUUID)
 			epActive := true
 			if epIn.IsActive != nil {
 				epActive = *epIn.IsActive
@@ -700,7 +703,11 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 					trimmed := strings.TrimSpace(uStr)
 					rawUUID = &trimmed
 				}
-				epUUID := resolveEndpointUUID(rawUUID)
+				uuidDefault := user.Token
+				if user.UUID != nil && strings.TrimSpace(*user.UUID) != "" {
+					uuidDefault = *user.UUID
+				}
+				epUUID := resolveEndpointUUID(rawUUID, uuidDefault)
 
 				var epPwd *string
 				if pStr, ok := m["password"].(string); ok && strings.TrimSpace(pStr) != "" {
@@ -897,6 +904,12 @@ func AddUserEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var user model.User
+	if err := db.DB.NewSelect().Model(&user).Where("id = ?", userID).Scan(r.Context()); err != nil {
+		RespondError(w, http.StatusNotFound, "User not found")
+		return
+	}
+
 	var req EndpointInput
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		RespondError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -927,7 +940,11 @@ func AddUserEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	epUUID := resolveEndpointUUID(req.UUID)
+	uuidDefault := user.Token
+	if user.UUID != nil && strings.TrimSpace(*user.UUID) != "" {
+		uuidDefault = *user.UUID
+	}
+	epUUID := resolveEndpointUUID(req.UUID, uuidDefault)
 	isActive := true
 	if req.IsActive != nil {
 		isActive = *req.IsActive

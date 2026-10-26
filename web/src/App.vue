@@ -508,7 +508,7 @@ provide('metrics', updateMetrics)
   </div>
 
   <!-- 移动端 Token 弹窗 -->
-  <div v-if="isMobileTokenModalOpen" class="mobile-token-modal-mask" @click.self="isMobileTokenModalOpen = false">
+  <div v-if="isMobileTokenModalOpen" class="mobile-token-modal-mask" @mousedown.self="isMobileTokenModalOpen = false">
     <div class="mobile-token-modal-card">
       <div class="mobile-token-modal-header">
         <h4>{{ t('nav.adminTokenTitle') }}</h4>

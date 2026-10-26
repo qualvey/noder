@@ -447,7 +447,7 @@ onMounted(fetchData)
   </section>
 
   <!-- 上传分发文件 Modal (UXPilot 风格) -->
-  <div class="modal-overlay" :class="{ active: showModal }" @click.self="!isUploading && (showModal = false)">
+  <div class="modal-overlay" :class="{ active: showModal }" @mousedown.self="!isUploading && (showModal = false)">
     <div class="modal upload-modal">
       <!-- Modal Header -->
       <div class="modal-header">
@@ -749,7 +749,7 @@ onMounted(fetchData)
   </div>
 
   <!-- 文本文件编辑 Modal -->
-  <div class="modal-overlay" :class="{ active: showTextModal }" @click.self="showTextModal = false">
+  <div class="modal-overlay" :class="{ active: showTextModal }" @mousedown.self="showTextModal = false">
     <div class="modal">
       <div class="modal-header">
         <div class="modal-title">{{ t('files.textModal.title') }}{{ textEdit ? `：${textEdit.download_name || textEdit.original_name || textEdit.name}` : '' }}</div>

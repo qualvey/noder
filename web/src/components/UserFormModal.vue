@@ -37,6 +37,7 @@ interface EndpointFormItem {
   id?: number
   node_id: number
   tag: string
+  tagManuallyEdited?: boolean
   uuid: string
   password?: string
   is_active: boolean
@@ -74,8 +75,12 @@ function endpointKey(ep: EndpointFormItem, index: number) {
   return String(ep.id ?? `new-${index}`)
 }
 
+function nodeDefaultTag(node: Node) {
+  return node.node_name || node.tag || `Node-${node.id}`
+}
+
 function nodeLabel(node: Node) {
-  return `${node.node_name || node.tag || `Node-${node.id}`} (${node.protocol.toUpperCase()})`
+  return `${nodeDefaultTag(node)} (${node.protocol.toUpperCase()})`
 }
 
 function filteredNodes(ep: EndpointFormItem, index: number) {
@@ -108,6 +113,11 @@ function chooseNode(ep: EndpointFormItem, node: Node, index: number) {
   activeNodeSelector.value = null
 }
 
+function chooseFirstMatchingNode(ep: EndpointFormItem, index: number) {
+  const firstNode = filteredNodes(ep, index)[0]
+  if (firstNode) chooseNode(ep, firstNode, index)
+}
+
 async function refreshNodes() {
   try {
     availableNodes.value = await api.nodes.list()
@@ -129,6 +139,10 @@ function loadForm(u: User) {
       id: e.id,
       node_id: e.node_id,
       tag: e.tag,
+      tagManuallyEdited: (() => {
+        const node = availableNodes.value.find(n => n.id === e.node_id)
+        return Boolean(e.tag && (!node || e.tag !== nodeDefaultTag(node)))
+      })(),
       uuid: e.uuid,
       password: e.password || '',
       is_active: e.is_active ?? true,
@@ -139,6 +153,7 @@ function loadForm(u: User) {
       return {
         node_id: nid,
         tag: node?.node_name || node?.tag || `Node-${nid}`,
+        tagManuallyEdited: false,
         uuid: u.uuid || '',
         password: u.password || '',
         is_active: true,
@@ -201,8 +216,11 @@ function addEndpoint(nodeId?: number) {
 
   form.endpoints.push({
     node_id: targetNode.id,
-    tag: targetNode.node_name || targetNode.tag || `Node-${targetNode.id}`,
-    uuid: randomUUID(),
+    tag: nodeDefaultTag(targetNode),
+    tagManuallyEdited: false,
+    // Endpoint UUIDs follow the user's UUID by default. The backend also
+    // applies this default when the user UUID is generated on save.
+    uuid: form.uuid || '',
     password: form.password || '',
     is_active: true,
   })
@@ -212,8 +230,9 @@ function addAllNodes() {
   for (const n of availableNodes.value) {
     form.endpoints.push({
       node_id: n.id,
-      tag: n.node_name || n.tag || `Node-${n.id}`,
-      uuid: randomUUID(),
+      tag: nodeDefaultTag(n),
+      tagManuallyEdited: false,
+      uuid: form.uuid || '',
       password: form.password || '',
       is_active: true,
     })
@@ -222,9 +241,13 @@ function addAllNodes() {
 
 function onNodeChange(ep: EndpointFormItem) {
   const node = availableNodes.value.find(n => n.id === ep.node_id)
-  if (node && !ep.tag) {
-    ep.tag = node.node_name || node.tag || `Node-${node.id}`
+  if (node && !ep.tagManuallyEdited) {
+    ep.tag = nodeDefaultTag(node)
   }
+}
+
+function onEndpointTagInput(ep: EndpointFormItem) {
+  ep.tagManuallyEdited = true
 }
 
 function toggleIndependentNode(id: number) {
@@ -276,7 +299,7 @@ async function saveUser() {
       id: ep.id,
       node_id: ep.node_id,
       tag: ep.tag.trim(),
-      uuid: ep.uuid.trim(), // 留空则后端自动生成
+      uuid: ep.uuid.trim(), // 留空则后端使用用户 UUID
       password: ep.password?.trim() || undefined,
       is_active: ep.is_active,
       sort_order: idx,
@@ -303,7 +326,7 @@ async function saveUser() {
 </script>
 
 <template>
-  <div class="modal-overlay" :class="{ active: open }" @click.self="closeModal()">
+  <div class="modal-overlay" :class="{ active: open }" @mousedown.self="closeModal()">
     <div class="modal modal-lg">
       <div class="modal-header">
         <div class="modal-title">{{ editing ? t('users.form.editTitle') : t('users.form.addTitle') }}</div>
@@ -395,7 +418,10 @@ async function saveUser() {
               v-for="(ep, idx) in form.endpoints"
               :key="idx"
               class="endpoint-card"
-              :class="{ 'is-primary': idx === 0 }"
+              :class="{
+                'is-primary': idx === 0,
+                'is-node-select-open': activeNodeSelector === endpointKey(ep, idx),
+              }"
             >
               <div class="endpoint-card-row1">
                 <div style="display: flex; align-items: center; gap: 6px;">
@@ -411,6 +437,7 @@ async function saveUser() {
                     :placeholder="t('users.form.endpointNodePlaceholder')"
                     @focus="focusNodeSelector(ep, idx)"
                     @input="nodeSearch[endpointKey(ep, idx)] = ($event.target as HTMLInputElement).value"
+                    @keydown.enter.prevent="chooseFirstMatchingNode(ep, idx)"
                   />
                   <div
                     v-if="activeNodeSelector === endpointKey(ep, idx)"
@@ -438,6 +465,7 @@ async function saveUser() {
                     class="form-control form-control-sm"
                     :placeholder="t('users.form.endpointTagPlaceholder')"
                     required
+                    @input="onEndpointTagInput(ep)"
                   />
                 </div>
 
@@ -615,6 +643,12 @@ async function saveUser() {
   background: rgba(59, 130, 246, 0.07);
 }
 
+/* 打开节点下拉框时，将当前端点提升到其它端点之上。 */
+.endpoint-card.is-node-select-open {
+  position: relative;
+  z-index: 100;
+}
+
 .endpoint-card-row1 {
   display: flex;
   align-items: center;
@@ -652,7 +686,7 @@ async function saveUser() {
 
 .endpoint-node-options {
   position: absolute;
-  z-index: 20;
+  z-index: 1000;
   top: calc(100% + 3px);
   left: 0;
   right: 0;

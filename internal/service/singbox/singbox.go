@@ -258,11 +258,6 @@ func GenerateSingboxConfigFromTemplate(cfg map[string]interface{}, endpoints []*
 		}
 	}
 
-	cfg, err := LoadSingboxTemplate()
-	if err != nil {
-		return nil, err
-	}
-
 	var rawOutbounds []interface{}
 	if obs, ok := cfg["outbounds"].([]interface{}); ok {
 		rawOutbounds = obs

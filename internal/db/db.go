@@ -79,7 +79,7 @@ func CreateDBAndTables(ctx context.Context) error {
 		INSERT INTO endpoint (user_id, node_id, tag, uuid, password, is_active, sort_order)
 		SELECT l.user_id, l.node_id,
 		       COALESCE(NULLIF(n.tag, ''), n.node_name, 'Node-' || n.id),
-		       COALESCE(NULLIF(u.uuid, ''), lower(hex(randomblob(16)))),
+		       COALESCE(NULLIF(u.uuid, ''), NULLIF(u.token, ''), lower(hex(randomblob(16)))),
 		       u.password,
 		       1,
 		       0
