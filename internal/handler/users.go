@@ -127,35 +127,37 @@ func toEndpointRead(ep *model.Endpoint) EndpointReadResp {
 }
 
 type UserCreateReq struct {
-	Name             string          `json:"name"`
-	ExternalID       *string         `json:"external_id"`
-	IsActive         *bool           `json:"is_active"`
-	Token            *string         `json:"token"`
-	UUID             *string         `json:"uuid"`
-	Password         *string         `json:"password"`
-	Remark           *string         `json:"remark"`
-	ConfigOverride   *string         `json:"config_override"`
-	NodeIDs          []int64         `json:"node_ids"`
-	Endpoints        []EndpointInput `json:"endpoints"`
-	TemplateBranchID *int64          `json:"template_branch_id"`
+	Name               string          `json:"name"`
+	ExternalID         *string         `json:"external_id"`
+	IsActive           *bool           `json:"is_active"`
+	Token              *string         `json:"token"`
+	UUID               *string         `json:"uuid"`
+	Password           *string         `json:"password"`
+	Remark             *string         `json:"remark"`
+	ConfigOverride     *string         `json:"config_override"`
+	NodeIDs            []int64         `json:"node_ids"`
+	Endpoints          []EndpointInput `json:"endpoints"`
+	TemplateBranchID   *int64          `json:"template_branch_id"`
+	IndependentNodeIDs []int64         `json:"independent_node_ids"`
 }
 
 type UserReadResp struct {
-	ID               int64              `json:"id"`
-	ExternalID       *string            `json:"external_id,omitempty"`
-	Name             string             `json:"name"`
-	IsActive         bool               `json:"is_active"`
-	Token            string             `json:"token"`
-	UUID             *string            `json:"uuid"`
-	Password         *string            `json:"password"`
-	Remark           *string            `json:"remark"`
-	ConfigOverride   *string            `json:"config_override"`
-	NodeOrder        *string            `json:"node_order"`
-	NodeIDs          []int64            `json:"node_ids"`
-	Endpoints        []EndpointReadResp `json:"endpoints"`
-	TemplateBranchID *int64             `json:"template_branch_id,omitempty"`
-	DownloadCount    int                `json:"download_count"`
-	LastDownloadAt   *time.Time         `json:"last_download_at,omitempty"`
+	ID                 int64              `json:"id"`
+	ExternalID         *string            `json:"external_id,omitempty"`
+	Name               string             `json:"name"`
+	IsActive           bool               `json:"is_active"`
+	Token              string             `json:"token"`
+	UUID               *string            `json:"uuid"`
+	Password           *string            `json:"password"`
+	Remark             *string            `json:"remark"`
+	ConfigOverride     *string            `json:"config_override"`
+	NodeOrder          *string            `json:"node_order"`
+	NodeIDs            []int64            `json:"node_ids"`
+	Endpoints          []EndpointReadResp `json:"endpoints"`
+	TemplateBranchID   *int64             `json:"template_branch_id,omitempty"`
+	DownloadCount      int                `json:"download_count"`
+	LastDownloadAt     *time.Time         `json:"last_download_at,omitempty"`
+	IndependentNodeIDs []int64            `json:"independent_node_ids"`
 }
 
 type UserDownloadReadResp struct {
@@ -222,20 +224,32 @@ func toUserRead(u *model.User) UserReadResp {
 		epResps = []EndpointReadResp{}
 	}
 	return UserReadResp{
-		ID:               u.ID,
-		ExternalID:       u.ExternalID,
-		Name:             u.Name,
-		IsActive:         u.IsActive,
-		Token:            u.Token,
-		UUID:             u.UUID,
-		Password:         u.Password,
-		Remark:           u.Remark,
-		ConfigOverride:   u.ConfigOverride,
-		NodeOrder:        u.NodeOrder,
-		NodeIDs:          sortedIDs,
-		Endpoints:        epResps,
-		TemplateBranchID: u.TemplateBranchID,
+		ID:                 u.ID,
+		ExternalID:         u.ExternalID,
+		Name:               u.Name,
+		IsActive:           u.IsActive,
+		Token:              u.Token,
+		UUID:               u.UUID,
+		Password:           u.Password,
+		Remark:             u.Remark,
+		ConfigOverride:     u.ConfigOverride,
+		NodeOrder:          u.NodeOrder,
+		NodeIDs:            sortedIDs,
+		Endpoints:          epResps,
+		TemplateBranchID:   u.TemplateBranchID,
+		IndependentNodeIDs: parseIDList(u.IndependentNodeIDs),
 	}
+}
+
+func parseIDList(raw *string) []int64 {
+	if raw == nil {
+		return []int64{}
+	}
+	var ids []int64
+	if json.Unmarshal([]byte(*raw), &ids) != nil || ids == nil {
+		return []int64{}
+	}
+	return ids
 }
 
 func randomHex(bytesLen int) string {
@@ -309,18 +323,25 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		s := string(b)
 		nodeOrder = &s
 	}
+	var independentNodeIDs *string
+	if req.IndependentNodeIDs != nil {
+		b, _ := json.Marshal(req.IndependentNodeIDs)
+		s := string(b)
+		independentNodeIDs = &s
+	}
 
 	user := &model.User{
-		Name:             req.Name,
-		ExternalID:       req.ExternalID,
-		Token:            token,
-		IsActive:         isActive,
-		UUID:             &userUUID,
-		Password:         &userPassword,
-		Remark:           req.Remark,
-		ConfigOverride:   configOverride,
-		NodeOrder:        nodeOrder,
-		TemplateBranchID: req.TemplateBranchID,
+		Name:               req.Name,
+		ExternalID:         req.ExternalID,
+		Token:              token,
+		IsActive:           isActive,
+		UUID:               &userUUID,
+		Password:           &userPassword,
+		Remark:             req.Remark,
+		ConfigOverride:     configOverride,
+		NodeOrder:          nodeOrder,
+		TemplateBranchID:   req.TemplateBranchID,
+		IndependentNodeIDs: independentNodeIDs,
 	}
 
 	if _, err := db.DB.NewInsert().Model(user).Exec(r.Context()); err != nil {
@@ -568,6 +589,23 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if r, ok := body["remark"].(string); ok {
 		user.Remark = &r
+	}
+	if raw, exists := body["independent_node_ids"]; exists {
+		var ids []int64
+		if list, ok := raw.([]interface{}); ok {
+			for _, item := range list {
+				if f, ok := item.(float64); ok {
+					ids = append(ids, int64(f))
+				}
+			}
+		}
+		if len(ids) == 0 {
+			user.IndependentNodeIDs = nil
+		} else {
+			b, _ := json.Marshal(ids)
+			s := string(b)
+			user.IndependentNodeIDs = &s
+		}
 	}
 
 	if rawExtID, exists := body["external_id"]; exists {

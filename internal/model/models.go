@@ -50,21 +50,21 @@ type Node struct {
 type Endpoint struct {
 	bun.BaseModel `bun:"table:endpoint"`
 
-	ID        int64     `bun:"id,pk,autoincrement" json:"id"`
-	UserID    int64     `bun:"user_id,notnull" json:"user_id"`
-	User      *User     `bun:"rel:belongs-to,join:user_id=id" json:"-"`
-	NodeID    *int64    `bun:"node_id" json:"node_id"`
-	Node      *Node     `bun:"rel:belongs-to,join:node_id=id" json:"node,omitempty"`
+	ID     int64  `bun:"id,pk,autoincrement" json:"id"`
+	UserID int64  `bun:"user_id,notnull" json:"user_id"`
+	User   *User  `bun:"rel:belongs-to,join:user_id=id" json:"-"`
+	NodeID *int64 `bun:"node_id" json:"node_id"`
+	Node   *Node  `bun:"rel:belongs-to,join:node_id=id" json:"node,omitempty"`
 
-	Tag       string    `bun:"tag,notnull" json:"tag"`
-	UUID      string    `bun:"uuid,notnull" json:"uuid"`
-	Username  *string   `bun:"username" json:"username,omitempty"`
-	Password  *string   `bun:"password" json:"password,omitempty"`
-	Status    string    `bun:"status,notnull,default:'active'" json:"status"`
-	Country   *string   `bun:"country" json:"country,omitempty"`
-	IsActive  bool      `bun:"is_active,notnull,default:true" json:"is_active"`
-	SortOrder int       `bun:"sort_order,notnull,default:0" json:"sort_order"`
-	Remark    *string   `bun:"remark" json:"remark,omitempty"`
+	Tag       string  `bun:"tag,notnull" json:"tag"`
+	UUID      string  `bun:"uuid,notnull" json:"uuid"`
+	Username  *string `bun:"username" json:"username,omitempty"`
+	Password  *string `bun:"password" json:"password,omitempty"`
+	Status    string  `bun:"status,notnull,default:'active'" json:"status"`
+	Country   *string `bun:"country" json:"country,omitempty"`
+	IsActive  bool    `bun:"is_active,notnull,default:true" json:"is_active"`
+	SortOrder int     `bun:"sort_order,notnull,default:0" json:"sort_order"`
+	Remark    *string `bun:"remark" json:"remark,omitempty"`
 
 	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
@@ -74,23 +74,38 @@ type Endpoint struct {
 type User struct {
 	bun.BaseModel `bun:"table:user"`
 
-	ID               int64   `bun:"id,pk,autoincrement" json:"id"`
-	ExternalID       *string `bun:"external_id,unique" json:"external_id,omitempty"`
-	Name             string  `bun:"name,notnull" json:"name"`
-	Token            string  `bun:"token,notnull,unique" json:"token"`
-	IsActive         bool    `bun:"is_active,notnull,default:true" json:"is_active"`
-	UUID             *string `bun:"uuid" json:"uuid,omitempty"`
-	Password         *string `bun:"password" json:"password,omitempty"`
-	Remark           *string `bun:"remark" json:"remark,omitempty"`
-	ConfigOverride   *string `bun:"config_override" json:"config_override,omitempty"`
-	NodeOrder        *string `bun:"node_order" json:"node_order,omitempty"`
-	TemplateBranchID *int64  `bun:"template_branch_id" json:"template_branch_id,omitempty"`
+	ID                 int64   `bun:"id,pk,autoincrement" json:"id"`
+	ExternalID         *string `bun:"external_id,unique" json:"external_id,omitempty"`
+	Name               string  `bun:"name,notnull" json:"name"`
+	Token              string  `bun:"token,notnull,unique" json:"token"`
+	IsActive           bool    `bun:"is_active,notnull,default:true" json:"is_active"`
+	UUID               *string `bun:"uuid" json:"uuid,omitempty"`
+	Password           *string `bun:"password" json:"password,omitempty"`
+	Remark             *string `bun:"remark" json:"remark,omitempty"`
+	ConfigOverride     *string `bun:"config_override" json:"config_override,omitempty"`
+	NodeOrder          *string `bun:"node_order" json:"node_order,omitempty"`
+	TemplateBranchID   *int64  `bun:"template_branch_id" json:"template_branch_id,omitempty"`
+	IndependentNodeIDs *string `bun:"independent_node_ids" json:"independent_node_ids,omitempty"`
 
 	Endpoints []*Endpoint `bun:"rel:has-many,join:id=user_id" json:"endpoints,omitempty"`
 	Nodes     []*Node     `bun:"m2m:usernodelink,join:User=Node" json:"-"`
 
 	// 序列化时动态装配
 	NodeIDs []int64 `bun:"-" json:"node_ids"`
+}
+
+func (u *User) GetIndependentNodeIDs() map[int64]bool {
+	result := make(map[int64]bool)
+	if u.IndependentNodeIDs == nil {
+		return result
+	}
+	var ids []int64
+	if json.Unmarshal([]byte(*u.IndependentNodeIDs), &ids) == nil {
+		for _, id := range ids {
+			result[id] = true
+		}
+	}
+	return result
 }
 
 // GetSortedNodeIDs 返回该用户实际关联的、按 user.NodeOrder 优先排定的节点 ID 列表
@@ -211,7 +226,7 @@ type TemplateBranch struct {
 
 	ID            int64     `bun:"id,pk,autoincrement" json:"id"`
 	Name          string    `bun:"name,notnull" json:"name"`
-	Target        string    `bun:"target,notnull" json:"target"` // sing-box | mihomo
+	Target        string    `bun:"target,notnull" json:"target"`                 // sing-box | mihomo
 	ContentFormat string    `bun:"content_format,notnull" json:"content_format"` // json | yaml
 	Content       string    `bun:"content,notnull" json:"content"`
 	Remark        *string   `bun:"remark" json:"remark,omitempty"`

@@ -1,10 +1,10 @@
 {
     "log": {
-        "level": "warn",
+        "level": "info",
         "timestamp": true
     },
     "experimental": {
-        "clash_api": {
+	            "clash_api": {
             "external_controller": "0.0.0.0:9090",
             "external_ui": "./zash",
             "external_ui_download_url": "https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip",
@@ -41,6 +41,10 @@
                 "tag": "fakeip",
                 "inet4_range": "198.18.0.0/15",
                 "inet6_range": "fc00::/18"
+            },
+            {
+                "type": "local",
+                "tag": "local"
             }
         ],
         "rules": [
@@ -50,31 +54,11 @@
                 ],
                 "action": "reject"
             },
-            {
-                "query_type": [
-                    "SVCB",
-                    "HTTPS",
-                    "PTR"
-                ],
-                "action": "reject"
-            },
-            {
-                "domain": [
-                      "abs.twimg.com",
-                      "pbs.twimg.com"
+	          {
+        "query_type": ["SVCB", "HTTPS", "PTR"],
 
-                ],
-                "server": "fakeip"
-            },
-            {
-                "domain": [
-                        "pbs.twimg.com.cdn.cloudflare.net",
-                        "abs.twimg.com.cdn.cloudflare.net"
-
-                ],
-                "client_subnet": "118.160.0.0/24",
-                "server": "google"
-            },
+        "action": "reject"
+      },
             {
                 "clash_mode": "global",
                 "server": "google"
@@ -114,13 +98,13 @@
             "listen": "127.0.0.1",
             "listen_port": 8080
         },
-        {
+	        {
             "tag": "tun-in",
             "interface_name": "sing-tun",
             "type": "tun",
             "address": [
                 "172.19.0.0/30",
-                "fdfe:dcba:9876::1/126"
+		"fdfe:dcba:9876::1/126"
             ],
             "mtu": 1400,
             "auto_route": true,
@@ -191,21 +175,11 @@
                 "action": "hijack-dns"
             },
             {
-                "domain": "pbs.twimg.com",
-                "action": "route-options",
-                 "override_address": "pbs.twimg.com.cdn.cloudflare.net"
-            },
-                        {
-                "domain": "abs.twimg.com",
-                "action": "route-options",
-                 "override_address": "abs.twimg.com.cdn.cloudflare.net"
-            },
-            {
                 "clash_mode": "direct",
                 "action": "bypass",
                 "outbound": "direct"
             },
-            {
+                        {
                 "type": "logical",
                 "mode": "and",
                 "rules": [
@@ -216,7 +190,7 @@
                         ]
                     }
                 ],
-                "outbound": "Proxy"
+		"outbound": "Proxy"
             },
             {
                 "protocol": "bittorrent",

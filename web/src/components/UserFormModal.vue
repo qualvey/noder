@@ -2,7 +2,7 @@
 // 用户新增/编辑表单弹窗
 // 包含：用户基础信息 / 快捷凭证提取 / 节点端点 (Endpoints) 灵活配置 / config_override
 // 契约：props { open, editing, nodes }，emits { close, saved }
-import { computed, inject, reactive, ref, watch } from 'vue'
+import { inject, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { Node, User } from '../types'
@@ -50,6 +50,8 @@ const form = reactive({
   password: '',
   config_override: '',
   endpoints: [] as EndpointFormItem[],
+  node_ids: [] as number[],
+  independent_node_ids: [] as number[],
 })
 
 function resetForm() {
@@ -61,6 +63,8 @@ function resetForm() {
     password: '',
     config_override: '',
     endpoints: [],
+    node_ids: [],
+    independent_node_ids: [],
   })
   showExtract.value = false
   extractInput.value = ''
@@ -149,6 +153,8 @@ function loadForm(u: User) {
     password: u.password || '',
     config_override: u.config_override || '',
     endpoints: eps,
+    node_ids: [...u.node_ids],
+    independent_node_ids: [...(u.independent_node_ids || [])],
   })
   showExtract.value = false
   extractInput.value = ''
@@ -221,6 +227,12 @@ function onNodeChange(ep: EndpointFormItem) {
   }
 }
 
+function toggleIndependentNode(id: number) {
+  const idx = form.independent_node_ids.indexOf(id)
+  if (idx >= 0) form.independent_node_ids.splice(idx, 1)
+  else form.independent_node_ids.push(id)
+}
+
 function moveEndpointToTop(index: number) {
   if (index <= 0 || index >= form.endpoints.length) return
   const [target] = form.endpoints.splice(index, 1)
@@ -270,6 +282,7 @@ async function saveUser() {
       sort_order: idx,
     })),
     node_ids: Array.from(new Set(form.endpoints.map(e => e.node_id))),
+    independent_node_ids: form.independent_node_ids,
     is_active: true,
   }
   try {
@@ -343,6 +356,16 @@ async function saveUser() {
           <textarea v-model="form.config_override" class="form-control" rows="3" style="font-family: var(--font-mono); font-size: 0.78rem"
             :placeholder="t('users.form.configOverridePlaceholder')"></textarea>
           <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px">{{ t('users.form.configOverrideTip') }}</div>
+        </div>
+        <div class="form-group form-span">
+          <label>{{ t('users.form.independentNodes') }}</label>
+          <div class="checkboxes-group">
+            <label v-for="node in nodes" :key="`independent-${node.id}`" class="checkbox-label">
+              <input type="checkbox" :checked="form.independent_node_ids.includes(node.id)" @change="toggleIndependentNode(node.id)" />
+              {{ node.node_name }} <span style="color: var(--text-muted); font-size: 0.72rem">({{ node.protocol }})</span>
+            </label>
+          </div>
+          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px">{{ t('users.form.independentNodesTip') }}</div>
         </div>
 
         <!-- 节点端点 (Endpoints) 区域 -->

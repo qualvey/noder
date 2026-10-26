@@ -46,6 +46,7 @@ export interface User {
   node_ids: number[]
   endpoints?: Endpoint[]
   template_branch_id?: number | null
+  independent_node_ids: number[]
   download_count: number
   last_download_at?: string | null
 }

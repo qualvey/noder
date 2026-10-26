@@ -241,6 +241,11 @@ func GenerateSingboxConfigFromTemplate(cfg map[string]interface{}, endpoints []*
 
 	var nodeOutbounds []map[string]interface{}
 	var nodeTags []string
+	independent := make(map[int64]bool)
+	if user != nil {
+		independent = user.GetIndependentNodeIDs()
+	}
+	var urlTestTags []string
 	for _, ep := range activeEndpoints {
 		ob, err := BuildSingboxEndpointOutbound(ep)
 		if err != nil {
@@ -248,6 +253,14 @@ func GenerateSingboxConfigFromTemplate(cfg map[string]interface{}, endpoints []*
 		}
 		nodeOutbounds = append(nodeOutbounds, ob)
 		nodeTags = append(nodeTags, ep.Tag)
+		if ep.NodeID == nil || !independent[*ep.NodeID] {
+			urlTestTags = append(urlTestTags, ep.Tag)
+		}
+	}
+
+	cfg, err := LoadSingboxTemplate()
+	if err != nil {
+		return nil, err
 	}
 
 	var rawOutbounds []interface{}
@@ -278,7 +291,7 @@ func GenerateSingboxConfigFromTemplate(cfg map[string]interface{}, endpoints []*
 				ob["outbounds"] = existingList
 			} else if tag == "urltest" || obType == "urltest" {
 				var tagInterfaces []interface{}
-				for _, nt := range nodeTags {
+				for _, nt := range urlTestTags {
 					tagInterfaces = append(tagInterfaces, nt)
 				}
 				ob["outbounds"] = tagInterfaces

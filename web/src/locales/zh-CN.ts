@@ -202,6 +202,8 @@ export default {
       configOverridePlaceholder: "{'{'}\"route\": {'{'}...{'}'}, \"dns\": {'{'}...{'}'}{'}'}",
       configOverrideTip: '每用户独立覆盖 sing-box 配置的 route / dns 整段，其他字段不可覆盖。留空则使用默认模板。',
       boundNodes: '绑定上游节点 (支持多选)',
+      independentNodes: '独立节点 (不加入 urltest)',
+      independentNodesTip: '独立节点仍会加入 Proxy，但不会写入 urltest。',
       noNodes: '暂无节点，请先在节点管理创建',
       nodeOrdering: '节点顺序编排 (第 1 个节点为客户端默认首选出口)',
       primaryNodeBadge: '★ 首选',

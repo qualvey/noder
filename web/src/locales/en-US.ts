@@ -199,6 +199,8 @@ export default {
       configOverridePlaceholder: "{'{'}\"route\": {'{'}...{'}'}, \"dns\": {'{'}...{'}'}{'}'}",
       configOverrideTip: 'Override sing-box route / dns sections per user. Other fields cannot be overridden. Leave empty for default template.',
       boundNodes: 'Bound Upstream Nodes (Multi-select)',
+      independentNodes: 'Independent Nodes (exclude from urltest)',
+      independentNodesTip: 'Independent nodes remain in Proxy but are excluded from urltest.',
       noNodes: 'No nodes available. Please create nodes first.',
       nodeOrdering: 'Node Priority & Ordering (First node is primary default outlet)',
       primaryNodeBadge: '★ Primary',

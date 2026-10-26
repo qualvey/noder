@@ -99,7 +99,7 @@ func CreateDBAndTables(ctx context.Context) error {
 	_, _ = DB.ExecContext(ctx, "UPDATE node SET tag = node_name WHERE tag IS NULL OR tag = ''")
 	_, _ = DB.ExecContext(ctx, "UPDATE node SET transport_type = NULL, path = NULL WHERE protocol = 'tuic'")
 
-	userCols := []string{"remark", "config_override", "node_order", "template_branch_id", "external_id"}
+	userCols := []string{"remark", "config_override", "node_order", "template_branch_id", "external_id", "independent_node_ids"}
 	for _, col := range userCols {
 		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE user ADD COLUMN %s VARCHAR", col))
 	}
