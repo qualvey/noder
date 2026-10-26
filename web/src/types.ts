@@ -29,6 +29,7 @@ export interface Endpoint {
   uuid: string
   password?: string | null
   is_active?: boolean
+  is_urltest?: boolean
   sort_order?: number
   remark?: string | null
   node?: Node

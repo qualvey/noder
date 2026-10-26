@@ -107,11 +107,25 @@ func CreateDBAndTables(ctx context.Context) error {
 		return err
 	}
 
-	endpointCols := []string{"username", "status", "country"}
+	endpointCols := []string{"username", "status", "country", "is_urltest"}
 	for _, col := range endpointCols {
 		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE endpoint ADD COLUMN %s VARCHAR", col))
 	}
 	_, _ = DB.ExecContext(ctx, "UPDATE endpoint SET status = 'active' WHERE status IS NULL OR status = ''")
+	// Migrate the former node-level urltest exclusion to endpoint-level flags.
+	_, _ = DB.ExecContext(ctx, "UPDATE endpoint SET is_urltest = 1 WHERE is_urltest IS NULL")
+	_, _ = DB.ExecContext(ctx, `
+		UPDATE endpoint
+		SET is_urltest = 0
+		WHERE node_id IS NOT NULL
+		  AND EXISTS (
+			SELECT 1 FROM user u
+			WHERE u.id = endpoint.user_id
+			  AND (',' || replace(replace(replace(COALESCE(u.independent_node_ids, ''), '[', ''), ']', ''), ' ', '') || ',')
+			      LIKE '%,' || CAST(endpoint.node_id AS TEXT) || ',%'
+		  )
+	`)
+	_, _ = DB.ExecContext(ctx, "UPDATE user SET independent_node_ids = NULL WHERE independent_node_ids IS NOT NULL")
 
 	fileCols := []string{"source_url", "cached_at", "download_name"}
 	for _, col := range fileCols {

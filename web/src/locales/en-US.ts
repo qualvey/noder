@@ -223,6 +223,7 @@ export default {
       endpointUuid: 'Outbound UUID',
       endpointUuidPlaceholder: 'Defaults to user UUID; enter to override',
       endpointPassword: 'Password (Optional)',
+      endpointUrltest: 'Include in urltest',
       noEndpoints: 'No endpoints configured yet. Click above to add.',
     },
   },

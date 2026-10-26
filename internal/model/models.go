@@ -63,6 +63,7 @@ type Endpoint struct {
 	Status    string  `bun:"status,notnull,default:'active'" json:"status"`
 	Country   *string `bun:"country" json:"country,omitempty"`
 	IsActive  bool    `bun:"is_active,notnull,default:true" json:"is_active"`
+	IsURLTest *bool   `bun:"is_urltest,notnull,default:true" json:"is_urltest"`
 	SortOrder int     `bun:"sort_order,notnull,default:0" json:"sort_order"`
 	Remark    *string `bun:"remark" json:"remark,omitempty"`
 

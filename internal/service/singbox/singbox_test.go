@@ -163,19 +163,14 @@ func TestBuildSingboxEndpointOutbound_MultipleRoutesSameNode(t *testing.T) {
 	}
 }
 
-func TestGenerateSingboxConfig_IndependentNodeExcludedFromURLTest(t *testing.T) {
+func TestGenerateSingboxConfig_EndpointURLTestMembership(t *testing.T) {
 	node1 := &model.Node{
 		ID: 1, Tag: "node-1", Protocol: "vless", ServerAddress: "one.example.com", ServerPort: 443,
 		Security: "reality", SNI: strPtr("one.example.com"), PublicKey: strPtr("public-key-1"),
 		ShortID: strPtr("0001"), Fingerprint: strPtr("chrome"), IsActive: true,
 	}
-	node2 := &model.Node{
-		ID: 2, Tag: "node-2", Protocol: "vless", ServerAddress: "two.example.com", ServerPort: 443,
-		Security: "reality", SNI: strPtr("two.example.com"), PublicKey: strPtr("public-key-2"),
-		ShortID: strPtr("0002"), Fingerprint: strPtr("chrome"), IsActive: true,
-	}
-
-	independentIDs := "[2]"
+	useURLTest := true
+	excludeFromURLTest := false
 	cfg := map[string]interface{}{
 		"outbounds": []interface{}{
 			map[string]interface{}{"type": "selector", "tag": "Proxy", "outbounds": []interface{}{}},
@@ -183,9 +178,9 @@ func TestGenerateSingboxConfig_IndependentNodeExcludedFromURLTest(t *testing.T) 
 		},
 	}
 	result, err := GenerateSingboxConfigFromTemplate(cfg, []*model.Endpoint{
-		{NodeID: &node1.ID, Node: node1, Tag: node1.Tag, UUID: "uuid-1", IsActive: true},
-		{NodeID: &node2.ID, Node: node2, Tag: node2.Tag, UUID: "uuid-2", IsActive: true},
-	}, &model.User{IndependentNodeIDs: &independentIDs})
+		{NodeID: &node1.ID, Node: node1, Tag: "node-1-default", UUID: "uuid-1", IsActive: true, IsURLTest: &useURLTest},
+		{NodeID: &node1.ID, Node: node1, Tag: "node-1-dns", UUID: "uuid-2", IsActive: true, IsURLTest: &excludeFromURLTest},
+	}, nil)
 	if err != nil {
 		t.Fatalf("GenerateSingboxConfigFromTemplate failed: %v", err)
 	}
@@ -196,10 +191,10 @@ func TestGenerateSingboxConfig_IndependentNodeExcludedFromURLTest(t *testing.T) 
 	}
 	selector := ob[0].(map[string]interface{})["outbounds"]
 	urltest := ob[1].(map[string]interface{})["outbounds"]
-	if got, want := mustJSON(selector), `["node-1","node-2"]`; got != want {
+	if got, want := mustJSON(selector), `["node-1-default","node-1-dns"]`; got != want {
 		t.Errorf("selector outbounds = %s, want %s", got, want)
 	}
-	if got, want := mustJSON(urltest), `["node-1"]`; got != want {
+	if got, want := mustJSON(urltest), `["node-1-default"]`; got != want {
 		t.Errorf("urltest outbounds = %s, want %s", got, want)
 	}
 }

@@ -34,3 +34,5 @@ web/pages-dist/
 *.log
 .aider*
 
+
+/templates/sing-box-1.14.2-linux-amd64

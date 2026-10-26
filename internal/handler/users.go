@@ -77,6 +77,7 @@ type EndpointInput struct {
 	Status    *string `json:"status,omitempty"`
 	Country   *string `json:"country,omitempty"`
 	IsActive  *bool   `json:"is_active,omitempty"`
+	IsURLTest *bool   `json:"is_urltest,omitempty"`
 	SortOrder *int    `json:"sort_order,omitempty"`
 	Remark    *string `json:"remark,omitempty"`
 }
@@ -92,6 +93,7 @@ type EndpointReadResp struct {
 	Status    string      `json:"status"`
 	Country   *string     `json:"country,omitempty"`
 	IsActive  bool        `json:"is_active"`
+	IsURLTest bool        `json:"is_urltest"`
 	SortOrder int         `json:"sort_order"`
 	Remark    *string     `json:"remark,omitempty"`
 	Node      *model.Node `json:"node,omitempty"`
@@ -123,10 +125,25 @@ func toEndpointRead(ep *model.Endpoint) EndpointReadResp {
 		Status:    status,
 		Country:   ep.Country,
 		IsActive:  ep.IsActive,
+		IsURLTest: endpointUsesURLTest(ep),
 		SortOrder: ep.SortOrder,
 		Remark:    ep.Remark,
 		Node:      ep.Node,
 	}
+}
+
+func endpointUsesURLTest(ep *model.Endpoint) bool {
+	return ep == nil || ep.IsURLTest == nil || *ep.IsURLTest
+}
+
+func endpointURLTestValue(input *bool, independentNodeIDs map[int64]bool, nodeID *int64) *bool {
+	value := true
+	if input != nil {
+		value = *input
+	} else if nodeID != nil && independentNodeIDs[*nodeID] {
+		value = false
+	}
+	return &value
 }
 
 type UserCreateReq struct {
@@ -357,6 +374,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		var endpoints []*model.Endpoint
 		var nodeIDs []int64
 		nodeSeen := make(map[int64]bool)
+		independentNodeIDs := user.GetIndependentNodeIDs()
 		for idx, epIn := range req.Endpoints {
 			var epNodeID *int64
 			if epIn.NodeID != nil && *epIn.NodeID > 0 {
@@ -397,6 +415,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 				Status:    epStatus,
 				Country:   epIn.Country,
 				IsActive:  epActive,
+				IsURLTest: endpointURLTestValue(epIn.IsURLTest, independentNodeIDs, epNodeID),
 				SortOrder: sortOrder,
 				Remark:    epIn.Remark,
 			})
@@ -422,6 +441,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	} else if req.NodeIDs != nil && len(req.NodeIDs) > 0 {
 		var links []*model.UserNodeLink
 		var endpoints []*model.Endpoint
+		independentNodeIDs := user.GetIndependentNodeIDs()
 		for idx, nid := range req.NodeIDs {
 			links = append(links, &model.UserNodeLink{UserID: user.ID, NodeID: nid})
 			var n model.Node
@@ -441,6 +461,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 				Password:  &userPassword,
 				Status:    "active",
 				IsActive:  true,
+				IsURLTest: endpointURLTestValue(nil, independentNodeIDs, &nidCopy),
 				SortOrder: idx,
 			})
 		}
@@ -672,6 +693,7 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 			var endpoints []*model.Endpoint
 			var nodeIDs []int64
 			nodeSeen := make(map[int64]bool)
+			independentNodeIDs := user.GetIndependentNodeIDs()
 
 			for idx, item := range epList {
 				m, ok := item.(map[string]interface{})
@@ -719,6 +741,10 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 				if act, ok := m["is_active"].(bool); ok {
 					isActive = act
 				}
+				var isURLTestInput *bool
+				if value, ok := m["is_urltest"].(bool); ok {
+					isURLTestInput = &value
+				}
 
 				sortOrder := idx
 				if so, ok := m["sort_order"].(float64); ok {
@@ -743,6 +769,7 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 					Password:  epPwd,
 					Status:    "active",
 					IsActive:  isActive,
+					IsURLTest: endpointURLTestValue(isURLTestInput, independentNodeIDs, epNodeID),
 					SortOrder: sortOrder,
 					Remark:    epRemark,
 				})
@@ -786,6 +813,7 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 			if len(newIDs) > 0 {
 				var links []*model.UserNodeLink
 				var endpoints []*model.Endpoint
+				independentNodeIDs := user.GetIndependentNodeIDs()
 				uUUID := user.Token
 				if user.UUID != nil && *user.UUID != "" {
 					uUUID = *user.UUID
@@ -809,6 +837,7 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 						Password:  user.Password,
 						Status:    "active",
 						IsActive:  true,
+						IsURLTest: endpointURLTestValue(nil, independentNodeIDs, &nidCopy),
 						SortOrder: idx,
 					})
 				}
@@ -945,6 +974,7 @@ func AddUserEndpoint(w http.ResponseWriter, r *http.Request) {
 		uuidDefault = *user.UUID
 	}
 	epUUID := resolveEndpointUUID(req.UUID, uuidDefault)
+	isURLTest := endpointURLTestValue(req.IsURLTest, user.GetIndependentNodeIDs(), nodeIDPtr)
 	isActive := true
 	if req.IsActive != nil {
 		isActive = *req.IsActive
@@ -974,6 +1004,7 @@ func AddUserEndpoint(w http.ResponseWriter, r *http.Request) {
 		Status:    status,
 		Country:   req.Country,
 		IsActive:  isActive,
+		IsURLTest: isURLTest,
 		SortOrder: sortOrder,
 		Remark:    req.Remark,
 	}
@@ -1033,6 +1064,9 @@ func UpdateUserEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 	if u, ok := body["uuid"].(string); ok && strings.TrimSpace(u) != "" {
 		ep.UUID = strings.TrimSpace(u)
+	}
+	if value, ok := body["is_urltest"].(bool); ok {
+		ep.IsURLTest = &value
 	}
 	if pwd, ok := body["password"].(string); ok {
 		ep.Password = &pwd

@@ -41,6 +41,7 @@ interface EndpointFormItem {
   uuid: string
   password?: string
   is_active: boolean
+  is_urltest: boolean
 }
 
 const form = reactive({
@@ -52,7 +53,6 @@ const form = reactive({
   config_override: '',
   endpoints: [] as EndpointFormItem[],
   node_ids: [] as number[],
-  independent_node_ids: [] as number[],
 })
 
 function resetForm() {
@@ -65,7 +65,6 @@ function resetForm() {
     config_override: '',
     endpoints: [],
     node_ids: [],
-    independent_node_ids: [],
   })
   showExtract.value = false
   extractInput.value = ''
@@ -134,6 +133,7 @@ function closeModal(clearDraft = false) {
 
 function loadForm(u: User) {
   let eps: EndpointFormItem[] = []
+  const legacyIndependentNodeIDs = new Set(u.independent_node_ids || [])
   if (u.endpoints && u.endpoints.length) {
     eps = u.endpoints.map(e => ({
       id: e.id,
@@ -146,6 +146,7 @@ function loadForm(u: User) {
       uuid: e.uuid,
       password: e.password || '',
       is_active: e.is_active ?? true,
+      is_urltest: e.is_urltest ?? !legacyIndependentNodeIDs.has(e.node_id),
     }))
   } else if (u.node_ids && u.node_ids.length) {
     eps = u.node_ids.map(nid => {
@@ -157,6 +158,7 @@ function loadForm(u: User) {
         uuid: u.uuid || '',
         password: u.password || '',
         is_active: true,
+        is_urltest: !legacyIndependentNodeIDs.has(nid),
       }
     })
   }
@@ -169,7 +171,6 @@ function loadForm(u: User) {
     config_override: u.config_override || '',
     endpoints: eps,
     node_ids: [...u.node_ids],
-    independent_node_ids: [...(u.independent_node_ids || [])],
   })
   showExtract.value = false
   extractInput.value = ''
@@ -223,6 +224,7 @@ function addEndpoint(nodeId?: number) {
     uuid: form.uuid || '',
     password: form.password || '',
     is_active: true,
+    is_urltest: true,
   })
 }
 
@@ -235,6 +237,7 @@ function addAllNodes() {
       uuid: form.uuid || '',
       password: form.password || '',
       is_active: true,
+      is_urltest: true,
     })
   }
 }
@@ -248,12 +251,6 @@ function onNodeChange(ep: EndpointFormItem) {
 
 function onEndpointTagInput(ep: EndpointFormItem) {
   ep.tagManuallyEdited = true
-}
-
-function toggleIndependentNode(id: number) {
-  const idx = form.independent_node_ids.indexOf(id)
-  if (idx >= 0) form.independent_node_ids.splice(idx, 1)
-  else form.independent_node_ids.push(id)
 }
 
 function moveEndpointToTop(index: number) {
@@ -302,10 +299,10 @@ async function saveUser() {
       uuid: ep.uuid.trim(), // 留空则后端使用用户 UUID
       password: ep.password?.trim() || undefined,
       is_active: ep.is_active,
+      is_urltest: ep.is_urltest ?? true,
       sort_order: idx,
     })),
     node_ids: Array.from(new Set(form.endpoints.map(e => e.node_id))),
-    independent_node_ids: form.independent_node_ids,
     is_active: true,
   }
   try {
@@ -380,17 +377,6 @@ async function saveUser() {
             :placeholder="t('users.form.configOverridePlaceholder')"></textarea>
           <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px">{{ t('users.form.configOverrideTip') }}</div>
         </div>
-        <div class="form-group form-span">
-          <label>{{ t('users.form.independentNodes') }}</label>
-          <div class="checkboxes-group">
-            <label v-for="node in nodes" :key="`independent-${node.id}`" class="checkbox-label">
-              <input type="checkbox" :checked="form.independent_node_ids.includes(node.id)" @change="toggleIndependentNode(node.id)" />
-              {{ node.node_name }} <span style="color: var(--text-muted); font-size: 0.72rem">({{ node.protocol }})</span>
-            </label>
-          </div>
-          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px">{{ t('users.form.independentNodesTip') }}</div>
-        </div>
-
         <!-- 节点端点 (Endpoints) 区域 -->
         <div class="form-group form-span endpoints-section">
           <div class="endpoints-header">
@@ -510,6 +496,11 @@ async function saveUser() {
               </div>
 
               <div class="endpoint-card-row2">
+                <label class="endpoint-urltest-toggle">
+                  <input v-model="ep.is_urltest" type="checkbox" />
+                  {{ t('users.form.endpointUrltest') }}
+                </label>
+
                 <div class="endpoint-uuid-wrap">
                   <span class="field-label-sm">UUID</span>
                   <input
@@ -742,6 +733,16 @@ async function saveUser() {
   padding-top: 4px;
   border-top: 1px dashed rgba(255, 255, 255, 0.05);
   flex-wrap: wrap;
+}
+
+.endpoint-urltest-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
 }
 
 .endpoint-uuid-wrap {

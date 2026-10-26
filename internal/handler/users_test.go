@@ -31,9 +31,12 @@ func TestUserEndpointsDefaultToUserUUID(t *testing.T) {
 	RegisterUserRoutes(r)
 
 	createBody, _ := json.Marshal(map[string]interface{}{
-		"name":      "endpoint-uuid-default-test",
-		"uuid":      "user-uuid-default",
-		"endpoints": []map[string]interface{}{{"node_id": 1, "tag": "default-endpoint"}},
+		"name": "endpoint-uuid-default-test",
+		"uuid": "user-uuid-default",
+		"endpoints": []map[string]interface{}{
+			{"node_id": 1, "tag": "default-endpoint", "is_urltest": false},
+			{"node_id": 1, "tag": "urltest-endpoint", "is_urltest": true},
+		},
 	})
 	createReq := httptest.NewRequest(http.MethodPost, "/api/users/", bytes.NewReader(createBody))
 	createReq.Header.Set("X-Admin-Token", "admin-secret")
@@ -47,8 +50,11 @@ func TestUserEndpointsDefaultToUserUUID(t *testing.T) {
 	if err := json.Unmarshal(createResp.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode created user: %v", err)
 	}
-	if len(created.Endpoints) != 1 || created.Endpoints[0].UUID != "user-uuid-default" {
+	if len(created.Endpoints) != 2 || created.Endpoints[0].UUID != "user-uuid-default" || created.Endpoints[1].UUID != "user-uuid-default" {
 		t.Fatalf("created endpoint did not inherit user UUID: %#v", created.Endpoints)
+	}
+	if created.Endpoints[0].IsURLTest || !created.Endpoints[1].IsURLTest {
+		t.Fatalf("endpoint-level urltest flags were not preserved: %#v", created.Endpoints)
 	}
 
 	addBody, _ := json.Marshal(map[string]interface{}{"node_id": 2, "tag": "added-endpoint"})
@@ -66,6 +72,9 @@ func TestUserEndpointsDefaultToUserUUID(t *testing.T) {
 	}
 	if added.UUID != "user-uuid-default" {
 		t.Fatalf("added endpoint UUID = %q, want user UUID", added.UUID)
+	}
+	if !added.IsURLTest {
+		t.Fatal("new endpoint should join urltest by default")
 	}
 
 	if added.UserID != created.ID || added.Node == nil {
