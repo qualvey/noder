@@ -226,6 +226,7 @@ export default {
        endpointUuid: '出站 UUID',
        endpointUuidPlaceholder: '默认使用用户 UUID，可手动覆盖',
        endpointPassword: '密码 (可选)',
+       endpointActive: '启用端点（参与节点渲染）',
        endpointUrltest: '加入 urltest',
        noEndpoints: '尚未配置端点，请点击上方按钮添加',
     },

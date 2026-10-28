@@ -59,6 +59,8 @@ VLESS 使用 Reality 时需要同时提供 `public_key`、`short_id`、`sni` 和
 
 用户响应包含 UUID 和密码，应按敏感信息处理。
 
+用户端点（`endpoints`）的 `is_active` 字段控制该端点是否参与订阅节点渲染；关闭后端点仍保留，但不会出现在 Sing-box、Mihomo、Xray 或节点列表输出中。`is_urltest` 仅控制端点是否加入 Sing-box 的 `urltest` 组。
+
 ### DistFile（分发文件）
 
 `file_type` 为 `apk`、`zip` 或 `text`。ZIP 可指定 `template_name`，用户用

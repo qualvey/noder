@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/uptrace/bun"
 	"noder/internal/db"
 	"noder/internal/model"
 	"noder/internal/service/file"
@@ -85,7 +86,13 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 	var matchedUser *model.User
 	if !isSharedAuth {
 		var u model.User
-		err := db.DB.NewSelect().Model(&u).Relation("Nodes").Where("user.token = ?", token).Scan(r.Context())
+		err := db.DB.NewSelect().Model(&u).
+			Relation("Nodes").
+			Relation("Endpoints", func(q *bun.SelectQuery) *bun.SelectQuery {
+				return q.Order("endpoint.sort_order ASC", "endpoint.id ASC")
+			}).
+			Relation("Endpoints.Node").
+			Where("user.token = ?", token).Scan(r.Context())
 		if err == nil && u.IsActive {
 			matchedUser = &u
 		}
@@ -158,7 +165,7 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		renderedZip, err := template.RenderZipForUserWithProgress(data, dist.TemplateName, matchedUser, matchedUser.Nodes, knownTokens, func(processed, total uint64) {
+		renderedZip, err := template.RenderZipForUserWithProgressFromEndpoints(data, dist.TemplateName, matchedUser, getUserActiveEndpoints(matchedUser), knownTokens, func(processed, total uint64) {
 			if progressID == "" {
 				return
 			}

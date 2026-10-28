@@ -496,6 +496,10 @@ async function saveUser() {
               </div>
 
               <div class="endpoint-card-row2">
+                <label class="endpoint-active-toggle">
+                  <input v-model="ep.is_active" type="checkbox" />
+                  {{ t('users.form.endpointActive') }}
+                </label>
                 <label class="endpoint-urltest-toggle">
                   <input v-model="ep.is_urltest" type="checkbox" />
                   {{ t('users.form.endpointUrltest') }}
@@ -741,6 +745,16 @@ async function saveUser() {
   gap: 5px;
   white-space: nowrap;
   color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.endpoint-active-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  color: var(--text-main);
   font-size: 0.75rem;
   cursor: pointer;
 }

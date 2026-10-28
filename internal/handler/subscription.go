@@ -46,6 +46,9 @@ func getActiveUser(ctx context.Context, token string) (*model.User, error) {
 }
 
 func getUserActiveEndpoints(user *model.User) []*model.Endpoint {
+	// Once endpoint records exist, they are the source of truth. Do not fall
+	// back to the legacy user-node links when all endpoints are disabled:
+	// an explicitly disabled endpoint must not be rendered.
 	if len(user.Endpoints) > 0 {
 		var res []*model.Endpoint
 		for _, ep := range user.Endpoints {
@@ -53,9 +56,7 @@ func getUserActiveEndpoints(user *model.User) []*model.Endpoint {
 				res = append(res, ep)
 			}
 		}
-		if len(res) > 0 {
-			return res
-		}
+		return res
 	}
 
 	// 兜底：兼容只有 usernodelink 的存量情况

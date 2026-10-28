@@ -35,3 +35,20 @@ func TestUserGetActiveEndpointsExcludesSocks5(t *testing.T) {
 		t.Fatalf("expected protocol vless, got %s", active[0].Node.Protocol)
 	}
 }
+
+func TestUserGetActiveEndpointsDoesNotFallbackWhenEndpointsDisabled(t *testing.T) {
+	node := &model.Node{ID: 1, Protocol: "vless", IsActive: true}
+	nid := int64(1)
+	user := &model.User{
+		IsActive: true,
+		Nodes:    []*model.Node{node},
+		Endpoints: []*model.Endpoint{
+			{ID: 1, UserID: 1, NodeID: &nid, Node: node, IsActive: false},
+		},
+	}
+
+	active := getUserActiveEndpoints(user)
+	if len(active) != 0 {
+		t.Fatalf("expected disabled endpoint to be excluded without legacy fallback, got %d", len(active))
+	}
+}
