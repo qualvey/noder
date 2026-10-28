@@ -56,15 +56,20 @@ type Endpoint struct {
 	NodeID *int64 `bun:"node_id" json:"node_id"`
 	Node   *Node  `bun:"rel:belongs-to,join:node_id=id" json:"node,omitempty"`
 
-	Tag       string  `bun:"tag,notnull" json:"tag"`
-	UUID      string  `bun:"uuid,notnull" json:"uuid"`
-	Username  *string `bun:"username" json:"username,omitempty"`
-	Password  *string `bun:"password" json:"password,omitempty"`
-	Status    string  `bun:"status,notnull,default:'active'" json:"status"`
-	Country   *string `bun:"country" json:"country,omitempty"`
-	IsActive  bool    `bun:"is_active,notnull,default:true" json:"is_active"`
-	IsURLTest *bool   `bun:"is_urltest,notnull,default:true" json:"is_urltest"`
-	SortOrder int     `bun:"sort_order,notnull,default:0" json:"sort_order"`
+	Tag      string  `bun:"tag,notnull" json:"tag"`
+	UUID     string  `bun:"uuid,notnull" json:"uuid"`
+	Username *string `bun:"username" json:"username,omitempty"`
+	Password *string `bun:"password" json:"password,omitempty"`
+	Status   string  `bun:"status,notnull,default:'active'" json:"status"`
+	Country  *string `bun:"country" json:"country,omitempty"`
+	// Do not declare a Bun default here. Bun treats zero values on INSERT as
+	// DEFAULT when the field has a SQL default, which turns an explicitly
+	// disabled endpoint back on (the database default is true).
+	IsActive  bool  `bun:"is_active,notnull" json:"is_active"`
+	IsURLTest *bool `bun:"is_urltest,notnull,default:true" json:"is_urltest"`
+	// Zero is a valid order. A Bun default would make multi-row inserts derive
+	// the INSERT columns from the first row and drop later non-zero values.
+	SortOrder int     `bun:"sort_order,notnull" json:"sort_order"`
 	Remark    *string `bun:"remark" json:"remark,omitempty"`
 
 	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`

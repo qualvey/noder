@@ -34,8 +34,8 @@ func TestUserEndpointsDefaultToUserUUID(t *testing.T) {
 		"name": "endpoint-uuid-default-test",
 		"uuid": "user-uuid-default",
 		"endpoints": []map[string]interface{}{
-			{"node_id": 1, "tag": "default-endpoint", "is_urltest": false},
-			{"node_id": 1, "tag": "urltest-endpoint", "is_urltest": true},
+			{"node_id": 1, "tag": "default-endpoint", "is_active": false, "is_urltest": false, "sort_order": 0},
+			{"node_id": 1, "tag": "urltest-endpoint", "is_active": true, "is_urltest": true, "sort_order": 1},
 		},
 	})
 	createReq := httptest.NewRequest(http.MethodPost, "/api/users/", bytes.NewReader(createBody))
@@ -55,6 +55,36 @@ func TestUserEndpointsDefaultToUserUUID(t *testing.T) {
 	}
 	if created.Endpoints[0].IsURLTest || !created.Endpoints[1].IsURLTest {
 		t.Fatalf("endpoint-level urltest flags were not preserved: %#v", created.Endpoints)
+	}
+	if created.Endpoints[0].IsActive || !created.Endpoints[1].IsActive {
+		t.Fatalf("endpoint-level active flags were not preserved: %#v", created.Endpoints)
+	}
+	if created.Endpoints[0].SortOrder != 0 || created.Endpoints[1].SortOrder != 1 {
+		t.Fatalf("endpoint sort order was not preserved: %#v", created.Endpoints)
+	}
+
+	updateBody, _ := json.Marshal(map[string]interface{}{
+		"endpoints": []map[string]interface{}{
+			{"node_id": 1, "tag": "default-endpoint", "is_active": false, "is_urltest": false, "sort_order": 0},
+			{"node_id": 2, "tag": "enabled-endpoint", "is_active": true, "is_urltest": true, "sort_order": 1},
+		},
+	})
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/users/"+userTestFormatID(created.ID), bytes.NewReader(updateBody))
+	updateReq.Header.Set("X-Admin-Token", "admin-secret")
+	updateResp := httptest.NewRecorder()
+	r.ServeHTTP(updateResp, updateReq)
+	if updateResp.Code != http.StatusOK {
+		t.Fatalf("update user returned %d: %s", updateResp.Code, updateResp.Body.String())
+	}
+	var updated UserReadResp
+	if err := json.Unmarshal(updateResp.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated user: %v", err)
+	}
+	if len(updated.Endpoints) != 2 || updated.Endpoints[0].IsActive || !updated.Endpoints[1].IsActive {
+		t.Fatalf("updated endpoint active flags were not preserved: %#v", updated.Endpoints)
+	}
+	if updated.Endpoints[0].SortOrder != 0 || updated.Endpoints[1].SortOrder != 1 {
+		t.Fatalf("updated endpoint sort order was not preserved: %#v", updated.Endpoints)
 	}
 
 	addBody, _ := json.Marshal(map[string]interface{}{"node_id": 2, "tag": "added-endpoint"})
