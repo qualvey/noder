@@ -243,6 +243,20 @@ func RenderZipForUser(zipData []byte, templateName *string, user *model.User, no
 }
 
 func RenderZipForUserWithProgress(zipData []byte, templateName *string, user *model.User, nodes []*model.Node, knownTokens []string, onProgress func(processed, total uint64)) ([]byte, error) {
+	return renderZipForUserWithProgress(zipData, templateName, user, knownTokens, func(data []byte) map[string]string {
+		return BuildTemplateContext(user, nodes, strings.Contains(string(data), MihomoPlaceholder))
+	}, onProgress)
+}
+
+// RenderZipForUserWithProgressFromEndpoints renders a user ZIP using endpoint
+// records as the source of truth, including each endpoint's is_active switch.
+func RenderZipForUserWithProgressFromEndpoints(zipData []byte, templateName *string, user *model.User, endpoints []*model.Endpoint, knownTokens []string, onProgress func(processed, total uint64)) ([]byte, error) {
+	return renderZipForUserWithProgress(zipData, templateName, user, knownTokens, func(data []byte) map[string]string {
+		return BuildTemplateContextFromEndpoints(user, endpoints, strings.Contains(string(data), MihomoPlaceholder))
+	}, onProgress)
+}
+
+func renderZipForUserWithProgress(zipData []byte, templateName *string, user *model.User, knownTokens []string, buildContext func([]byte) map[string]string, onProgress func(processed, total uint64)) ([]byte, error) {
 	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
 		return nil, err
@@ -303,7 +317,7 @@ func RenderZipForUserWithProgress(zipData []byte, templateName *string, user *mo
 			if err != nil {
 				return nil, err
 			}
-			ctx := BuildTemplateContext(user, nodes, strings.Contains(string(data), MihomoPlaceholder))
+			ctx := buildContext(data)
 			rendered := []byte(RenderTemplateTextWithContext(string(data), user, ctx, knownTokens))
 
 			header := f.FileHeader
