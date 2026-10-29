@@ -153,6 +153,14 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 
 	// 用户下载 ZIP：进行模板渲染
 	if matchedUser != nil && dist.FileType == "zip" {
+		templateType := template.TemplateTypeSing
+		templateName := ""
+		if dist.TemplateName != nil {
+			templateName = *dist.TemplateName
+		}
+		if detected, detectErr := template.DetectTemplateTypeFromZip(data, templateName); detectErr == nil && detected != "" {
+			templateType = detected
+		}
 		if progressID != "" {
 			publishDownloadProgress(progressID, 10, "准备模板与用户数据", false)
 		}
@@ -165,7 +173,7 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		renderedZip, err := template.RenderZipForUserWithProgressFromEndpoints(data, dist.TemplateName, matchedUser, getUserActiveEndpoints(matchedUser), knownTokens, func(processed, total uint64) {
+		renderedZip, err := template.RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL(data, dist.TemplateName, matchedUser, getUserActiveEndpoints(matchedUser), knownTokens, templateType, getBaseURL(r), func(processed, total uint64) {
 			if progressID == "" {
 				return
 			}

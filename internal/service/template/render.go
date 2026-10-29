@@ -15,14 +15,126 @@ import (
 	"noder/internal/model"
 	"noder/internal/service/mihomo"
 	"noder/internal/service/singbox"
+	"noder/internal/service/xray"
 )
 
 const MihomoPlaceholder = "{{mihomo_proxies_yaml}}"
 
+const (
+	TemplateTypeAuto = "auto"
+	TemplateTypeSing = "sing-box"
+	TemplateTypeXray = "xray"
+)
+
+func NormalizeTemplateType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case TemplateTypeXray:
+		return TemplateTypeXray
+	case TemplateTypeSing, "singbox", "sing_box":
+		return TemplateTypeSing
+	case "", TemplateTypeAuto:
+		return TemplateTypeAuto
+	default:
+		return ""
+	}
+}
+
+func DetectTemplateType(data []byte) string {
+	var value interface{}
+	if json.Unmarshal(data, &value) == nil {
+		if detected := detectTemplateTypeValue(value); detected != "" {
+			return detected
+		}
+	}
+	var yamlValue interface{}
+	if yaml.Unmarshal(data, &yamlValue) == nil {
+		if detected := detectTemplateTypeValue(yamlValue); detected != "" {
+			return detected
+		}
+	}
+	lower := strings.ToLower(string(data))
+	if strings.Contains(lower, "xray_bin") || strings.Contains(lower, "xray.exe") || strings.Contains(lower, "/xray") {
+		return TemplateTypeXray
+	}
+	if strings.Contains(lower, "sing_box_bin") || strings.Contains(lower, "sing-box.exe") || strings.Contains(lower, "/sub") {
+		return TemplateTypeSing
+	}
+	return ""
+}
+
+func DetectTemplateTypeFromZip(zipData []byte, templateName string) (string, error) {
+	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		return "", err
+	}
+	target := filepath.Base(templateName)
+	for _, entry := range zr.File {
+		if target == "" {
+			lower := strings.ToLower(entry.Name)
+			if !strings.HasSuffix(lower, ".json") && !strings.HasSuffix(lower, ".yaml") && !strings.HasSuffix(lower, ".yml") {
+				continue
+			}
+		}
+		if target != "" && filepath.Base(entry.Name) != target && entry.Name != templateName {
+			continue
+		}
+		rc, err := entry.Open()
+		if err != nil {
+			return "", err
+		}
+		data, readErr := io.ReadAll(rc)
+		_ = rc.Close()
+		if readErr != nil {
+			return "", readErr
+		}
+		return DetectTemplateType(data), nil
+	}
+	return "", zip.ErrFormat
+}
+
+func detectTemplateTypeValue(value interface{}) string {
+	root, ok := value.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	for _, section := range []string{"outbounds", "inbounds"} {
+		items, ok := root[section].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, item := range items {
+			object, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if _, ok := object["protocol"]; ok {
+				return TemplateTypeXray
+			}
+			if _, ok := object["type"]; ok {
+				return TemplateTypeSing
+			}
+		}
+	}
+	return ""
+}
+
 func BuildTemplateContextFromEndpoints(user *model.User, endpoints []*model.Endpoint, includeMihomo bool) map[string]string {
+	return BuildTemplateContextFromEndpointsForTargetWithBaseURL(user, endpoints, includeMihomo, TemplateTypeSing, "")
+}
+
+func BuildTemplateContextFromEndpointsForTarget(user *model.User, endpoints []*model.Endpoint, includeMihomo bool, templateType string) map[string]string {
+	return BuildTemplateContextFromEndpointsForTargetWithBaseURL(user, endpoints, includeMihomo, templateType, "")
+}
+
+func BuildTemplateContextFromEndpointsForTargetWithBaseURL(user *model.User, endpoints []*model.Endpoint, includeMihomo bool, templateType string, baseURL string) map[string]string {
+	templateType = NormalizeTemplateType(templateType)
+	if templateType == TemplateTypeAuto || templateType == "" {
+		templateType = TemplateTypeSing
+	}
 	var activeEndpoints []*model.Endpoint
 	for _, ep := range endpoints {
-		if ep.IsActive && ep.Node != nil && ep.Node.IsActive {
+		if ep.IsActive && ep.Node != nil && ep.Node.IsActive &&
+			(templateType != TemplateTypeXray || ep.Node.Protocol == "vless") {
 			activeEndpoints = append(activeEndpoints, ep)
 		}
 	}
@@ -38,11 +150,21 @@ func BuildTemplateContextFromEndpoints(user *model.User, endpoints []*model.Endp
 		})
 	}
 
-	var outbounds []map[string]interface{}
+	var singboxOutbounds []map[string]interface{}
 	for _, ep := range activeEndpoints {
 		if ob, err := singbox.BuildSingboxEndpointOutbound(ep); err == nil {
-			outbounds = append(outbounds, ob)
+			singboxOutbounds = append(singboxOutbounds, ob)
 		}
+	}
+	var xrayOutbounds []map[string]interface{}
+	for _, ep := range activeEndpoints {
+		if ob, err := xray.BuildXrayEndpointOutbound(ep); err == nil {
+			xrayOutbounds = append(xrayOutbounds, ob)
+		}
+	}
+	outbounds := singboxOutbounds
+	if templateType == TemplateTypeXray {
+		outbounds = xrayOutbounds
 	}
 
 	yamlDump := func(obj interface{}) string {
@@ -75,15 +197,31 @@ func BuildTemplateContextFromEndpoints(user *model.User, endpoints []*model.Endp
 	}
 
 	ctx := map[string]string{
-		"uuid":           uuidStr,
-		"password":       pwdStr,
-		"token":          user.Token,
-		"name":           user.Name,
-		"user_name":      user.Name,
-		"node_list_yaml": yamlDump(nodeMeta),
-		"node_list_json": jsonIndent(nodeMeta),
-		"outbounds_yaml": yamlDump(outbounds),
-		"outbounds_json": jsonIndent(outbounds),
+		"uuid":                   uuidStr,
+		"password":               pwdStr,
+		"token":                  user.Token,
+		"name":                   user.Name,
+		"user_name":              user.Name,
+		"node_list_yaml":         yamlDump(nodeMeta),
+		"node_list_json":         jsonIndent(nodeMeta),
+		"outbounds_yaml":         yamlDump(outbounds),
+		"outbounds_json":         jsonIndent(outbounds),
+		"singbox_outbounds_yaml": yamlDump(singboxOutbounds),
+		"singbox_outbounds_json": jsonIndent(singboxOutbounds),
+		"xray_outbounds_yaml":    yamlDump(xrayOutbounds),
+		"xray_outbounds_json":    jsonIndent(xrayOutbounds),
+	}
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL != "" {
+		ctx["singbox_config_url"] = baseURL + "/sub"
+		ctx["xray_config_url"] = baseURL + "/xray"
+	}
+	if templateType != TemplateTypeXray {
+		if config, err := singbox.GenerateSingboxConfigFromEndpoints(activeEndpoints, user); err == nil {
+			ctx["singbox_config_json"] = jsonIndent(config)
+		}
+	} else if config, err := xray.GenerateXrayConfigFromEndpoints(activeEndpoints, user); err == nil {
+		ctx["xray_config_json"] = jsonIndent(config)
 	}
 
 	if includeMihomo {
@@ -130,6 +268,92 @@ func BuildTemplateContext(user *model.User, nodes []*model.Node, includeMihomo b
 }
 
 var keyedPattern = regexp.MustCompile(`(?i)(["']?[\w.\-]*?(?:token|uuid|password)["']?\s*[:=]\s*)(["']?)([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(["']?)`)
+var placeholderPattern = regexp.MustCompile(`\{\{\s*([A-Za-z0-9_]+)\s*\}\}`)
+
+func isLauncherEntry(name string) bool {
+	base := strings.ToLower(filepath.Base(name))
+	return base == "config.yaml" || base == "config.yml" || base == "config.json"
+}
+
+func shouldRenderLauncherEntry(name string, data []byte, templateType string) bool {
+	text := strings.ToLower(string(data))
+	base := strings.ToLower(filepath.Base(name))
+	if (base == "config.yaml" || base == "config.yml") && strings.Contains(text, "upstream_url:") {
+		return strings.Contains(text, "xray_bin:") ||
+			strings.Contains(text, "sing_box_bin:") ||
+			templateType == TemplateTypeXray ||
+			strings.Contains(text, "{{xray_config_url}}") ||
+			strings.Contains(text, "{{singbox_config_url}}")
+	}
+	if base != "config.json" {
+		return false
+	}
+	for _, placeholder := range []string{"{{xray_config_json}}", "{{xray_outbounds_json}}", "{{singbox_config_json}}", "{{singbox_outbounds_json}}"} {
+		if strings.Contains(text, placeholder) {
+			return true
+		}
+	}
+	return false
+}
+
+// RenderLauncherConfigText also handles launcher archives that contain the
+// old example values instead of Noder placeholders.
+func RenderLauncherConfigText(text string, user *model.User, ctx map[string]string) string {
+	if user == nil {
+		return text
+	}
+	lines := strings.SplitAfter(text, "\n")
+	for i, line := range lines {
+		ending := ""
+		body := line
+		if strings.HasSuffix(body, "\n") {
+			ending = "\n"
+			body = strings.TrimSuffix(body, "\n")
+		}
+		if strings.HasSuffix(body, "\r") {
+			ending = "\r" + ending
+			body = strings.TrimSuffix(body, "\r")
+		}
+		colon := strings.IndexByte(body, ':')
+		if colon < 0 {
+			continue
+		}
+		key := strings.TrimSpace(body[:colon])
+		replacement := ""
+		switch key {
+		case "upstream_url":
+			replacement = ctx["xray_config_url"]
+			if replacement == "" {
+				replacement = ctx["singbox_config_url"]
+			}
+		case "token":
+			replacement = user.Token
+		default:
+			continue
+		}
+		if replacement == "" {
+			continue
+		}
+		value := strings.TrimSpace(body[colon+1:])
+		suffix := ""
+		if comment := strings.IndexByte(value, '#'); comment >= 0 {
+			suffix = value[comment:]
+			value = strings.TrimSpace(value[:comment])
+		}
+		quote := ""
+		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
+			quote = value[:1]
+		}
+		spaces := body[colon+1:]
+		spaces = spaces[:len(spaces)-len(strings.TrimLeft(spaces, " \t"))]
+		lines[i] = body[:colon+1] + spaces + quote + replacement + quote
+		if suffix != "" {
+			lines[i] += " " + suffix
+		}
+		lines[i] += ending
+	}
+	return strings.Join(lines, "")
+}
 
 func readAllWithProgress(r io.Reader, onRead func(uint64)) ([]byte, error) {
 	var data bytes.Buffer
@@ -197,6 +421,15 @@ func RenderTemplateTextWithContext(text string, user *model.User, ctx map[string
 	for k, v := range ctx {
 		text = strings.ReplaceAll(text, "{{"+k+"}}", v)
 	}
+	text = placeholderPattern.ReplaceAllStringFunc(text, func(m string) string {
+		sub := placeholderPattern.FindStringSubmatch(m)
+		if len(sub) == 2 {
+			if value, ok := ctx[sub[1]]; ok {
+				return value
+			}
+		}
+		return m
+	})
 
 	// 键名感知替换
 	text = keyedPattern.ReplaceAllStringFunc(text, func(m string) string {
@@ -245,18 +478,26 @@ func RenderZipForUser(zipData []byte, templateName *string, user *model.User, no
 func RenderZipForUserWithProgress(zipData []byte, templateName *string, user *model.User, nodes []*model.Node, knownTokens []string, onProgress func(processed, total uint64)) ([]byte, error) {
 	return renderZipForUserWithProgress(zipData, templateName, user, knownTokens, func(data []byte) map[string]string {
 		return BuildTemplateContext(user, nodes, strings.Contains(string(data), MihomoPlaceholder))
-	}, onProgress)
+	}, TemplateTypeSing, onProgress)
 }
 
 // RenderZipForUserWithProgressFromEndpoints renders a user ZIP using endpoint
 // records as the source of truth, including each endpoint's is_active switch.
 func RenderZipForUserWithProgressFromEndpoints(zipData []byte, templateName *string, user *model.User, endpoints []*model.Endpoint, knownTokens []string, onProgress func(processed, total uint64)) ([]byte, error) {
-	return renderZipForUserWithProgress(zipData, templateName, user, knownTokens, func(data []byte) map[string]string {
-		return BuildTemplateContextFromEndpoints(user, endpoints, strings.Contains(string(data), MihomoPlaceholder))
-	}, onProgress)
+	return RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL(zipData, templateName, user, endpoints, knownTokens, TemplateTypeSing, "", onProgress)
 }
 
-func renderZipForUserWithProgress(zipData []byte, templateName *string, user *model.User, knownTokens []string, buildContext func([]byte) map[string]string, onProgress func(processed, total uint64)) ([]byte, error) {
+func RenderZipForUserWithProgressFromEndpointsForTarget(zipData []byte, templateName *string, user *model.User, endpoints []*model.Endpoint, knownTokens []string, templateType string, onProgress func(processed, total uint64)) ([]byte, error) {
+	return RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL(zipData, templateName, user, endpoints, knownTokens, templateType, "", onProgress)
+}
+
+func RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL(zipData []byte, templateName *string, user *model.User, endpoints []*model.Endpoint, knownTokens []string, templateType string, baseURL string, onProgress func(processed, total uint64)) ([]byte, error) {
+	return renderZipForUserWithProgress(zipData, templateName, user, knownTokens, func(data []byte) map[string]string {
+		return BuildTemplateContextFromEndpointsForTargetWithBaseURL(user, endpoints, strings.Contains(string(data), MihomoPlaceholder), templateType, baseURL)
+	}, templateType, onProgress)
+}
+
+func renderZipForUserWithProgress(zipData []byte, templateName *string, user *model.User, knownTokens []string, buildContext func([]byte) map[string]string, templateType string, onProgress func(processed, total uint64)) ([]byte, error) {
 	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
 		return nil, err
@@ -265,16 +506,34 @@ func renderZipForUserWithProgress(zipData []byte, templateName *string, user *mo
 	if templateName != nil && *templateName != "" {
 		targetName = filepath.Base(*templateName)
 	}
+	launcherEntries := make(map[string]bool)
+	for _, f := range zr.File {
+		if !isLauncherEntry(f.Name) {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		data, readErr := io.ReadAll(rc)
+		_ = rc.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if shouldRenderLauncherEntry(f.Name, data, templateType) {
+			launcherEntries[f.Name] = true
+		}
+	}
 
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	var totalWeight uint64
 	for _, f := range zr.File {
-		totalWeight += zipEntryProgressWeight(f, targetName == "" || filepath.Base(f.Name) == targetName)
+		totalWeight += zipEntryProgressWeight(f, targetName == "" || filepath.Base(f.Name) == targetName || launcherEntries[f.Name])
 	}
 	var processedWeight uint64
 	for _, f := range zr.File {
-		renderedEntry := targetName == "" || filepath.Base(f.Name) == targetName
+		renderedEntry := targetName == "" || filepath.Base(f.Name) == targetName || launcherEntries[f.Name]
 		weight := zipEntryProgressWeight(f, renderedEntry)
 		if !renderedEntry {
 			raw, err := f.OpenRaw()
@@ -318,7 +577,11 @@ func renderZipForUserWithProgress(zipData []byte, templateName *string, user *mo
 				return nil, err
 			}
 			ctx := buildContext(data)
-			rendered := []byte(RenderTemplateTextWithContext(string(data), user, ctx, knownTokens))
+			renderedText := RenderTemplateTextWithContext(string(data), user, ctx, knownTokens)
+			if launcherEntries[f.Name] && (strings.EqualFold(filepath.Ext(f.Name), ".yaml") || strings.EqualFold(filepath.Ext(f.Name), ".yml")) {
+				renderedText = RenderLauncherConfigText(renderedText, user, ctx)
+			}
+			rendered := []byte(renderedText)
 
 			header := f.FileHeader
 			header.Method = zip.Store

@@ -36,3 +36,34 @@ web/pages-dist/
 
 
 /templates/sing-box-1.14.2-linux-amd64
+xray-launcher/xray.exe
+Xray-windows-64/geoip.dat
+Xray-windows-64/geosite.dat
+Xray-windows-64/LICENSE
+Xray-windows-64/LICENSE-Wintun
+Xray-windows-64/README.md
+Xray-windows-64/wintun.dll
+Xray-windows-64/xray_no_window.cmd
+Xray-windows-64/xray_no_window.ps1
+Xray-windows-64/xray_no_window.vbs
+Xray-windows-64/xray.exe
+xray-launcher/README.md
+xray-launcher/wintun.dll
+xray-launcher/xray
+xray-launcher/xray_no_window.cmd
+xray-launcher/xray_no_window.ps1
+xray-launcher/xray_no_window.vbs
+xray-launcher/LICENSE-Wintun
+sing-launcher/config.yaml
+sing-launcher/launch.ps1
+sing-launcher/libcronet.dll
+sing-launcher/sing-box.exe
+sing-launcher/start.bat
+sing-launcher/使用说明.txt
+xray-launcher/config.json
+xray-launcher/geoip.dat
+xray-launcher/geosite.dat
+xray-launcher/LICENSE
+xray.zip
+.gitignore
+server

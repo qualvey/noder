@@ -31,6 +31,63 @@ func TestRenderTemplateText(t *testing.T) {
 	}
 }
 
+func TestRenderXrayLauncherConfigReplacesExampleValues(t *testing.T) {
+	var source bytes.Buffer
+	writer := zip.NewWriter(&source)
+	config, err := writer.Create("xray-launcher/config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Write([]byte(`{{xray_config_json}}`)); err != nil {
+		t.Fatal(err)
+	}
+	launcher, err := writer.Create("xray-launcher/config.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := launcher.Write([]byte("upstream_url: \"https://example.com/xray\"\ntoken: \"replace-with-user-token\"\nconfig_file: \"config.json\"\nxray_bin: \"./xray.exe\"\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	user := &model.User{Token: "real-user-token"}
+	rendered, err := RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL(source.Bytes(), stringPtr("config.json"), user, nil, nil, TemplateTypeXray, "http://localhost:8000", nil)
+	if err != nil {
+		t.Fatalf("rendering Xray launcher ZIP failed: %v", err)
+	}
+	result, err := zip.NewReader(bytes.NewReader(rendered), int64(len(rendered)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range result.File {
+		if entry.Name != "xray-launcher/config.yml" {
+			continue
+		}
+		rc, err := entry.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := string(data)
+		if !strings.Contains(got, `upstream_url: "http://localhost:8000/xray"`) {
+			t.Fatalf("upstream URL was not rendered: %s", got)
+		}
+		if !strings.Contains(got, `token: "real-user-token"`) {
+			t.Fatalf("launcher token was not rendered: %s", got)
+		}
+		return
+	}
+	t.Fatal("rendered ZIP did not contain launcher config.yml")
+}
+
+func stringPtr(value string) *string { return &value }
+
 func TestRenderZipForUser(t *testing.T) {
 	// 创建内存 ZIP
 	var buf bytes.Buffer
