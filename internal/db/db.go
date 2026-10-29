@@ -127,7 +127,7 @@ func CreateDBAndTables(ctx context.Context) error {
 	`)
 	_, _ = DB.ExecContext(ctx, "UPDATE user SET independent_node_ids = NULL WHERE independent_node_ids IS NOT NULL")
 
-	fileCols := []string{"source_url", "cached_at", "download_name"}
+	fileCols := []string{"source_url", "cached_at", "download_name", "template_type"}
 	for _, col := range fileCols {
 		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE distfile ADD COLUMN %s VARCHAR", col))
 	}
@@ -335,7 +335,18 @@ func loadXrayTemplateJSON() string {
 	if data, err := os.ReadFile(config.XrayTemplatePath); err == nil && len(data) > 0 {
 		return string(data)
 	}
-	return `{"outbounds": []}`
+	return `{
+  "log": {"loglevel": "warning"},
+  "inbounds": [{
+    "listen": "127.0.0.1",
+    "port": 1080,
+    "protocol": "socks",
+    "settings": {"auth": "noauth", "udp": true},
+    "tag": "socks-in"
+  }],
+  "outbounds": [],
+  "routing": {"domainStrategy": "AsIs", "rules": []}
+}`
 }
 
 func strPtr(s string) *string {

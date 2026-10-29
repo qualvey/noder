@@ -17,6 +17,7 @@ import (
 	"noder/internal/db"
 	"noder/internal/model"
 	"noder/internal/service/file"
+	templateService "noder/internal/service/template"
 )
 
 func RegisterFileRoutes(r chi.Router) {
@@ -33,6 +34,60 @@ func RegisterFileRoutes(r chi.Router) {
 		r.Put("/{id}", UpdateFile)
 		r.Delete("/{id}", DeleteFile)
 	})
+}
+
+// resolveZipTemplateMetadata validates the selected member and determines the
+// configuration core. Explicit types are checked against the file when it is
+// recognizable; placeholder-only custom templates remain valid.
+func resolveZipTemplateMetadata(content []byte, requestedName, requestedType string) (string, string, error) {
+	zr, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
+	if err != nil {
+		return "", "", fmt.Errorf("无效的 ZIP 文件")
+	}
+
+	templateName := strings.TrimSpace(requestedName)
+	if templateName == "" {
+		for _, entry := range zr.File {
+			lower := strings.ToLower(entry.Name)
+			if strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml") || strings.HasSuffix(lower, ".json") {
+				templateName = entry.Name
+				break
+			}
+		}
+		if templateName == "" {
+			return "", "", fmt.Errorf("ZIP 内未找到 .json/.yaml/.yml 模板，请指定模板文件名")
+		}
+	} else {
+		matched := false
+		baseName := filepath.Base(templateName)
+		for _, entry := range zr.File {
+			if entry.Name == templateName || filepath.Base(entry.Name) == baseName {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return "", "", fmt.Errorf("ZIP 中不存在模板文件: %s", templateName)
+		}
+	}
+
+	templateType := templateService.NormalizeTemplateType(requestedType)
+	if templateType == "" {
+		return "", "", fmt.Errorf("不支持的模板类型 %q，仅支持 auto、sing-box 或 xray", requestedType)
+	}
+	detectedType, detectErr := templateService.DetectTemplateTypeFromZip(content, templateName)
+	if detectErr != nil {
+		return "", "", detectErr
+	}
+	if templateType == templateService.TemplateTypeAuto {
+		templateType = detectedType
+		if templateType == "" {
+			templateType = templateService.TemplateTypeSing
+		}
+	} else if detectedType != "" && detectedType != templateType {
+		return "", "", fmt.Errorf("模板类型不匹配：选择了 %s，但内容分析为 %s", templateType, detectedType)
+	}
+	return templateName, templateType, nil
 }
 
 func ListFiles(w http.ResponseWriter, r *http.Request) {
@@ -92,45 +147,17 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	remark := r.FormValue("remark")
 	templateName := r.FormValue("template_name")
+	templateType := r.FormValue("template_type")
 	downloadName := r.FormValue("download_name")
 	forceStr := r.FormValue("force")
 	force := forceStr == "true" || forceStr == "1"
 
 	if fileType == "zip" {
-		zr, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
-		if err != nil {
-			RespondError(w, http.StatusBadRequest, "无效的 ZIP 文件")
+		var resolveErr error
+		templateName, templateType, resolveErr = resolveZipTemplateMetadata(content, templateName, templateType)
+		if resolveErr != nil {
+			RespondError(w, http.StatusBadRequest, resolveErr.Error())
 			return
-		}
-		var names []string
-		for _, f := range zr.File {
-			names = append(names, f.Name)
-		}
-		if templateName == "" {
-			for _, n := range names {
-				lower := strings.ToLower(n)
-				if strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml") || strings.HasSuffix(lower, ".json") {
-					templateName = n
-					break
-				}
-			}
-			if templateName == "" {
-				RespondError(w, http.StatusBadRequest, "ZIP 内未找到 .yaml/.yml 模板，请指定模板文件名")
-				return
-			}
-		} else {
-			matched := false
-			baseTpl := filepath.Base(templateName)
-			for _, n := range names {
-				if filepath.Base(n) == baseTpl || n == templateName {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				RespondError(w, http.StatusBadRequest, fmt.Sprintf("ZIP 中不存在模板文件: %s", templateName))
-				return
-			}
 		}
 	}
 
@@ -158,6 +185,9 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		// 覆盖现有文件
 		dup.Size = int64(len(content))
 		dup.Name = name
+		if fileType == "zip" {
+			dup.TemplateType = templateType
+		}
 		if templateName != "" {
 			dup.TemplateName = &templateName
 		}
@@ -176,6 +206,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 	dist := &model.DistFile{
 		Name:         name,
 		FileType:     fileType,
+		TemplateType: templateType,
 		OriginalName: originalName,
 		StoredName:   file.GenerateStoredName(originalName),
 		Size:         int64(len(content)),
@@ -212,6 +243,8 @@ func CreateRemoteFile(w http.ResponseWriter, r *http.Request) {
 		Remark       *string `json:"remark"`
 		DownloadName *string `json:"download_name"`
 		FileType     *string `json:"file_type"`
+		TemplateName *string `json:"template_name"`
+		TemplateType *string `json:"template_type"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		RespondError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -234,6 +267,22 @@ func CreateRemoteFile(w http.ResponseWriter, r *http.Request) {
 	if body.FileType != nil && *body.FileType != "" {
 		ft = *body.FileType
 	}
+	templateName := ""
+	templateType := ""
+	if body.TemplateName != nil {
+		templateName = *body.TemplateName
+	}
+	if body.TemplateType != nil {
+		templateType = *body.TemplateType
+	}
+	if ft == "zip" {
+		var resolveErr error
+		templateName, templateType, resolveErr = resolveZipTemplateMetadata(content, templateName, templateType)
+		if resolveErr != nil {
+			RespondError(w, http.StatusBadRequest, resolveErr.Error())
+			return
+		}
+	}
 	name := origName
 	if body.Name != nil && *body.Name != "" {
 		name = *body.Name
@@ -243,6 +292,7 @@ func CreateRemoteFile(w http.ResponseWriter, r *http.Request) {
 	dist := &model.DistFile{
 		Name:         name,
 		FileType:     ft,
+		TemplateType: templateType,
 		OriginalName: origName,
 		StoredName:   file.GenerateStoredName(origName),
 		Size:         int64(len(content)),
@@ -252,6 +302,9 @@ func CreateRemoteFile(w http.ResponseWriter, r *http.Request) {
 		Remark:       body.Remark,
 		DownloadName: body.DownloadName,
 		CreatedAt:    cachedAt,
+	}
+	if templateName != "" {
+		dist.TemplateName = &templateName
 	}
 
 	if _, err := db.DB.NewInsert().Model(dist).Exec(r.Context()); err != nil {
@@ -423,6 +476,30 @@ func UpdateFile(w http.ResponseWriter, r *http.Request) {
 	}
 	if tplName, ok := body["template_name"].(string); ok {
 		dist.TemplateName = &tplName
+	}
+	if tplType, ok := body["template_type"].(string); ok {
+		normalized := templateService.NormalizeTemplateType(tplType)
+		if normalized == "" {
+			RespondError(w, http.StatusBadRequest, "不支持的模板类型，仅支持 auto、sing-box 或 xray")
+			return
+		}
+		if dist.FileType == "zip" {
+			content, err := file.ReadFileContent(&dist)
+			if err != nil {
+				RespondError(w, http.StatusInternalServerError, "读取 ZIP 文件失败: "+err.Error())
+				return
+			}
+			name := ""
+			if dist.TemplateName != nil {
+				name = *dist.TemplateName
+			}
+			_, normalized, err = resolveZipTemplateMetadata(content, name, normalized)
+			if err != nil {
+				RespondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		dist.TemplateType = normalized
 	}
 
 	_, _ = db.DB.NewUpdate().Model(&dist).Where("id = ?", id).Exec(r.Context())

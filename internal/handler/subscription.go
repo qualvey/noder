@@ -93,6 +93,20 @@ func getUserActiveEndpoints(user *model.User) []*model.Endpoint {
 	return res
 }
 
+func getUserActiveEndpointsForTemplate(user *model.User, templateType string) []*model.Endpoint {
+	endpoints := getUserActiveEndpoints(user)
+	if template.NormalizeTemplateType(templateType) != template.TemplateTypeXray {
+		return endpoints
+	}
+	var vlessEndpoints []*model.Endpoint
+	for _, ep := range endpoints {
+		if ep.Node != nil && ep.Node.Protocol == "vless" {
+			vlessEndpoints = append(vlessEndpoints, ep)
+		}
+	}
+	return vlessEndpoints
+}
+
 func getUserOrderedActiveNodes(user *model.User) []*model.Node {
 	orderedIDs := user.GetSortedNodeIDs()
 	activeMap := make(map[int64]*model.Node)
@@ -250,7 +264,7 @@ func GetXrayConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activeEndpoints := getUserActiveEndpoints(user)
+	activeEndpoints := getUserActiveEndpointsForTemplate(user, template.TemplateTypeXray)
 	if len(activeEndpoints) == 0 {
 		RespondError(w, http.StatusNotFound, "No active nodes associated with this user")
 		return

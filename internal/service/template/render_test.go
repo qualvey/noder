@@ -3,12 +3,103 @@ package template
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
 
 	"noder/internal/model"
 )
+
+func testXrayTemplateEndpoint() *model.Endpoint {
+	sni := "www.example.com"
+	publicKey := "99BZ0JCnaSB55YEQYOCV66GhKTiK2ZGMPR3b6D_Q3wo"
+	shortID := "1a91"
+	fingerprint := "chrome"
+	flow := "xtls-rprx-vision"
+	return &model.Endpoint{
+		Tag:      "xray-node",
+		UUID:     "11111111-1111-4111-8111-111111111111",
+		IsActive: true,
+		Node: &model.Node{
+			Tag:           "xray-node",
+			Protocol:      "vless",
+			ServerAddress: "example.com",
+			ServerPort:    443,
+			Security:      "reality",
+			SNI:           &sni,
+			PublicKey:     &publicKey,
+			ShortID:       &shortID,
+			Fingerprint:   &fingerprint,
+			Flow:          &flow,
+			IsActive:      true,
+		},
+	}
+}
+
+func TestDetectTemplateType(t *testing.T) {
+	if got := DetectTemplateType([]byte(`{"outbounds":[{"type":"vless"}]}`)); got != TemplateTypeSing {
+		t.Fatalf("sing-box template detected as %q", got)
+	}
+	if got := DetectTemplateType([]byte(`{"outbounds":[{"protocol":"vless"}]}`)); got != TemplateTypeXray {
+		t.Fatalf("xray template detected as %q", got)
+	}
+	if got := DetectTemplateType([]byte("upstream_url: https://example.com/xray\nxray_bin: ./xray.exe")); got != TemplateTypeXray {
+		t.Fatalf("xray launcher template detected as %q", got)
+	}
+}
+
+func TestXrayTemplateContext(t *testing.T) {
+	user := &model.User{Name: "Xray User", Token: "xray-token", UUID: stringPtr("11111111-1111-4111-8111-111111111111")}
+	ctx := BuildTemplateContextFromEndpointsForTarget(user, []*model.Endpoint{testXrayTemplateEndpoint()}, false, TemplateTypeXray)
+	if !strings.Contains(ctx["xray_outbounds_json"], `"protocol": "vless"`) {
+		t.Fatalf("xray outbound placeholder was not generated: %s", ctx["xray_outbounds_json"])
+	}
+	if !strings.Contains(ctx["xray_config_json"], `"inbounds"`) {
+		t.Fatalf("full xray config placeholder was not generated: %s", ctx["xray_config_json"])
+	}
+}
+
+func TestRenderXrayZipUsesUserConfig(t *testing.T) {
+	var source bytes.Buffer
+	writer := zip.NewWriter(&source)
+	entry, err := writer.Create("config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write([]byte(`{{xray_config_json}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	user := &model.User{Name: "Xray User", Token: "xray-token", UUID: stringPtr("11111111-1111-4111-8111-111111111111")}
+	rendered, err := RenderZipForUserWithProgressFromEndpointsForTarget(source.Bytes(), nil, user, []*model.Endpoint{testXrayTemplateEndpoint()}, nil, TemplateTypeXray, nil)
+	if err != nil {
+		t.Fatalf("rendering Xray ZIP failed: %v", err)
+	}
+	resultZip, err := zip.NewReader(bytes.NewReader(rendered), int64(len(rendered)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configFile := resultZip.File[0]
+	configReader, err := configFile.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]interface{}
+	if err := json.NewDecoder(configReader).Decode(&config); err != nil {
+		_ = configReader.Close()
+		t.Fatal(err)
+	}
+	_ = configReader.Close()
+	if _, ok := config["inbounds"]; !ok {
+		t.Fatalf("rendered Xray config has no inbounds: %#v", config)
+	}
+}
+
+func stringPtr(value string) *string { return &value }
 
 func TestRenderTemplateText(t *testing.T) {
 	user := &model.User{

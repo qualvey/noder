@@ -112,6 +112,8 @@ export const api = {
       remark?: string
       download_name?: string
       file_type?: string
+      template_name?: string
+      template_type?: string
     }) => request<DistFile>('/api/files/remote', { method: 'POST', body }),
     createWithProgress: (
       fd: FormData,
