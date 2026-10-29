@@ -85,7 +85,7 @@ func TestRenderXrayLauncherRendersCompanionConfigYAML(t *testing.T) {
 	}
 
 	user := &model.User{Name: "Xray User", Token: "xray-token", UUID: stringPtr("11111111-1111-4111-8111-111111111111")}
-	rendered, err := RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL(source.Bytes(), stringPtr("config.json"), user, []*model.Endpoint{testXrayTemplateEndpoint()}, nil, TemplateTypeXray, "https://proxy.example.test", nil)
+	rendered, err := RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL(source.Bytes(), stringPtr("config.yaml"), user, []*model.Endpoint{testXrayTemplateEndpoint()}, nil, TemplateTypeXray, "https://proxy.example.test", nil)
 	if err != nil {
 		t.Fatalf("rendering Xray launcher ZIP failed: %v", err)
 	}
@@ -93,10 +93,9 @@ func TestRenderXrayLauncherRendersCompanionConfigYAML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	jsonRendered := false
+	yamlRendered := false
 	for _, entry := range resultZip.File {
-		if entry.Name != "config.yaml" {
-			continue
-		}
 		rc, err := entry.Open()
 		if err != nil {
 			t.Fatal(err)
@@ -107,12 +106,19 @@ func TestRenderXrayLauncherRendersCompanionConfigYAML(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := string(data)
-		if !strings.Contains(got, `upstream_url: "https://proxy.example.test/xray"`) || !strings.Contains(got, `token: "xray-token"`) {
-			t.Fatalf("Xray launcher config was not rendered: %s", got)
+		switch entry.Name {
+		case "config.json":
+			jsonRendered = strings.Contains(got, `"inbounds"`)
+		case "config.yaml":
+			yamlRendered = strings.Contains(got, `upstream_url: "https://proxy.example.test/xray"`) && strings.Contains(got, `token: "xray-token"`)
 		}
-		return
 	}
-	t.Fatal("rendered ZIP did not contain config.yaml")
+	if !jsonRendered {
+		t.Fatal("Xray config.json was not rendered when config.yaml was selected")
+	}
+	if !yamlRendered {
+		t.Fatal("Xray launcher config.yaml was not rendered")
+	}
 }
 
 func TestRenderXrayZipUsesUserConfig(t *testing.T) {
@@ -174,6 +180,13 @@ func TestRenderTemplateText(t *testing.T) {
 	renderedKeyed := RenderTemplateText(keyedRaw, user, nil, nil)
 	if !strings.Contains(renderedKeyed, "my-token-1234") {
 		t.Errorf("Keyed replacement failed: %s", renderedKeyed)
+	}
+
+	spaced := RenderTemplateTextWithContext("url: {{ xray_config_url }}", user, map[string]string{
+		"xray_config_url": "https://proxy.example.test/xray",
+	}, nil)
+	if spaced != "url: https://proxy.example.test/xray" {
+		t.Errorf("spaced placeholder was not rendered: %s", spaced)
 	}
 }
 

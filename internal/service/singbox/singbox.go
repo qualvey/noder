@@ -3,11 +3,11 @@ package singbox
 import (
 	"encoding/json"
 	"errors"
-	"log"
 	"os"
 
 	"noder/internal/config"
 	"noder/internal/contract"
+	"noder/internal/logging"
 	"noder/internal/model"
 )
 
@@ -219,15 +219,17 @@ const DefaultSingboxTemplateJSON = `{
 func LoadSingboxTemplate() (map[string]interface{}, error) {
 	data, err := os.ReadFile(config.SingBoxTemplatePath)
 	if err != nil || len(data) == 0 {
+		logging.L().Debug("using built-in sing-box template", "path", config.SingBoxTemplatePath, "read_error", err)
 		var res map[string]interface{}
 		_ = json.Unmarshal([]byte(DefaultSingboxTemplateJSON), &res)
 		return res, nil
 	}
 	var res map[string]interface{}
 	if err := json.Unmarshal(data, &res); err != nil {
-		log.Printf("Failed to unmarshal singbox template: %v", err)
+		logging.L().Error("failed to unmarshal sing-box template", "error", err, "path", config.SingBoxTemplatePath)
 		return nil, err
 	}
+	logging.L().Debug("loaded sing-box template", "path", config.SingBoxTemplatePath, "bytes", len(data))
 	return res, nil
 }
 
@@ -320,7 +322,23 @@ func GenerateSingboxConfigFromEndpoints(endpoints []*model.Endpoint, user *model
 	if err != nil {
 		return nil, err
 	}
-	return GenerateSingboxConfigFromTemplate(cfg, endpoints, user)
+	rendered, err := GenerateSingboxConfigFromTemplate(cfg, endpoints, user)
+	if err != nil {
+		logging.L().Warn("failed to render sing-box config", "error", err, "endpoints", len(endpoints))
+		return nil, err
+	}
+	logging.L().Debug("rendered sing-box config", "endpoints", len(endpoints), "outbounds", configItemCount(rendered["outbounds"]))
+	return rendered, nil
+}
+
+func configItemCount(value interface{}) int {
+	switch items := value.(type) {
+	case []map[string]interface{}:
+		return len(items)
+	case []interface{}:
+		return len(items)
+	}
+	return 0
 }
 
 func GenerateSingboxConfig(nodes []*model.Node, user *model.User) (map[string]interface{}, error) {

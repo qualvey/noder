@@ -89,11 +89,18 @@ make deb-all        # 构建 amd64 与 arm64 架构 deb 包
 
 ## 🔑 配置说明
 
-### 环境变量
+完整配置说明见 **[配置参考](doc/config.md)**。默认配置文件为项目工作目录下的
+`config.yaml`；Debian 安装后为 `/etc/noder/config.yaml`，环境变量优先级更高。
+
+### 常用环境变量
 
 | 环境变量名 | 说明 | 默认值 |
 | :--- | :--- | :--- |
+| `HOST` | HTTP 监听地址 | `0.0.0.0` |
+| `PORT` | HTTP 监听端口 | `8000` |
 | `ADMIN_SECRET_TOKEN` | 管理员 API 鉴权密钥（用于网页后台 CRUD 操作 header `X-Admin-Token`） | `admin-secret` |
+| `LOG_LEVEL` | 服务端日志等级：`debug`/`info`/`warn`/`error` | `info` |
+| `LOG_FORMAT` | 服务端日志格式：`text`/`json` | `text` |
 
 ---
 

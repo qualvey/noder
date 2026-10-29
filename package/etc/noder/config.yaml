@@ -1,0 +1,14 @@
+# Noder application configuration.
+# Environment variables override values in this file.
+
+server:
+  host: 0.0.0.0
+  port: 8000
+
+logging:
+  # debug, info, warn or error
+  level: info
+  # text or json
+  format: text
+  # stdout or stderr; stderr is recommended for systemd/journald
+  output: stderr

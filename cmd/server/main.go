@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,17 +21,27 @@ import (
 	"noder/internal/config"
 	"noder/internal/db"
 	"noder/internal/handler"
+	"noder/internal/logging"
 )
 
 var Version = "dev"
 
 func main() {
-	config.Init("")
+	if err := config.Load(""); err != nil {
+		fmt.Fprintf(os.Stderr, "configuration error: %v\n", err)
+		os.Exit(1)
+	}
+	if err := logging.Configure(config.LogLevel, config.LogFormat, config.LogOutput); err != nil {
+		fmt.Fprintf(os.Stderr, "logging configuration error: %v\n", err)
+		os.Exit(1)
+	}
+	logger := logging.L()
 
 	// 初始化数据库及迁移
 	_, err := db.InitDB()
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		logger.Error("failed to initialize database", "error", err)
+		os.Exit(1)
 	}
 
 	r := chi.NewRouter()
@@ -39,8 +49,8 @@ func main() {
 	// 基础中间件
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	r.Use(logging.RequestLogger(logger))
+	r.Use(logging.Recoverer(logger))
 
 	// CORS 跨域配置
 	r.Use(cors.Handler(cors.Options{
@@ -66,13 +76,8 @@ func main() {
 	// 挂载 SPA 前端静态资源
 	mountSPA(r)
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8000"
-	}
-
 	server := &http.Server{
-		Addr:    ":" + port,
+		Addr:    net.JoinHostPort(config.ServerHost, fmt.Sprint(config.ServerPort)),
 		Handler: r,
 	}
 
@@ -81,29 +86,35 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("Noder (Go Edition %s) server listening on http://0.0.0.0:%s", Version, port)
+		logger.Info("server listening",
+			"version", Version,
+			"address", server.Addr,
+			"config", config.ConfigPath,
+			"log_level", config.LogLevel,
+		)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("Server error: %v", err)
+			logger.Error("server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-stop
-	log.Println("Shutting down server gracefully...")
+	logger.Info("shutting down server gracefully")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+		logger.Error("server forced to shutdown", "error", err)
 	}
 
-	log.Println("Server exited successfully")
+	logger.Info("server exited successfully")
 }
 
 func mountSPA(r *chi.Mux) {
 	subFS, err := fs.Sub(noder.StaticFS, "static")
 	if err != nil {
-		log.Printf("Warning: failed to load embedded static fs: %v", err)
+		logging.L().Warn("failed to load embedded static filesystem", "error", err)
 		return
 	}
 
