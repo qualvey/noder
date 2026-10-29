@@ -138,7 +138,10 @@ jobs:
               exit 1
             fi
             echo "Installing $DEB_FILE ..."
-            sudo dpkg -i "$DEB_FILE"
+            # noder.env is a conffile and may have local secrets/settings.
+            # Keep the server copy so unattended SSH deployments never block
+            # on dpkg's conffile prompt.
+            sudo env DEBIAN_FRONTEND=noninteractive dpkg --force-confold -i "$DEB_FILE"
             sudo systemctl daemon-reload
             sudo systemctl enable noder
             sudo systemctl restart noder
