@@ -133,6 +133,14 @@ func BuildTemplateContextFromEndpoints(user *model.User, endpoints []*model.Endp
 }
 
 func BuildTemplateContextFromEndpointsForTarget(user *model.User, endpoints []*model.Endpoint, includeMihomo bool, templateType string) map[string]string {
+	return BuildTemplateContextFromEndpointsForTargetWithBaseURL(user, endpoints, includeMihomo, templateType, "")
+}
+
+// BuildTemplateContextFromEndpointsForTargetWithBaseURL adds launcher
+// subscription URLs to the regular per-user template context. The base URL is
+// supplied by the request handler so reverse-proxy and configured public URLs
+// are respected.
+func BuildTemplateContextFromEndpointsForTargetWithBaseURL(user *model.User, endpoints []*model.Endpoint, includeMihomo bool, templateType string, baseURL string) map[string]string {
 	templateType = NormalizeTemplateType(templateType)
 	if templateType == TemplateTypeAuto || templateType == "" {
 		templateType = TemplateTypeSing
@@ -217,6 +225,11 @@ func BuildTemplateContextFromEndpointsForTarget(user *model.User, endpoints []*m
 		"singbox_outbounds_json": jsonIndent(singboxOutbounds),
 		"xray_outbounds_yaml":    yamlDump(xrayOutbounds),
 		"xray_outbounds_json":    jsonIndent(xrayOutbounds),
+	}
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL != "" {
+		ctx["singbox_config_url"] = baseURL + "/sub"
+		ctx["xray_config_url"] = baseURL + "/xray"
 	}
 	if singboxConfig, err := singbox.GenerateSingboxConfigFromEndpoints(activeEndpoints, user); err == nil {
 		ctx["singbox_config_json"] = jsonIndent(singboxConfig)
@@ -394,8 +407,16 @@ func RenderZipForUserWithProgressFromEndpoints(zipData []byte, templateName *str
 }
 
 func RenderZipForUserWithProgressFromEndpointsForTarget(zipData []byte, templateName *string, user *model.User, endpoints []*model.Endpoint, knownTokens []string, templateType string, onProgress func(processed, total uint64)) ([]byte, error) {
+	return RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL(zipData, templateName, user, endpoints, knownTokens, templateType, "", onProgress)
+}
+
+// RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL renders the
+// selected template and, for launcher archives, the companion config.yaml.
+// Xray launcher archives commonly use config.json as their detected template
+// while config.yaml controls where the launcher downloads that JSON.
+func RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL(zipData []byte, templateName *string, user *model.User, endpoints []*model.Endpoint, knownTokens []string, templateType string, baseURL string, onProgress func(processed, total uint64)) ([]byte, error) {
 	return renderZipForUserWithProgress(zipData, templateName, user, knownTokens, func(data []byte) map[string]string {
-		return BuildTemplateContextFromEndpointsForTarget(user, endpoints, strings.Contains(string(data), MihomoPlaceholder), templateType)
+		return BuildTemplateContextFromEndpointsForTargetWithBaseURL(user, endpoints, strings.Contains(string(data), MihomoPlaceholder), templateType, baseURL)
 	}, onProgress)
 }
 
@@ -408,16 +429,39 @@ func renderZipForUserWithProgress(zipData []byte, templateName *string, user *mo
 	if templateName != nil && *templateName != "" {
 		targetName = filepath.Base(*templateName)
 	}
+	launcherEntries := make(map[string]bool)
+	if targetName != "" {
+		for _, f := range zr.File {
+			name := strings.ToLower(filepath.Base(f.Name))
+			if name != "config.yaml" && name != "config.yml" {
+				continue
+			}
+			rc, openErr := f.Open()
+			if openErr != nil {
+				return nil, openErr
+			}
+			data, readErr := io.ReadAll(rc)
+			_ = rc.Close()
+			if readErr != nil {
+				return nil, readErr
+			}
+			lower := strings.ToLower(string(data))
+			if strings.Contains(lower, "upstream_url:") && (strings.Contains(lower, "xray_bin:") || strings.Contains(lower, "sing_box_bin:")) {
+				launcherEntries[f.Name] = true
+			}
+		}
+	}
 
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	var totalWeight uint64
 	for _, f := range zr.File {
-		totalWeight += zipEntryProgressWeight(f, targetName == "" || filepath.Base(f.Name) == targetName)
+		rendered := targetName == "" || filepath.Base(f.Name) == targetName || launcherEntries[f.Name]
+		totalWeight += zipEntryProgressWeight(f, rendered)
 	}
 	var processedWeight uint64
 	for _, f := range zr.File {
-		renderedEntry := targetName == "" || filepath.Base(f.Name) == targetName
+		renderedEntry := targetName == "" || filepath.Base(f.Name) == targetName || launcherEntries[f.Name]
 		weight := zipEntryProgressWeight(f, renderedEntry)
 		if !renderedEntry {
 			raw, err := f.OpenRaw()

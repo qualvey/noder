@@ -196,7 +196,7 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		renderedZip, err := template.RenderZipForUserWithProgressFromEndpointsForTarget(data, dist.TemplateName, matchedUser, activeEndpoints, knownTokens, templateType, func(processed, total uint64) {
+		renderedZip, err := template.RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL(data, dist.TemplateName, matchedUser, activeEndpoints, knownTokens, templateType, getBaseURL(r), func(processed, total uint64) {
 			if progressID == "" {
 				return
 			}

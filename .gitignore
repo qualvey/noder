@@ -45,3 +45,15 @@ web/pages-dist/
 !/xray-launcher/使用说明.txt
 /sing-launcher/
 /sing-launcher.zip
+server
+xray.zip
+Xray-windows-64/geoip.dat
+Xray-windows-64/geosite.dat
+Xray-windows-64/LICENSE
+Xray-windows-64/LICENSE-Wintun
+Xray-windows-64/README.md
+Xray-windows-64/wintun.dll
+Xray-windows-64/xray_no_window.cmd
+Xray-windows-64/xray_no_window.ps1
+Xray-windows-64/xray_no_window.vbs
+Xray-windows-64/xray.exe

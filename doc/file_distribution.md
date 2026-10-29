@@ -102,6 +102,8 @@
 | `{{xray_outbounds_json}}` | Xray outbound JSON 数组（仅 VLESS） |
 | `{{singbox_config_json}}` | 用户完整 Sing-Box 配置 JSON |
 | `{{xray_config_json}}` | 用户完整 Xray 配置 JSON |
+| `{{singbox_config_url}}` | 当前服务的 Sing-Box `/sub` 订阅地址（启动器配置使用） |
+| `{{xray_config_url}}` | 当前服务的 Xray `/xray` 配置地址（启动器配置使用） |
 | `{{mihomo_proxies_yaml}}` | Mihomo 风格 proxies 列表 YAML（vless+reality+vision / tuic v5；anytls 节点被导出守卫拒绝） |
 
 - 未知占位符**原样保留**，不误伤模板中其他 `{{ }}` 内容。
