@@ -127,6 +127,17 @@ func CreateDBAndTables(ctx context.Context) error {
 	`)
 	_, _ = DB.ExecContext(ctx, "UPDATE user SET independent_node_ids = NULL WHERE independent_node_ids IS NOT NULL")
 
+	// 清理历史上节点删除失败后遗留的端点和用户-节点关联。
+	_, _ = DB.ExecContext(ctx, `
+		DELETE FROM endpoint
+		WHERE node_id IS NOT NULL
+		  AND NOT EXISTS (SELECT 1 FROM node WHERE node.id = endpoint.node_id)
+	`)
+	_, _ = DB.ExecContext(ctx, `
+		DELETE FROM usernodelink
+		WHERE NOT EXISTS (SELECT 1 FROM node WHERE node.id = usernodelink.node_id)
+	`)
+
 	fileCols := []string{"source_url", "cached_at", "download_name"}
 	for _, col := range fileCols {
 		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE distfile ADD COLUMN %s VARCHAR", col))

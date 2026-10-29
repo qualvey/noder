@@ -215,7 +215,26 @@ func DeleteNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := db.DB.NewDelete().Model((*model.Node)(nil)).Where("id = ?", id).Exec(r.Context())
+	tx, err := db.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Delete dependent records before the node. This ordering is required when
+	// SQLite foreign-key enforcement is enabled, and keeps user endpoints from
+	// becoming visible orphan records.
+	if _, err := tx.NewDelete().Model((*model.Endpoint)(nil)).Where("node_id = ?", id).Exec(r.Context()); err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if _, err := tx.NewDelete().Model((*model.UserNodeLink)(nil)).Where("node_id = ?", id).Exec(r.Context()); err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	res, err := tx.NewDelete().Model((*model.Node)(nil)).Where("id = ?", id).Exec(r.Context())
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -227,9 +246,10 @@ func DeleteNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 级联清理关联
-	_, _ = db.DB.NewDelete().Model((*model.UserNodeLink)(nil)).Where("node_id = ?", id).Exec(r.Context())
-	_, _ = db.DB.NewDelete().Model((*model.Endpoint)(nil)).Where("node_id = ?", id).Exec(r.Context())
+	if err := tx.Commit(); err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	RespondJSON(w, http.StatusOK, map[string]string{
 		"message": fmt.Sprintf("Node %d deleted successfully", id),
