@@ -34,7 +34,7 @@ web/pages-dist/
 *.log
 .aider*
 
-
+# external assets
 /templates/sing-box-1.14.2-linux-amd64
 xray-launcher/xray.exe
 Xray-windows-64/geoip.dat

@@ -2,7 +2,7 @@
 // 用户新增/编辑表单弹窗
 // 包含：用户基础信息 / 快捷凭证提取 / 节点端点 (Endpoints) 灵活配置 / config_override
 // 契约：props { open, editing, nodes }，emits { close, saved }
-import { inject, reactive, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { Node, User } from '../types'
@@ -27,6 +27,8 @@ const toast = inject('toast') as (msg: string, type?: 'info' | 'error') => void
 const availableNodes = ref<Node[]>([...props.nodes])
 const activeNodeSelector = ref<string | null>(null)
 const nodeSearch = reactive<Record<string, string>>({})
+const nodeInputRefs = new Map<string, HTMLInputElement>()
+const nodeDropdownPosition = ref({ top: 0, left: 0, width: 0, maxHeight: 220 })
 
 const showExtract = ref(false)
 const extractInput = ref('')
@@ -94,6 +96,26 @@ function filteredNodes(ep: EndpointFormItem, index: number) {
   ].some(value => String(value ?? '').toLowerCase().includes(query)))
 }
 
+const activeNodeContext = computed(() => {
+  const key = activeNodeSelector.value
+  if (!key) return null
+
+  const index = form.endpoints.findIndex((ep, idx) => endpointKey(ep, idx) === key)
+  return index >= 0 ? { ep: form.endpoints[index], index } : null
+})
+
+const activeNodeOptions = computed(() => {
+  const context = activeNodeContext.value
+  return context ? filteredNodes(context.ep, context.index) : []
+})
+
+const nodeDropdownStyle = computed(() => ({
+  top: `${nodeDropdownPosition.value.top}px`,
+  left: `${nodeDropdownPosition.value.left}px`,
+  width: `${nodeDropdownPosition.value.width}px`,
+  maxHeight: `${nodeDropdownPosition.value.maxHeight}px`,
+}))
+
 function selectedNodeLabel(ep: EndpointFormItem) {
   const node = availableNodes.value.find(n => n.id === ep.node_id)
   return node ? nodeLabel(node) : `Node-${ep.node_id}`
@@ -103,19 +125,89 @@ function focusNodeSelector(ep: EndpointFormItem, index: number) {
   const key = endpointKey(ep, index)
   activeNodeSelector.value = key
   nodeSearch[key] = ''
+
+  // 选择后输入框仍可能保持焦点，立即清空 DOM 值，确保下一次输入只作为搜索词。
+  const input = nodeInputRefs.get(key)
+  if (input) input.value = ''
+}
+
+function onNodeSearchInput(ep: EndpointFormItem, index: number, event: Event) {
+  const key = endpointKey(ep, index)
+  const value = (event.target as HTMLInputElement).value
+
+  // 选择候选项后焦点可能没有离开输入框，因此不能只依赖 focus 事件打开下拉框。
+  if (activeNodeSelector.value !== key) activeNodeSelector.value = key
+  nodeSearch[key] = value
+  updateNodeDropdownPosition()
 }
 
 function chooseNode(ep: EndpointFormItem, node: Node, index: number) {
+  const key = endpointKey(ep, index)
   ep.node_id = node.id
   onNodeChange(ep)
-  nodeSearch[endpointKey(ep, index)] = ''
+  nodeSearch[key] = ''
   activeNodeSelector.value = null
+
+  // 让再次点击输入框时稳定触发 focus，从已选择的节点标签重新开始搜索。
+  nodeInputRefs.get(key)?.blur()
 }
 
-function chooseFirstMatchingNode(ep: EndpointFormItem, index: number) {
-  const firstNode = filteredNodes(ep, index)[0]
-  if (firstNode) chooseNode(ep, firstNode, index)
+function chooseActiveNode(node: Node) {
+  const context = activeNodeContext.value
+  if (context) chooseNode(context.ep, node, context.index)
 }
+
+function setNodeInputRef(key: string, element: unknown) {
+  if (element instanceof HTMLInputElement) nodeInputRefs.set(key, element)
+  else nodeInputRefs.delete(key)
+}
+
+function updateNodeDropdownPosition() {
+  const key = activeNodeSelector.value
+  if (!key) return
+
+  const input = nodeInputRefs.get(key)
+  if (!input) return
+
+  const rect = input.getBoundingClientRect()
+  const viewportPadding = 8
+  const spaceBelow = window.innerHeight - rect.bottom - viewportPadding
+  const spaceAbove = rect.top - viewportPadding
+  let top = rect.bottom + 3
+  let maxHeight = Math.min(220, Math.max(80, spaceBelow))
+
+  // 窗口底部空间不足时向上展开，避免下拉框再次被视口裁剪。
+  if (spaceBelow < 120 && spaceAbove > spaceBelow) {
+    maxHeight = Math.min(220, Math.max(80, spaceAbove))
+    top = rect.top - maxHeight - 3
+  }
+
+  nodeDropdownPosition.value = {
+    top: Math.max(viewportPadding, top),
+    left: Math.max(viewportPadding, Math.min(rect.left, window.innerWidth - rect.width - viewportPadding)),
+    width: rect.width,
+    maxHeight,
+  }
+}
+
+function stopNodeDropdownTracking() {
+  window.removeEventListener('resize', updateNodeDropdownPosition)
+  window.removeEventListener('scroll', updateNodeDropdownPosition, true)
+}
+
+watch(activeNodeSelector, async (key) => {
+  stopNodeDropdownTracking()
+  if (!key) return
+
+  await nextTick()
+  updateNodeDropdownPosition()
+  window.addEventListener('resize', updateNodeDropdownPosition)
+  window.addEventListener('scroll', updateNodeDropdownPosition, true)
+})
+
+onBeforeUnmount(() => {
+  stopNodeDropdownTracking()
+})
 
 async function refreshNodes() {
   try {
@@ -128,6 +220,7 @@ async function refreshNodes() {
 
 function closeModal(clearDraft = false) {
   if (clearDraft) localStorage.removeItem(draftKey())
+  activeNodeSelector.value = null
   emit('close')
 }
 
@@ -421,27 +514,10 @@ async function saveUser() {
                     class="form-control form-control-sm"
                     :value="activeNodeSelector === endpointKey(ep, idx) ? (nodeSearch[endpointKey(ep, idx)] || '') : selectedNodeLabel(ep)"
                     :placeholder="t('users.form.endpointNodePlaceholder')"
+                    :ref="(element) => setNodeInputRef(endpointKey(ep, idx), element)"
                     @focus="focusNodeSelector(ep, idx)"
-                    @input="nodeSearch[endpointKey(ep, idx)] = ($event.target as HTMLInputElement).value"
-                    @keydown.enter.prevent="chooseFirstMatchingNode(ep, idx)"
+                    @input="onNodeSearchInput(ep, idx, $event)"
                   />
-                  <div
-                    v-if="activeNodeSelector === endpointKey(ep, idx)"
-                    class="endpoint-node-options"
-                  >
-                    <button
-                      v-for="node in filteredNodes(ep, idx)"
-                      :key="node.id"
-                      type="button"
-                      class="endpoint-node-option"
-                      @mousedown.prevent="chooseNode(ep, node, idx)"
-                    >
-                      {{ nodeLabel(node) }}
-                    </button>
-                    <span v-if="!filteredNodes(ep, idx).length" class="endpoint-node-empty">
-                      {{ t('common.noResults') }}
-                    </span>
-                  </div>
                 </div>
 
                 <!-- 节点 Tag -->
@@ -534,6 +610,28 @@ async function saveUser() {
             </div>
           </div>
         </div>
+
+        <!-- 提升到 body，避免被端点列表和弹窗自身的滚动容器裁剪。 -->
+        <Teleport to="body">
+          <div
+            v-if="activeNodeContext"
+            class="endpoint-node-options"
+            :style="nodeDropdownStyle"
+          >
+            <button
+              v-for="node in activeNodeOptions"
+              :key="node.id"
+              type="button"
+              class="endpoint-node-option"
+              @mousedown.prevent="chooseActiveNode(node)"
+            >
+              {{ nodeLabel(node) }}
+            </button>
+            <span v-if="!activeNodeOptions.length" class="endpoint-node-empty">
+              {{ t('common.noResults') }}
+            </span>
+          </div>
+        </Teleport>
 
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" @click="closeModal()">{{ t('common.cancel') }}</button>
@@ -680,18 +778,15 @@ async function saveUser() {
 }
 
 .endpoint-node-options {
-  position: absolute;
-  z-index: 1000;
-  top: calc(100% + 3px);
-  left: 0;
-  right: 0;
-  max-height: 220px;
+  position: fixed;
+  z-index: 10000;
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--border-glass);
   border-radius: 6px;
   background: var(--bg-card, #172033);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  box-sizing: border-box;
 }
 
 .endpoint-node-option {
