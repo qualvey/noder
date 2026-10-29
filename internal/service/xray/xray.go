@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
 	"noder/internal/config"
 	"noder/internal/contract"
-	"noder/internal/logging"
 	"noder/internal/model"
 )
 
@@ -44,17 +44,15 @@ const DefaultXrayTemplateJSON = `{
 func LoadXrayTemplate() (map[string]interface{}, error) {
 	data, err := os.ReadFile(config.XrayTemplatePath)
 	if err != nil || len(data) == 0 {
-		logging.L().Debug("using built-in Xray template", "path", config.XrayTemplatePath, "read_error", err)
 		var cfg map[string]interface{}
 		_ = json.Unmarshal([]byte(DefaultXrayTemplateJSON), &cfg)
 		return cfg, nil
 	}
 	var cfg map[string]interface{}
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		logging.L().Error("failed to unmarshal xray template", "error", err, "path", config.XrayTemplatePath)
+		log.Printf("Failed to unmarshal xray template: %v", err)
 		return nil, err
 	}
-	logging.L().Debug("loaded Xray template", "path", config.XrayTemplatePath, "bytes", len(data))
 	return cfg, nil
 }
 
@@ -200,23 +198,7 @@ func GenerateXrayConfigFromEndpoints(endpoints []*model.Endpoint, user *model.Us
 	if err != nil {
 		return nil, err
 	}
-	rendered, err := GenerateXrayConfigFromTemplate(cfg, endpoints, user)
-	if err != nil {
-		logging.L().Warn("failed to render Xray config", "error", err, "endpoints", len(endpoints))
-		return nil, err
-	}
-	logging.L().Debug("rendered Xray config", "endpoints", len(endpoints), "outbounds", configItemCount(rendered["outbounds"]))
-	return rendered, nil
-}
-
-func configItemCount(value interface{}) int {
-	switch items := value.(type) {
-	case []map[string]interface{}:
-		return len(items)
-	case []interface{}:
-		return len(items)
-	}
-	return 0
+	return GenerateXrayConfigFromTemplate(cfg, endpoints, user)
 }
 
 func GenerateXrayConfig(nodes []*model.Node, user *model.User) (map[string]interface{}, error) {

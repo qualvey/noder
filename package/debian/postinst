@@ -76,10 +76,7 @@ case "$1" in
             fi
 
             # 4. 读取运行信息并打印欢迎 Banner
-            CURRENT_PORT=$(grep -E '^PORT=' "${CONFIG_FILE}" 2>/dev/null | cut -d'=' -f2- | tr -d ' "\r\n' || true)
-            if [[ -z "${CURRENT_PORT}" && -f "/etc/noder/config.yaml" ]]; then
-                CURRENT_PORT=$(sed -n 's/^[[:space:]]*port:[[:space:]]*//p' /etc/noder/config.yaml | head -1 | tr -d ' "\r\n' || true)
-            fi
+            CURRENT_PORT=$(grep -E '^PORT=' "${CONFIG_FILE}" 2>/dev/null | cut -d'=' -f2- | tr -d ' "\r\n' || echo "8000")
             CURRENT_TOKEN=$(grep -E '^ADMIN_SECRET_TOKEN=' "${CONFIG_FILE}" 2>/dev/null | cut -d'=' -f2- | tr -d ' "\r\n' || echo "admin-secret")
             CURRENT_PORT=${CURRENT_PORT:-8000}
 

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -11,7 +12,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/uptrace/bun"
 	"noder/internal/db"
-	"noder/internal/logging"
 	"noder/internal/model"
 	"noder/internal/service/file"
 	"noder/internal/service/loading"
@@ -273,11 +273,7 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 			DownloadedAt: time.Now().UTC(),
 		}).Exec(r.Context())
 		if logErr != nil {
-			logging.L().ErrorContext(r.Context(), "failed to record download",
-				"error", logErr,
-				"user_id", matchedUser.ID,
-				"file_id", dist.ID,
-			)
+			log.Printf("failed to record download for user %d and file %d: %v", matchedUser.ID, dist.ID, logErr)
 		}
 	}
 }

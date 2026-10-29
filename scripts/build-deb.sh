@@ -113,9 +113,7 @@ build_single_deb() {
     local CONF_DIR="${STAGING_DIR}/etc/noder"
     mkdir -p "${CONF_DIR}"
     cp "${ROOT_DIR}/package/etc/noder/noder.env" "${CONF_DIR}/noder.env"
-    cp "${ROOT_DIR}/package/etc/noder/config.yaml" "${CONF_DIR}/config.yaml"
     chmod 600 "${CONF_DIR}/noder.env"
-    chmod 644 "${CONF_DIR}/config.yaml"
 
     # 3. 创建持久化数据目录结构
     mkdir -p "${STAGING_DIR}/var/lib/noder/data/files"
