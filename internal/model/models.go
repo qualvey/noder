@@ -175,8 +175,7 @@ type DistFile struct {
 
 	ID           int64   `bun:"id,pk,autoincrement" json:"id"`
 	Name         string  `bun:"name,notnull" json:"name"`
-	FileType     string  `bun:"file_type,notnull" json:"file_type"`           // apk | zip | text
-	TemplateType string  `bun:"template_type" json:"template_type,omitempty"` // sing-box | xray (zip only)
+	FileType     string  `bun:"file_type,notnull" json:"file_type"` // apk | zip | text
 	TemplateName *string `bun:"template_name" json:"template_name,omitempty"`
 	OriginalName string  `bun:"original_name" json:"original_name"`
 	StoredName   string  `bun:"stored_name,notnull" json:"stored_name"`

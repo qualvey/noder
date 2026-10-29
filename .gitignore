@@ -36,12 +36,3 @@ web/pages-dist/
 
 
 /templates/sing-box-1.14.2-linux-amd64
-# Keep the downloaded Xray core and geo data local, but version the launcher
-# scripts and its non-secret configuration template.
-/xray-launcher/*
-!/xray-launcher/launch.ps1
-!/xray-launcher/start.bat
-!/xray-launcher/config.yaml
-!/xray-launcher/使用说明.txt
-/sing-launcher/
-/sing-launcher.zip

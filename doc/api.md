@@ -206,7 +206,7 @@ GET /dl/{id}?token={user_token}
 ```
 
 `token` 可使用用户 Token 或共享下载 Token。启用用户 Token 下载 ZIP 时，
-服务端会按已保存/自动分析的 Sing-Box 或 Xray 模板类型、用户节点和凭证生成个性化 ZIP；首次打开会显示进度页，使用 `download=1` 或 `raw=1` 可跳过 ZIP 引导页
+服务端会按用户凭证渲染模板；使用 `download=1` 或 `raw=1` 可跳过 ZIP 引导页
 并直接返回文件。响应包含 `Content-Disposition`。
 
 ## 5. 配置与安全提示

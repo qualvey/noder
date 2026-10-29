@@ -6,40 +6,13 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 
 	"noder/internal/config"
 	"noder/internal/contract"
 	"noder/internal/model"
 )
 
-// DefaultXrayTemplateJSON is intentionally a small, client-side configuration.
-// Its empty outbounds array is populated with the user's active VLESS nodes,
-// making the first active node Xray's default outbound.
-const DefaultXrayTemplateJSON = `{
-  "log": {"loglevel": "warning"},
-  "inbounds": [
-    {
-      "listen": "127.0.0.1",
-      "port": 1080,
-      "protocol": "socks",
-      "settings": {"auth": "noauth", "udp": true},
-      "tag": "socks-in"
-    },
-	{
-      "protocol": "tun",
-      "settings": {
-        "name": "utun10",
-        "desc": "Wintun",
-        "mtu": 1500,
-        "autoSystemRoutingTable": ["0.0.0.0/0", "::/0"],
-        "autoOutboundsInterface": "auto"
-      }
-    }
-  ],
-  "outbounds": [],
-  "routing": {"domainStrategy": "AsIs", "rules": []}
-}`
+const DefaultXrayTemplateJSON = `{"outbounds": []}`
 
 func LoadXrayTemplate() (map[string]interface{}, error) {
 	data, err := os.ReadFile(config.XrayTemplatePath)
@@ -61,8 +34,7 @@ func BuildXrayEndpointOutbound(ep *model.Endpoint) (map[string]interface{}, erro
 		return nil, errors.New("endpoint and node are required")
 	}
 	node := ep.Node
-	proto := strings.ToLower(strings.TrimSpace(node.Protocol))
-	if proto != "vless" {
+	if node.Protocol != "vless" {
 		return nil, contract.NewBadRequest(fmt.Sprintf("Xray only supports vless, got '%s'", node.Protocol))
 	}
 	if node.Security != "reality" {
@@ -90,26 +62,6 @@ func BuildXrayEndpointOutbound(ep *model.Endpoint) (map[string]interface{}, erro
 		return nil, contract.NewBadRequest("Xray VLESS outbound requires node tag")
 	}
 
-	merged := map[string]interface{}{
-		"tag":            tag,
-		"node_name":      node.NodeName,
-		"protocol":       proto,
-		"server_address": node.ServerAddress,
-		"server_port":    node.ServerPort,
-		"security":       node.Security,
-		"uuid":           ep.UUID,
-		"sni":            *node.SNI,
-		"public_key":     *node.PublicKey,
-		"short_id":       *node.ShortID,
-		"fingerprint":    *node.Fingerprint,
-	}
-	if node.Flow != nil {
-		merged["flow"] = *node.Flow
-	}
-	if err := contract.ValidateNodeContract(merged, proto, false); err != nil {
-		return nil, err
-	}
-
 	settings := map[string]interface{}{
 		"address":    node.ServerAddress,
 		"port":       node.ServerPort,
@@ -121,7 +73,7 @@ func BuildXrayEndpointOutbound(ep *model.Endpoint) (map[string]interface{}, erro
 	}
 
 	return map[string]interface{}{
-		"protocol": proto,
+		"protocol": "vless",
 		"tag":      tag,
 		"settings": settings,
 		"streamSettings": map[string]interface{}{
@@ -138,9 +90,6 @@ func BuildXrayEndpointOutbound(ep *model.Endpoint) (map[string]interface{}, erro
 }
 
 func BuildXrayOutbound(node *model.Node, user *model.User) (map[string]interface{}, error) {
-	if node == nil || user == nil {
-		return nil, errors.New("node and user are required")
-	}
 	tag := node.Tag
 	if tag == "" {
 		tag = node.NodeName
@@ -171,9 +120,6 @@ func GenerateXrayConfigFromTemplate(cfg map[string]interface{}, endpoints []*mod
 	}
 
 	for _, ep := range endpoints {
-		if ep == nil {
-			continue
-		}
 		if !ep.IsActive || ep.Node == nil || !ep.Node.IsActive {
 			continue
 		}
@@ -202,18 +148,12 @@ func GenerateXrayConfigFromEndpoints(endpoints []*model.Endpoint, user *model.Us
 }
 
 func GenerateXrayConfig(nodes []*model.Node, user *model.User) (map[string]interface{}, error) {
-	if user == nil {
-		return nil, errors.New("user is required")
-	}
 	var endpoints []*model.Endpoint
 	userUUID := user.Token
 	if user.UUID != nil && *user.UUID != "" {
 		userUUID = *user.UUID
 	}
 	for i, n := range nodes {
-		if n == nil {
-			continue
-		}
 		tag := n.Tag
 		if tag == "" {
 			tag = n.NodeName

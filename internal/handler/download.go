@@ -16,7 +16,6 @@ import (
 	"noder/internal/service/file"
 	"noder/internal/service/loading"
 	"noder/internal/service/template"
-	"noder/internal/service/xray"
 )
 
 func RegisterDownloadRoutes(r chi.Router) {
@@ -154,36 +153,6 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 
 	// 用户下载 ZIP：进行模板渲染
 	if matchedUser != nil && dist.FileType == "zip" {
-		templateType := template.NormalizeTemplateType(dist.TemplateType)
-		if templateType == template.TemplateTypeAuto || templateType == "" {
-			templateName := ""
-			if dist.TemplateName != nil {
-				templateName = *dist.TemplateName
-			}
-			if detected, detectErr := template.DetectTemplateTypeFromZip(data, templateName); detectErr == nil {
-				templateType = detected
-			}
-			if templateType == "" || templateType == template.TemplateTypeAuto {
-				templateType = template.TemplateTypeSing
-			}
-		}
-		activeEndpoints := getUserActiveEndpointsForTemplate(matchedUser, templateType)
-		if templateType == template.TemplateTypeXray && len(activeEndpoints) == 0 {
-			if progressID != "" {
-				publishDownloadProgress(progressID, 10, "用户没有可用的 Xray VLESS 节点", true)
-			}
-			RespondError(w, http.StatusNotFound, "用户没有可用的 Xray VLESS 节点")
-			return
-		}
-		if templateType == template.TemplateTypeXray {
-			if _, xrayErr := xray.GenerateXrayConfigFromEndpoints(activeEndpoints, matchedUser); xrayErr != nil {
-				if progressID != "" {
-					publishDownloadProgress(progressID, 10, "Xray 配置生成失败: "+xrayErr.Error(), true)
-				}
-				RespondError(w, http.StatusBadRequest, "生成 Xray 配置失败: "+xrayErr.Error())
-				return
-			}
-		}
 		if progressID != "" {
 			publishDownloadProgress(progressID, 10, "准备模板与用户数据", false)
 		}
@@ -196,7 +165,7 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		renderedZip, err := template.RenderZipForUserWithProgressFromEndpointsForTarget(data, dist.TemplateName, matchedUser, activeEndpoints, knownTokens, templateType, func(processed, total uint64) {
+		renderedZip, err := template.RenderZipForUserWithProgressFromEndpoints(data, dist.TemplateName, matchedUser, getUserActiveEndpoints(matchedUser), knownTokens, func(processed, total uint64) {
 			if progressID == "" {
 				return
 			}

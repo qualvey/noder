@@ -25,7 +25,6 @@ const { searchQuery, filteredItems: filteredFiles, clear: clearSearch } = useFuz
   f.file_type,
   f.source_url,
   f.template_name,
-  f.template_type,
   f.is_active ? t('files.statusActive') : t('files.statusInactive'),
   String(f.id),
 ])
@@ -51,7 +50,6 @@ type FileType = 'apk' | 'zip' | 'text'
 const form = ref({
   type: 'apk' as FileType,
   templateName: '',
-  templateType: 'auto',
   downloadName: '',
   remark: '',
   sourceUrl: '',
@@ -106,7 +104,6 @@ function openCreate() {
   Object.assign(form.value, {
     type: 'apk',
     templateName: '',
-    templateType: 'auto',
     downloadName: '',
     remark: '',
     sourceUrl: '',
@@ -227,7 +224,6 @@ async function submitUpload() {
       if (hasContent) fd.append('content_text', form.value.contentText)
       fd.append('file_type', form.value.type)
       fd.append('template_name', form.value.templateName.trim())
-      fd.append('template_type', isZip ? form.value.templateType : '')
       if (dlName) {
         fd.append('name', dlName)
         fd.append('download_name', dlName)
@@ -418,7 +414,7 @@ onMounted(fetchData)
               <span v-else-if="f.file_type === 'text'" style="color: var(--text-muted)">📝 {{ t('files.sourceText') }}</span>
               <span v-else style="color: var(--text-muted)">📁 {{ t('files.sourceLocal') }}</span>
             </td>
-            <td>{{ f.file_type === 'zip' ? `${f.template_type || 'auto'} / ${f.template_name || '-'}` : '-' }}</td>
+            <td>{{ f.file_type === 'zip' ? f.template_name || '-' : '-' }}</td>
             <td>
               <span v-if="f.is_active" style="color: var(--accent-emerald)">{{ t('files.statusActive') }}</span>
               <span v-else style="color: var(--accent-rose)">{{ t('files.statusInactive') }}</span>
@@ -445,7 +441,7 @@ onMounted(fetchData)
     </div>
 
     <div style="margin-top: 14px; background: var(--bg-card); padding: 14px; border-radius: var(--radius-lg); border: 1px solid var(--border-glass); font-size: 0.82rem; color: var(--text-muted)">
-      <b>{{ t('files.templateHintTitle') }}</b><code>&#123;&#123;uuid&#125;&#125;</code> <code>&#123;&#123;password&#125;&#125;</code> <code>&#123;&#123;token&#125;&#125;</code> <code>&#123;&#123;name&#125;&#125;</code> <code>&#123;&#123;node_list_json&#125;&#125;</code> <code>&#123;&#123;outbounds_json&#125;&#125;</code> <code>&#123;&#123;singbox_config_json&#125;&#125;</code> <code>&#123;&#123;xray_config_json&#125;&#125;</code> <code>&#123;&#123;mihomo_proxies_yaml&#125;&#125;</code> —
+      <b>{{ t('files.templateHintTitle') }}</b><code>&#123;&#123;uuid&#125;&#125;</code> <code>&#123;&#123;password&#125;&#125;</code> <code>&#123;&#123;token&#125;&#125;</code> <code>&#123;&#123;name&#125;&#125;</code> <code>&#123;&#123;node_list_yaml&#125;&#125;</code> <code>&#123;&#123;node_list_json&#125;&#125;</code> <code>&#123;&#123;outbounds_yaml&#125;&#125;</code> <code>&#123;&#123;outbounds_json&#125;&#125;</code> <code>&#123;&#123;mihomo_proxies_yaml&#125;&#125;</code> —
       {{ t('files.templateHintDesc') }}
     </div>
   </section>
@@ -663,16 +659,6 @@ onMounted(fetchData)
                 <span class="ready-badge">{{ t('files.modal.readyBadge') }}</span>
                 <button type="button" class="btn-remove-file" :title="t('files.modal.removeFile')" @click="clearSelectedFile">&times;</button>
               </div>
-            </div>
-
-            <div class="form-group" style="margin-top: 14px;">
-              <label>{{ t('files.modal.templateTypeLabel') }}</label>
-              <select v-model="form.templateType" class="form-control">
-                <option value="auto">{{ t('files.modal.templateTypeAuto') }}</option>
-                <option value="sing-box">{{ t('files.modal.templateTypeSingbox') }}</option>
-                <option value="xray">{{ t('files.modal.templateTypeXray') }}</option>
-              </select>
-              <div class="input-hint">{{ t('files.modal.templateTypeHint') }}</div>
             </div>
 
             <div class="form-group" style="margin-top: 14px;">

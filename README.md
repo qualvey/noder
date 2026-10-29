@@ -117,7 +117,7 @@ make deb-all        # 构建 amd64 与 arm64 架构 deb 包
 ### 4. 文件分发 API (用户侧 / 管理侧)
 - **用户下载 (Token 鉴权)**：GET /dl/{file_id}?token={USER_TOKEN}
   - APK：全员公用，原文件直出下载。
-  - ZIP：上传时可选择或自动识别 Sing-Box / Xray 模板类型（支持 JSON/YAML 配置），下载时打开进度页并按用户节点实时生成 ZIP；支持 `{{uuid}}`、`{{password}}`、`{{token}}`、`{{name}}`、`{{node_list_json}}`、`{{outbounds_json}}`、`{{singbox_config_json}}`、`{{xray_config_json}}` 等占位符，其余文件原样分发。
+  - ZIP：内含 1 个 yaml 模板（支持 \{{uuid}}\ \{{password}}\ \{{token}}\ \{{name}}\ \{{node_list_yaml}}\ \{{node_list_json}}\ \{{outbounds_yaml}}\ \{{outbounds_json}}\ 占位符），下载时按用户凭证实时渲染，其余文件原样分发。
 - **管理端 (Header: \X-Admin-Token\)**：\POST/GET/PUT/DELETE /api/files\ 上传、列表、更新元数据、删除分发文件。
 
 ### 3. 管理员 API (需要 Header: `X-Admin-Token`)

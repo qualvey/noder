@@ -87,7 +87,6 @@ export interface DistFile {
   id: number
   name: string
   file_type: FileType
-  template_type?: 'auto' | 'sing-box' | 'xray' | null
   template_name?: string | null
   original_name: string
   download_name?: string | null

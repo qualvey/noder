@@ -6,7 +6,7 @@
 新增需求：**文件形态分发** —— 不是在线 JSON，而是真实文件下载：
 
 - **APK**：全部用户共用同一份，直接静态分发；也可填远程链接自动拉取缓存。
-- **ZIP**：一个文件夹，内含 **1 个 JSON/YAML 模板**（内容按用户个性化渲染）+ 其他公共文件（原样分发）。模板类型可选择 Sing-Box / Xray，也可由后端自动分析。
+- **ZIP**：一个文件夹，内含 **1 个 yaml 模板**（内容按用户个性化渲染）+ 其他公共文件（原样分发）。
 - **文本 (text)**：粘贴一段文本内容即生成下载链接，下载时按用户渲染占位符（免打包的模板组件）。
 
 ## 2. 架构设计
@@ -37,7 +37,6 @@
 | id | int PK | 文件 ID |
 | name | str | 显示名称 |
 | file_type | str | `apk` / `zip` |
-| template_type | str? | ZIP 模板类型：`sing-box` / `xray` |
 | template_name | str? | ZIP 内模板文件相对路径（仅 zip） |
 | original_name | str | 原始上传文件名（下载时还原） |
 | stored_name | str | 磁盘存储文件名（uuid_原名，索引） |
@@ -56,7 +55,7 @@
 
 | 方法 | 路径 | 说明 |
 | :--- | :--- | :--- |
-| POST | `/api/files` | multipart 上传，三选一：`file` / `source_url` / `content_text`(文本)；另可带 `file_type`(auto/apk/zip) + `template_type`(auto/sing-box/xray) + `template_name`(可选) + `name` + `remark`。ZIP 未指定模板名时自动取第一个 `.json/.yaml/.yml`，并分析配置结构 |
+| POST | `/api/files` | multipart 上传，三选一：`file` / `source_url` / `content_text`(文本)；另可带 `file_type`(auto/apk/zip) + `template_name`(可选) + `name` + `remark`。ZIP 未指定模板名时自动取第一个 `.yaml/.yml` |
 | POST | `/api/files/{id}/refresh` | 强制刷新远程文件缓存 |
 | GET | `/api/files` | 文件列表（按 id 倒序） |
 | PUT | `/api/files/{id}` | 更新元数据：`name` / `template_name` / `is_active` / `remark` |
@@ -80,7 +79,7 @@
 
 | 方法 | 路径 | 说明 |
 | :--- | :--- | :--- |
-| GET | `/dl/{file_id}?token=TOKEN` | ZIP：用户 Token，打开后显示进度页，按模板类型使用该用户的 Sing-Box/Xray 节点生成后返回；APK/文本：共享 Token，原样直出 |
+| GET | `/dl/{file_id}?token=TOKEN` | ZIP：用户 Token，渲染模板后返回；APK/文本：共享 Token，原样直出 |
 | GET | `/api/settings/shared-token` | 查看共享下载 Token（管理员） |
 | POST | `/api/settings/shared-token/reset` | 重置共享下载 Token，旧值立即失效（管理员） |
 
@@ -98,10 +97,6 @@
 | `{{node_list_json}}` | 同上 JSON 数组 |
 | `{{outbounds_yaml}}` | 动态拼接的 Sing-Box Outbounds YAML 列表 |
 | `{{outbounds_json}}` | 同上 JSON 数组 |
-| `{{singbox_outbounds_json}}` | Sing-Box outbound JSON 数组 |
-| `{{xray_outbounds_json}}` | Xray outbound JSON 数组（仅 VLESS） |
-| `{{singbox_config_json}}` | 用户完整 Sing-Box 配置 JSON |
-| `{{xray_config_json}}` | 用户完整 Xray 配置 JSON |
 | `{{mihomo_proxies_yaml}}` | Mihomo 风格 proxies 列表 YAML（vless+reality+vision / tuic v5；anytls 节点被导出守卫拒绝） |
 
 - 未知占位符**原样保留**，不误伤模板中其他 `{{ }}` 内容。
