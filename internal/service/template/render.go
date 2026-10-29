@@ -298,10 +298,11 @@ func shouldRenderLauncherEntry(name string, data []byte, templateType string) bo
 
 // RenderLauncherConfigText also handles launcher archives that contain the
 // old example values instead of Noder placeholders.
-func RenderLauncherConfigText(text string, user *model.User, ctx map[string]string) string {
+func RenderLauncherConfigText(text string, user *model.User, ctx map[string]string, templateType string) string {
 	if user == nil {
 		return text
 	}
+	templateType = NormalizeTemplateType(templateType)
 	lines := strings.SplitAfter(text, "\n")
 	for i, line := range lines {
 		ending := ""
@@ -322,8 +323,9 @@ func RenderLauncherConfigText(text string, user *model.User, ctx map[string]stri
 		replacement := ""
 		switch key {
 		case "upstream_url":
-			replacement = ctx["xray_config_url"]
-			if replacement == "" {
+			if templateType == TemplateTypeXray {
+				replacement = ctx["xray_config_url"]
+			} else {
 				replacement = ctx["singbox_config_url"]
 			}
 		case "token":
@@ -579,7 +581,7 @@ func renderZipForUserWithProgress(zipData []byte, templateName *string, user *mo
 			ctx := buildContext(data)
 			renderedText := RenderTemplateTextWithContext(string(data), user, ctx, knownTokens)
 			if launcherEntries[f.Name] && (strings.EqualFold(filepath.Ext(f.Name), ".yaml") || strings.EqualFold(filepath.Ext(f.Name), ".yml")) {
-				renderedText = RenderLauncherConfigText(renderedText, user, ctx)
+				renderedText = RenderLauncherConfigText(renderedText, user, ctx, templateType)
 			}
 			rendered := []byte(renderedText)
 

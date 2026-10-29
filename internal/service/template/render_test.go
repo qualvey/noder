@@ -86,6 +86,61 @@ func TestRenderXrayLauncherConfigReplacesExampleValues(t *testing.T) {
 	t.Fatal("rendered ZIP did not contain launcher config.yml")
 }
 
+func TestRenderSingboxLauncherConfigUsesSingboxURL(t *testing.T) {
+	var source bytes.Buffer
+	writer := zip.NewWriter(&source)
+	config, err := writer.Create("sing-launcher/config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Write([]byte(`{{singbox_config_json}}`)); err != nil {
+		t.Fatal(err)
+	}
+	launcher, err := writer.Create("sing-launcher/config.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := launcher.Write([]byte("upstream_url: \"https://example.com/xray\"\ntoken: \"replace-with-user-token\"\nconfig_file: \"config.json\"\nsing_box_bin: \"./sing-box.exe\"\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	user := &model.User{Token: "real-user-token"}
+	rendered, err := RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL(source.Bytes(), stringPtr("config.json"), user, nil, nil, TemplateTypeSing, "http://localhost:8000", nil)
+	if err != nil {
+		t.Fatalf("rendering sing-box launcher ZIP failed: %v", err)
+	}
+	result, err := zip.NewReader(bytes.NewReader(rendered), int64(len(rendered)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range result.File {
+		if entry.Name != "sing-launcher/config.yml" {
+			continue
+		}
+		rc, err := entry.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := string(data)
+		if !strings.Contains(got, `upstream_url: "http://localhost:8000/sub"`) {
+			t.Fatalf("sing-box launcher used the wrong upstream URL: %s", got)
+		}
+		if strings.Contains(got, "/xray") {
+			t.Fatalf("sing-box launcher still contains an Xray URL: %s", got)
+		}
+		return
+	}
+	t.Fatal("rendered ZIP did not contain sing-launcher config.yml")
+}
+
 func stringPtr(value string) *string { return &value }
 
 func TestRenderZipForUser(t *testing.T) {
