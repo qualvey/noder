@@ -193,6 +193,25 @@ function updateNodeDropdownPosition() {
 function stopNodeDropdownTracking() {
   window.removeEventListener('resize', updateNodeDropdownPosition)
   window.removeEventListener('scroll', updateNodeDropdownPosition, true)
+  window.removeEventListener('mousedown', onNodeDropdownOutsideMouseDown)
+}
+
+function onNodeDropdownOutsideMouseDown(event: MouseEvent) {
+  const key = activeNodeSelector.value
+  if (!key) return
+
+  const input = nodeInputRefs.get(key)
+  const target = event.target
+  if (!(target instanceof Element)) return
+
+  // 下拉框被 Teleport 到 body，不能只通过父节点判断是否为内部点击。
+  // 点击候选项交给 chooseActiveNode 处理，其他位置则只关闭临时搜索态，
+  // 不修改当前已选中的 node_id。
+  if (input?.contains(target) || target.closest('.endpoint-node-options')) return
+
+  nodeSearch[key] = ''
+  input?.blur()
+  activeNodeSelector.value = null
 }
 
 watch(activeNodeSelector, async (key) => {
@@ -203,6 +222,7 @@ watch(activeNodeSelector, async (key) => {
   updateNodeDropdownPosition()
   window.addEventListener('resize', updateNodeDropdownPosition)
   window.addEventListener('scroll', updateNodeDropdownPosition, true)
+  window.addEventListener('mousedown', onNodeDropdownOutsideMouseDown)
 })
 
 onBeforeUnmount(() => {
