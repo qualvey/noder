@@ -59,6 +59,55 @@ func TestBuildXrayOutbound(t *testing.T) {
 	}
 }
 
+func TestBuildXrayXHTTPOutbound(t *testing.T) {
+	sni := "test.ryugo.org"
+	path := "/api/v1/data"
+	flow := ""
+	node := &model.Node{
+		Tag:           "xhttp",
+		Protocol:      "vless",
+		ServerAddress: "test.ryugo.org",
+		ServerPort:    443,
+		Security:      "tls",
+		SNI:           &sni,
+		TransportType: "xhttp",
+		Path:          &path,
+		Flow:          &flow,
+		IsActive:      true,
+	}
+
+	outbound, err := BuildXrayOutbound(node, testXrayUser())
+	if err != nil {
+		t.Fatalf("BuildXrayOutbound xhttp failed: %v", err)
+	}
+	settings := outbound["settings"].(map[string]interface{})
+	vnext := settings["vnext"].([]interface{})[0].(map[string]interface{})
+	users := vnext["users"].([]interface{})[0].(map[string]interface{})
+	if vnext["address"] != "test.ryugo.org" || vnext["port"] != 443 || users["flow"] != "" {
+		t.Fatalf("unexpected xhttp vnext settings: %#v", settings)
+	}
+	stream := outbound["streamSettings"].(map[string]interface{})
+	if stream["network"] != "xhttp" || stream["security"] != "tls" {
+		t.Fatalf("unexpected xhttp stream settings: %#v", stream)
+	}
+	tls := stream["tlsSettings"].(map[string]interface{})
+	if tls["serverName"] != "test.ryugo.org" || tls["allowInsecure"] != false {
+		t.Fatalf("unexpected xhttp TLS settings: %#v", tls)
+	}
+	xhttp := stream["xhttpSettings"].(map[string]interface{})
+	if xhttp["path"] != "/api/v1/data" || xhttp["mode"] != "auto" {
+		t.Fatalf("unexpected xhttp settings: %#v", xhttp)
+	}
+}
+
+func TestBuildXrayXHTTPRejectsReality(t *testing.T) {
+	node := testXrayNode()
+	node.TransportType = "xhttp"
+	if _, err := BuildXrayOutbound(node, testXrayUser()); err == nil {
+		t.Fatal("expected xhttp + Reality to be rejected")
+	}
+}
+
 func TestGenerateXrayConfigPreservesTemplateAndRejectsDuplicateTag(t *testing.T) {
 	tmp := t.TempDir()
 	config.XrayTemplatePath = filepath.Join(tmp, "xray.json")

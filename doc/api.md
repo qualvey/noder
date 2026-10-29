@@ -28,9 +28,9 @@
 | `protocol` | string | `vless`、`tuic` 或 `anytls`，默认 `vless` |
 | `server_address` | string | 服务器地址，必填 |
 | `server_port` | integer | 服务器端口，必填 |
-| `security` | string | `vless` 固定为 `reality`；`tuic` 固定为 `tls` |
+| `security` | string | `vless` 支持 `tls`/`reality`；`tuic` 固定为 `tls` |
 | `sni` | string | TLS SNI |
-| `transport_type` | string | 传输方式；非 TUIC 默认 `direct` |
+| `transport_type` | string | 传输方式；非 TUIC 默认 `direct`，支持 `xhttp` |
 | `path` | string | 传输路径 |
 | `public_key` | string | Reality 公钥 |
 | `short_id` | string | Reality Short ID |
@@ -42,6 +42,9 @@
 
 VLESS 使用 Reality 时需要同时提供 `public_key`、`short_id`、`sni` 和
 `fingerprint`。服务端会校验必填字段、固定值和枚举值。
+
+`xhttp` 仅支持 VLESS + TLS，必须填写反代域名 `sni`，不支持 Reality。
+该传输层仅由 Xray 渲染；Sing-box 和 Mihomo 订阅会明确返回不支持错误。
 
 ### User（用户）
 

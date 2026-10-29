@@ -37,20 +37,12 @@ func BuildXrayEndpointOutbound(ep *model.Endpoint) (map[string]interface{}, erro
 	if node.Protocol != "vless" {
 		return nil, contract.NewBadRequest(fmt.Sprintf("Xray only supports vless, got '%s'", node.Protocol))
 	}
-	if node.Security != "reality" {
-		return nil, contract.NewBadRequest("Xray VLESS outbound requires reality security")
-	}
 	if node.ServerAddress == "" || node.ServerPort <= 0 {
 		return nil, contract.NewBadRequest("Xray VLESS outbound requires server address and port")
 	}
 	if ep.UUID == "" {
 		return nil, contract.NewBadRequest("Xray VLESS outbound requires user UUID")
 	}
-	if node.SNI == nil || *node.SNI == "" || node.PublicKey == nil || *node.PublicKey == "" ||
-		node.ShortID == nil || *node.ShortID == "" || node.Fingerprint == nil || *node.Fingerprint == "" {
-		return nil, contract.NewBadRequest("Xray VLESS Reality outbound requires sni, public_key, short_id and fingerprint")
-	}
-
 	tag := ep.Tag
 	if tag == "" {
 		tag = node.Tag
@@ -62,6 +54,61 @@ func BuildXrayEndpointOutbound(ep *model.Endpoint) (map[string]interface{}, erro
 		return nil, contract.NewBadRequest("Xray VLESS outbound requires node tag")
 	}
 
+	transportType := contract.NormalizeTransportType(node.TransportType)
+	if transportType == "xhttp" {
+		if node.Security != "tls" {
+			return nil, contract.NewBadRequest("Xray xhttp outbound requires TLS security and does not support Reality")
+		}
+		if node.SNI == nil || *node.SNI == "" {
+			return nil, contract.NewBadRequest("Xray xhttp outbound requires reverse-proxy SNI")
+		}
+		flow := ""
+		if node.Flow != nil {
+			flow = *node.Flow
+		}
+		path := "/"
+		if node.Path != nil && *node.Path != "" {
+			path = *node.Path
+		}
+		return map[string]interface{}{
+			"tag":      tag,
+			"protocol": "vless",
+			"settings": map[string]interface{}{
+				"vnext": []interface{}{map[string]interface{}{
+					"address": node.ServerAddress,
+					"port":    node.ServerPort,
+					"users": []interface{}{map[string]interface{}{
+						"id":         ep.UUID,
+						"encryption": "none",
+						"flow":       flow,
+					}},
+				}},
+			},
+			"streamSettings": map[string]interface{}{
+				"network":  "xhttp",
+				"security": "tls",
+				"sockopt": map[string]interface{}{
+					"mark": 1024,
+				},
+				"tlsSettings": map[string]interface{}{
+					"serverName":    *node.SNI,
+					"allowInsecure": false,
+				},
+				"xhttpSettings": map[string]interface{}{
+					"path": path,
+					"mode": "auto",
+					"extra": map[string]interface{}{
+						"xPaddingBytes": "100-1000",
+					},
+				},
+			},
+		}, nil
+	}
+
+	if node.Security != "reality" && node.Security != "tls" {
+		return nil, contract.NewBadRequest("Xray VLESS outbound requires TLS or Reality security")
+	}
+
 	settings := map[string]interface{}{
 		"address":    node.ServerAddress,
 		"port":       node.ServerPort,
@@ -70,6 +117,30 @@ func BuildXrayEndpointOutbound(ep *model.Endpoint) (map[string]interface{}, erro
 	}
 	if node.Flow != nil && *node.Flow != "" {
 		settings["flow"] = *node.Flow
+	}
+
+	if node.Security == "tls" {
+		stream := map[string]interface{}{
+			"method":   "raw",
+			"security": "tls",
+			"tlsSettings": map[string]interface{}{
+				"allowInsecure": false,
+			},
+		}
+		if node.SNI != nil && *node.SNI != "" {
+			stream["tlsSettings"].(map[string]interface{})["serverName"] = *node.SNI
+		}
+		return map[string]interface{}{
+			"protocol":       "vless",
+			"tag":            tag,
+			"settings":       settings,
+			"streamSettings": stream,
+		}, nil
+	}
+
+	if node.SNI == nil || *node.SNI == "" || node.PublicKey == nil || *node.PublicKey == "" ||
+		node.ShortID == nil || *node.ShortID == "" || node.Fingerprint == nil || *node.Fingerprint == "" {
+		return nil, contract.NewBadRequest("Xray VLESS Reality outbound requires sni, public_key, short_id and fingerprint")
 	}
 
 	return map[string]interface{}{

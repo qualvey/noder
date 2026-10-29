@@ -10,14 +10,20 @@ export interface XrayOutboundConfig {
   protocol: 'vless'
   tag: string
   settings: {
-    address: string
-    port: number
-    id: string
-    encryption: 'none'
+    address?: string
+    port?: number
+    id?: string
+    encryption?: 'none'
     flow?: string
+    vnext?: Array<{
+      address: string
+      port: number
+      users: Array<{ id: string; encryption: 'none'; flow: string }>
+    }>
   }
   streamSettings: {
-    method: string
+    method?: string
+    network?: string
     security: 'reality' | 'tls' | 'none'
     realitySettings?: {
       serverName: string
@@ -27,6 +33,13 @@ export interface XrayOutboundConfig {
     }
     tlsSettings?: {
       serverName?: string
+      allowInsecure?: boolean
+    }
+    sockopt?: { mark?: number }
+    xhttpSettings?: {
+      path: string
+      mode: 'auto'
+      extra: { xPaddingBytes: string }
     }
   }
 }
@@ -67,6 +80,9 @@ export function toNodeMeta(config: BaseOutboundConfig): NodeMeta {
 
 /** 将节点元数据还原为标准 Sing-box outbound。 */
 export function toSingBoxConfig(meta: NodeMeta): BaseOutboundConfig {
+  if (meta.transport?.type === 'xhttp') {
+    throw new Error('Sing-box 暂不支持 xhttp，请使用 Xray 配置')
+  }
   const config: BaseOutboundConfig = {
     type: meta.protocol,
     ...(meta.tag ? { tag: meta.tag } : {}),
@@ -135,6 +151,33 @@ export function toXrayOutbound(meta: NodeMeta): XrayOutboundConfig {
     throw new Error(`Xray 目前仅支持 VLESS，无法转换 ${meta.protocol}`)
   }
   if (!meta.uuid) throw new Error('Xray VLESS 配置缺少 UUID')
+
+  if (meta.transport?.type === 'xhttp') {
+    if (meta.security !== 'tls') throw new Error('Xray XHTTP 仅支持与 TLS 结合，不支持 Reality')
+    if (!meta.serverName) throw new Error('Xray XHTTP 配置缺少反代域名 SNI')
+    return {
+      protocol: 'vless',
+      tag: meta.tag || 'xhttp',
+      settings: {
+        vnext: [{
+          address: meta.server,
+          port: meta.serverPort,
+          users: [{ id: meta.uuid, encryption: 'none', flow: meta.flow || '' }],
+        }],
+      },
+      streamSettings: {
+        network: 'xhttp',
+        security: 'tls',
+        sockopt: { mark: 1024 },
+        tlsSettings: { serverName: meta.serverName, allowInsecure: false },
+        xhttpSettings: {
+          path: meta.transport.path || '/',
+          mode: 'auto',
+          extra: { xPaddingBytes: '100-1000' },
+        },
+      },
+    }
+  }
 
   const outbound: XrayOutboundConfig = {
     protocol: 'vless',

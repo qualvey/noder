@@ -48,6 +48,11 @@ export const vlessHandler: ProtocolHandler<VlessOutboundConfig> = {
     if (!c.server) return '缺少 server (服务器地址) 字段'
     if (!c.server_port) return '缺少 server_port (服务器端口) 字段'
     if (!c.uuid) return '缺少 uuid 字段'
+    const transport = (c.transport as Record<string, unknown> | undefined)?.type
+    const tls = c.tls as Record<string, unknown> | undefined
+    if (transport === 'xhttp' && (!tls?.enabled || (tls.reality as Record<string, unknown> | undefined)?.enabled)) {
+      return 'XHTTP 仅支持与 TLS 结合，不支持 Reality'
+    }
     return null
   },
 
@@ -111,8 +116,11 @@ export const vlessHandler: ProtocolHandler<VlessOutboundConfig> = {
 
     // Transport
     const transportType = searchParams.get('type')
-    const validTransports = ['ws', 'http', 'grpc', 'quic', 'httpupgrade']
+    const validTransports = ['ws', 'http', 'grpc', 'quic', 'httpupgrade', 'xhttp']
     if (transportType && validTransports.includes(transportType)) {
+      if (transportType === 'xhttp' && security !== 'tls') {
+        throw new Error('XHTTP 仅支持 TLS，不支持 Reality')
+      }
       config.transport = {
         type: transportType,
       }
@@ -183,9 +191,12 @@ export const vlessHandler: ProtocolHandler<VlessOutboundConfig> = {
     }
 
     // Transport settings
-    const validTransports = ['ws', 'http', 'grpc', 'quic', 'httpupgrade']
+    const validTransports = ['ws', 'http', 'grpc', 'quic', 'httpupgrade', 'xhttp']
     if (config.transport?.type && validTransports.includes(config.transport.type)) {
       const transportType = config.transport.type
+      if (transportType === 'xhttp' && (security !== 'tls' || config.tls?.reality?.enabled)) {
+        throw new Error('XHTTP 仅支持与 TLS 结合，不支持 Reality')
+      }
       params.push(`type=${transportType}`)
 
       if (transportType === 'ws' || transportType === 'http' || transportType === 'httpupgrade') {

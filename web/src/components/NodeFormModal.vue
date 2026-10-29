@@ -64,7 +64,7 @@ const form = reactive<{
 
 const securityOptions: Record<string, string[]> = {
   tuic: ['tls'],
-  vless: ['reality'],
+  vless: ['reality', 'tls'],
   anytls: ['tls', 'reality', 'auto', 'none'],
 }
 
@@ -130,6 +130,18 @@ watch(form, (value) => {
 function onProtocolChange() {
   const opts = securityOptions[form.protocol] || ['tls']
   if (!opts.includes(form.security)) form.security = opts[0]
+  if (form.protocol !== 'vless' && form.transport_type === 'xhttp') {
+    form.transport_type = 'direct'
+  }
+}
+
+// xhttp 是 Xray 专用传输层，只能与 TLS 搭配，不能配置 Reality。
+function onTransportChange() {
+  if (form.transport_type === 'xhttp') {
+    form.protocol = 'vless'
+    form.security = 'tls'
+    form.flow = ''
+  }
 }
 
 async function saveNode() {
@@ -137,6 +149,7 @@ async function saveNode() {
   const isReality = form.security === 'reality'
   const isVless = form.protocol === 'vless'
   const transportType = normalizeTransportType(form.transport_type)
+  const isXhttp = transportType === 'xhttp'
 
   const payload: Partial<Node> = {
     tag: form.tag.trim(),
@@ -144,14 +157,14 @@ async function saveNode() {
     protocol: form.protocol,
     server_address: form.server_address.trim(),
     server_port: Number(form.server_port),
-    security: form.security,
+    security: isXhttp ? 'tls' : form.security,
     sni: form.sni.trim() || null,
     transport_type: isTuic ? null : transportType,
     path: isTuic ? null : (form.path.trim() || null),
     public_key: isReality ? (form.public_key.trim() || null) : null,
     short_id: isReality ? (form.short_id.trim() || null) : null,
     fingerprint: isReality ? (form.fingerprint.trim() || null) : null,
-    flow: isVless ? (form.flow.trim() || null) : null,
+    flow: isVless && !isXhttp ? (form.flow.trim() || null) : null,
     congestion_control: isTuic ? (form.congestion_control || 'bbr') : null,
     remark: form.remark.trim() || null,
     is_active: true,
@@ -182,17 +195,39 @@ function applyJsonImport() {
     toast(t('nodes.jsonError'), 'error')
     return
   }
-  const tls = (obj.tls as Record<string, unknown>) || {}
+  // 同时支持 Sing-box outbound 和 Xray VLESS outbound。
+  const xrayStream = (obj.streamSettings as Record<string, unknown>) || {}
+  const xraySettings = (obj.settings as Record<string, unknown>) || {}
+  const xrayVnext = Array.isArray(xraySettings.vnext) ? (xraySettings.vnext[0] as Record<string, unknown>) || {} : {}
+  const xrayUser = Array.isArray(xrayVnext.users) ? (xrayVnext.users[0] as Record<string, unknown>) || {} : {}
+  const normalizedObj = Object.keys(xrayStream).length > 0
+    ? {
+        tag: obj.tag,
+        type: obj.protocol,
+        server: xrayVnext.address,
+        server_port: xrayVnext.port,
+        uuid: xrayUser.id,
+        flow: xrayUser.flow,
+        tls: xrayStream.security === 'tls'
+          ? { enabled: true, server_name: (xrayStream.tlsSettings as Record<string, unknown>)?.serverName }
+          : undefined,
+        transport: xrayStream.network === 'xhttp'
+          ? { type: 'xhttp', path: (xrayStream.xhttpSettings as Record<string, unknown>)?.path }
+          : undefined,
+      }
+    : obj
+  const normalized = normalizedObj as Record<string, unknown>
+  const tls = (normalized.tls as Record<string, unknown>) || {}
   const reality = (tls.reality as Record<string, unknown>) || {}
   const utls = (tls.utls as Record<string, unknown>) || {}
-  const transport = (obj.transport as Record<string, unknown>) || {}
+  const transport = (normalized.transport as Record<string, unknown>) || {}
 
-  form.tag = String(obj.tag || '')
-  form.node_name = String(obj.tag || '')
-  const proto = (obj.type as string) || form.protocol
+  form.tag = String(normalized.tag || '')
+  form.node_name = String(normalized.tag || '')
+  const proto = (normalized.type as string) || form.protocol
   form.protocol = proto as 'tuic' | 'vless' | 'anytls'
-  form.server_address = String(obj.server || '')
-  form.server_port = Number(obj.server_port || 8443)
+  form.server_address = String(normalized.server || '')
+  form.server_port = Number(normalized.server_port || 8443)
   form.security = tls?.enabled ? (reality?.enabled ? 'reality' : 'tls') : 'none'
   form.sni = String(tls.server_name || '')
   form.public_key = String(reality.public_key || '')
@@ -200,13 +235,14 @@ function applyJsonImport() {
   // 导入值先过契约白名单，非法值回落默认（与后端 enum 对齐）
   const importedFp = String(utls.fingerprint ?? '')
   form.fingerprint = isEnumValue(UTLS_FINGERPRINTS, importedFp) ? importedFp : 'chrome'
-  const importedFlow = obj.flow === undefined || obj.flow === null ? '' : String(obj.flow)
+  const importedFlow = normalized.flow === undefined || normalized.flow === null ? '' : String(normalized.flow)
   form.flow = isEnumValue(VLESS_FLOWS, importedFlow) ? importedFlow : 'xtls-rprx-vision'
   const importedCc = String(obj.congestion_control ?? '')
   form.congestion_control = isEnumValue(TUIC_CONGESTION_CONTROLS, importedCc) ? importedCc : 'bbr'
   form.transport_type = normalizeTransportType(transport.type)
   form.path = String(transport.path || '')
   onProtocolChange()
+  onTransportChange()
   toast(t('nodes.jsonSuccess'))
 }
 
@@ -278,13 +314,13 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
         </div>
         <div class="form-group">
           <label>{{ t('nodes.form.security') }}</label>
-          <select v-model="form.security" class="form-control">
+          <select v-model="form.security" class="form-control" :disabled="form.transport_type === 'xhttp'">
             <option v-for="opt in securityOptions[form.protocol] || ['tls']" :key="opt" :value="opt">{{ opt.toUpperCase() }}</option>
           </select>
         </div>
         <div class="form-group">
           <label>{{ t('nodes.form.sni') }}</label>
-          <input v-model="form.sni" class="form-control" placeholder="aws.amazon.com" />
+          <input v-model="form.sni" class="form-control" placeholder="aws.amazon.com" :required="form.transport_type === 'xhttp'" />
         </div>
 
         <div v-if="form.protocol === 'tuic'" class="form-group">
@@ -296,7 +332,7 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
           </select>
         </div>
 
-        <div v-if="form.security === 'reality'" class="form-span reality-panel">
+        <div v-if="form.security === 'reality' && form.transport_type !== 'xhttp'" class="form-span reality-panel">
           <div class="form-group">
             <label>{{ t('nodes.form.publicKey') }} <span style="color: var(--accent-rose)">*</span></label>
             <input v-model="form.public_key" class="form-control" placeholder="如 99BZ0JCnaSB55YEQYOCV66GhKTiK2ZGMPR3b6D_Q3wo" />
@@ -321,13 +357,14 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
 
         <div v-if="['vless', 'anytls'].includes(form.protocol)" class="form-group">
           <label>{{ t('nodes.form.transport') }}</label>
-          <select v-model="form.transport_type" class="form-control">
+          <select v-model="form.transport_type" class="form-control" @change="onTransportChange">
             <option value="direct">direct</option>
             <option value="ws">WebSocket (ws)</option>
             <option value="grpc">gRPC</option>
             <option value="http">HTTP</option>
             <option value="quic">QUIC</option>
             <option value="httpupgrade">HTTPUpgrade</option>
+            <option v-if="form.protocol === 'vless'" value="xhttp">XHTTP (仅 Xray + TLS)</option>
           </select>
         </div>
         <div v-if="['vless', 'anytls'].includes(form.protocol)" class="form-group">

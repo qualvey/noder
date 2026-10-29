@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -93,6 +94,16 @@ func getUserActiveEndpoints(user *model.User) []*model.Endpoint {
 	return res
 }
 
+func rejectXHTTPForCore(w http.ResponseWriter, endpoints []*model.Endpoint, core string) bool {
+	for _, ep := range endpoints {
+		if ep != nil && ep.Node != nil && contract.NormalizeTransportType(ep.Node.TransportType) == "xhttp" {
+			HandleAPIError(w, contract.NewBadRequest(fmt.Sprintf("%s 暂不支持 xhttp 传输层，请使用 Xray 渲染", core)))
+			return true
+		}
+	}
+	return false
+}
+
 func getUserOrderedActiveNodes(user *model.User) []*model.Node {
 	orderedIDs := user.GetSortedNodeIDs()
 	activeMap := make(map[int64]*model.Node)
@@ -143,6 +154,9 @@ func GetSingboxConfig(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusNotFound, "No active nodes associated with this user")
 		return
 	}
+	if rejectXHTTPForCore(w, activeEndpoints, "sing-box") {
+		return
+	}
 
 	// 如果用户有关联的模板分支，使用分支内容渲染
 	if user.TemplateBranchID != nil && *user.TemplateBranchID > 0 {
@@ -180,6 +194,9 @@ func GetUserNodes(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusNotFound, "No active nodes associated with this user")
 		return
 	}
+	if rejectXHTTPForCore(w, activeEndpoints, "sing-box") {
+		return
+	}
 
 	var items []map[string]interface{}
 	for _, ep := range activeEndpoints {
@@ -214,6 +231,9 @@ func GetMihomoConfig(w http.ResponseWriter, r *http.Request) {
 	activeEndpoints := getUserActiveEndpoints(user)
 	if len(activeEndpoints) == 0 {
 		RespondError(w, http.StatusNotFound, "No active nodes associated with this user")
+		return
+	}
+	if rejectXHTTPForCore(w, activeEndpoints, "Mihomo") {
 		return
 	}
 
@@ -278,6 +298,9 @@ func VerifyUserToken(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusNotFound, "用户绑定的节点不存在或已被禁用")
 		return
 	}
+	if rejectXHTTPForCore(w, activeEndpoints, "sing-box") {
+		return
+	}
 
 	cfg, err := singbox.GenerateSingboxConfigFromEndpoints(activeEndpoints, user)
 	if err != nil {
@@ -321,6 +344,9 @@ func GetNodesForUser(w http.ResponseWriter, r *http.Request) {
 	activeEndpoints := getUserActiveEndpoints(user)
 	if len(activeEndpoints) == 0 {
 		RespondError(w, http.StatusNotFound, "No active nodes associated with this user")
+		return
+	}
+	if rejectXHTTPForCore(w, activeEndpoints, "sing-box") {
 		return
 	}
 

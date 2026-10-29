@@ -16,6 +16,9 @@ func BuildSingboxEndpointOutbound(ep *model.Endpoint) (map[string]interface{}, e
 		return nil, errors.New("endpoint and node are required")
 	}
 	node := ep.Node
+	if contract.NormalizeTransportType(node.TransportType) == "xhttp" {
+		return nil, contract.NewBadRequest("sing-box 暂不支持 xhttp 传输层，请使用 Xray 渲染")
+	}
 	proto := node.Protocol
 	if proto == "" {
 		proto = "vless"

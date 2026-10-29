@@ -41,9 +41,9 @@ var (
 	UtlsFingerprints       = []string{"chrome", "firefox", "edge", "safari", "360", "qq", "ios", "android", "random", "randomized"}
 	VlessFlows             = []string{"", "xtls-rprx-vision"}
 	TuicCongestionControls = []string{"bbr", "cubic", "new_reno"}
-	// Sing-box V2Ray transport types. "direct" is the internal sentinel for
-	// the default TCP transport and must not be emitted as a transport object.
-	TransportTypes = []string{"http", "ws", "quic", "grpc", "httpupgrade"}
+	// Transport types shared by the node form. "xhttp" is intentionally only
+	// rendered by Xray; sing-box and Mihomo reject it explicitly.
+	TransportTypes = []string{"http", "ws", "quic", "grpc", "httpupgrade", "xhttp"}
 )
 
 // NormalizeTransportType returns a supported transport type or "direct" so
@@ -72,16 +72,18 @@ var ProtocolContracts = map[string]*NodeContract{
 	"vless": {
 		Protocol: "vless",
 		Required: map[string]bool{"tag": true, "server_address": true, "server_port": true, "uuid": true},
-		Optional: map[string]bool{"node_name": true, "flow": true},
-		Fixed:    map[string]string{"security": "reality"},
+		Optional: map[string]bool{"node_name": true, "flow": true, "transport_type": true, "path": true},
 		Deps: map[string]map[string][]string{
 			"security": {
 				"reality": {"public_key", "short_id", "sni", "fingerprint"},
+				"tls":     {},
 			},
 		},
 		Enum: map[string][]string{
-			"flow":        VlessFlows,
-			"fingerprint": UtlsFingerprints,
+			"flow":           VlessFlows,
+			"fingerprint":    UtlsFingerprints,
+			"security":       {"tls", "reality"},
+			"transport_type": append([]string{"direct"}, TransportTypes...),
 		},
 	},
 	"anytls": {
@@ -162,6 +164,23 @@ func ValidateNodeContract(values map[string]interface{}, protocol string, nodeLe
 	}
 	if len(missing) > 0 {
 		return NewBadRequest(fmt.Sprintf("[%s] 缺少必填字段: %s", protocol, strings.Join(missing, ", ")))
+	}
+
+	// xhttp is an Xray-only VLESS transport. It cannot be combined with
+	// Reality and needs the reverse-proxy hostname in SNI.
+	transport, _ := getString(values, "transport_type")
+	if strings.EqualFold(strings.TrimSpace(transport), "xhttp") {
+		if strings.ToLower(strings.TrimSpace(protocol)) != "vless" {
+			return NewBadRequest("xhttp 仅支持 VLESS 协议")
+		}
+		security, _ := getString(values, "security")
+		if strings.ToLower(strings.TrimSpace(security)) != "tls" {
+			return NewBadRequest("xhttp 仅支持与 TLS 结合，不支持 Reality")
+		}
+		sni, _ := getString(values, "sni")
+		if strings.TrimSpace(sni) == "" {
+			return NewBadRequest("xhttp 必须填写反代域名 SNI")
+		}
 	}
 
 	// 2. 固定取值

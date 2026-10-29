@@ -11,10 +11,11 @@ const initialTheme = savedTheme === 'light' || savedTheme === 'dark'
 document.documentElement.dataset.theme = initialTheme
 
 import { i18n } from './i18n'
+import { router } from './router'
 import IconButton from './components/IconButton.vue'
 import SearchInput from './components/SearchInput.vue'
 
 const app = createApp(App)
 app.component('IconButton', IconButton)
 app.component('SearchInput', SearchInput)
-app.use(i18n).mount('#app')
+app.use(i18n).use(router).mount('#app')

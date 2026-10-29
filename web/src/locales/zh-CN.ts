@@ -33,6 +33,7 @@ export default {
     users: '用户管理',
     files: '文件分发',
     help: '使用指引与 API',
+    tools: '实用工具',
     nodesOnline: '在线节点',
     usersActive: '活跃用户',
     systemOnline: '系统运行正常',

@@ -45,7 +45,7 @@ export interface TlsConfig {
 }
 
 export interface TransportConfig {
-  type?: 'ws' | 'http' | 'grpc' | 'quic' | 'httpupgrade' | string
+  type?: 'ws' | 'http' | 'grpc' | 'quic' | 'httpupgrade' | 'xhttp' | string
   path?: string
   host?: string | string[]
   headers?: Record<string, string>

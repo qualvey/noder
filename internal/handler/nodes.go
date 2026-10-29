@@ -71,7 +71,11 @@ func CreateNode(w http.ResponseWriter, r *http.Request) {
 			body["fingerprint"] = "chrome"
 		}
 		if _, ok := body["flow"]; !ok {
-			body["flow"] = "xtls-rprx-vision"
+			if contract.NormalizeTransportType(transport) == "xhttp" {
+				body["flow"] = ""
+			} else {
+				body["flow"] = "xtls-rprx-vision"
+			}
 		}
 	}
 	if _, ok := body["is_active"]; !ok {

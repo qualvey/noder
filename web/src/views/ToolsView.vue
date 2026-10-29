@@ -1,41 +1,30 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import WatermarkTool from "../tools/WatermarkTool.vue";
-import NodeTransferTool from "../tools/NodeTransferTool.vue";
-import QRCodeTool from "../tools/QRCodeTool.vue";
-
-type ToolKey = "watermark" | "transfer" | "qrcode";
-const activeTool = ref<ToolKey>("watermark");
-
 const tools = [
-  { key: "watermark" as const, icon: "✦", label: "图片水印", hint: "编辑图片" },
-  { key: "transfer" as const, icon: "⇄", label: "节点转换", hint: "转换配置" },
-  { key: "qrcode" as const, icon: "⌁", label: "二维码", hint: "生成与解析" },
+  { key: "watermark", to: "/tools/watermark", icon: "✦", label: "图片水印" },
+  { key: "transfer", to: "/tools/transfer", icon: "⇄", label: "节点转换" },
+  { key: "qrcode", to: "/tools/qrcode", icon: "⌁", label: "二维码" },
 ];
 </script>
 
 <template>
   <section class="tools-page">
     <nav class="tools-nav" aria-label="工具选择">
-      <button
+      <RouterLink
         v-for="tool in tools"
         :key="tool.key"
-        type="button"
-        :class="{ active: activeTool === tool.key }"
-        @click="activeTool = tool.key"
+        :to="tool.to"
+        active-class="active"
       >
         <span class="nav-icon">{{ tool.icon }}</span>
         <span
           ><strong>{{ tool.label }}</strong
           ></span
         >
-      </button>
+      </RouterLink>
     </nav>
 
     <main class="tools-content">
-      <WatermarkTool v-if="activeTool === 'watermark'" />
-      <NodeTransferTool v-else-if="activeTool === 'transfer'" />
-      <QRCodeTool v-else />
+      <RouterView />
     </main>
   </section>
 </template>
@@ -97,7 +86,7 @@ const tools = [
   border-radius: 12px;
   background: var(--bg-soft);
 }
-.tools-nav button {
+.tools-nav a {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -109,13 +98,14 @@ const tools = [
   color: var(--text-muted);
   cursor: pointer;
   text-align: left;
+  text-decoration: none;
   transition: 0.2s;
 }
-.tools-nav button:hover {
+.tools-nav a:hover {
   color: var(--text-main);
   background: color-mix(in srgb, var(--primary) 8%, transparent);
 }
-.tools-nav button.active {
+.tools-nav a.active {
   border-color: color-mix(in srgb, var(--primary) 25%, var(--border-glass));
   background: var(--bg-elevated);
   color: var(--text-main);
@@ -136,7 +126,7 @@ const tools = [
   background: var(--primary);
   color: white;
 }
-.tools-nav button span:last-child {
+.tools-nav a span:last-child {
   display: grid;
   gap: 1px;
 }
@@ -163,13 +153,13 @@ const tools = [
   .tools-nav {
     gap: 3px;
   }
-  .tools-nav button {
+  .tools-nav a {
     min-width: 0;
     flex: 1;
     justify-content: center;
     padding: 7px 4px;
   }
-  .tools-nav button span:last-child {
+  .tools-nav a span:last-child {
     text-align: center;
   }
   .tools-nav small {

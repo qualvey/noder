@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"noder/internal/contract"
 	"noder/internal/db"
 	"noder/internal/model"
 	"noder/internal/service/singbox"
@@ -249,9 +250,14 @@ func RenderConfigStateless(w http.ResponseWriter, r *http.Request) {
 		if proto == "" {
 			proto = "vless"
 		}
+		transportType := contract.NormalizeTransportType(nr.TransportType)
 		sec := nr.Security
 		if sec == "" && proto == "vless" {
-			sec = "reality"
+			if transportType == "xhttp" {
+				sec = "tls"
+			} else {
+				sec = "reality"
+			}
 		}
 		n := &model.Node{
 			Tag:               nr.Tag,
@@ -266,7 +272,7 @@ func RenderConfigStateless(w http.ResponseWriter, r *http.Request) {
 			Fingerprint:       nr.Fingerprint,
 			Flow:              nr.Flow,
 			CongestionControl: nr.CongestionControl,
-			TransportType:     nr.TransportType,
+			TransportType:     transportType,
 			Path:              nr.Path,
 			IsActive:          true,
 		}

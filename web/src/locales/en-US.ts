@@ -33,6 +33,7 @@ export default {
     users: 'Users',
     files: 'Files',
     help: 'Guides & API',
+    tools: 'Utilities',
     nodesOnline: 'Online Nodes',
     usersActive: 'Active Users',
     systemOnline: 'System Operational',

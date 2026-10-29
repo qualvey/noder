@@ -10,7 +10,7 @@ export interface Node {
   method?: string | null
   security?: string | null
   sni?: string | null
-  transport_type?: string | null
+  transport_type?: 'direct' | 'http' | 'ws' | 'quic' | 'grpc' | 'httpupgrade' | 'xhttp' | string | null
   path?: string | null
   is_active: boolean
   public_key?: string | null

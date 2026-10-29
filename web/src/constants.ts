@@ -10,9 +10,9 @@ export const VLESS_FLOWS = ['', 'xtls-rprx-vision'] as const
 
 export const TUIC_CONGESTION_CONTROLS = ['bbr', 'cubic', 'new_reno'] as const
 
-// Sing-box V2Ray transport types. direct means the default transport and is
-// intentionally omitted from generated sing-box JSON.
-export const TRANSPORT_TYPES = ['http', 'ws', 'quic', 'grpc', 'httpupgrade'] as const
+// Supported node transport types. direct means the default TCP transport and
+// is intentionally omitted from generated sing-box JSON; xhttp is Xray-only.
+export const TRANSPORT_TYPES = ['http', 'ws', 'quic', 'grpc', 'httpupgrade', 'xhttp'] as const
 
 export function normalizeTransportType(value: unknown): string {
   const transport = String(value ?? '').trim().toLowerCase()

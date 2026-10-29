@@ -145,6 +145,8 @@ provide('popover', { show: showPopover, hide: hidePopover })
 
 import { useI18n } from 'vue-i18n'
 import { setLocale, type LocaleType } from './i18n'
+import { useRoute } from 'vue-router'
+import { mainNavItems, type TabKey } from './navigation'
 
 const { t, locale } = useI18n()
 
@@ -154,7 +156,11 @@ function toggleLocale() {
 }
 
 // 页面状态
-const activeTab = ref<'nodes' | 'users' | 'files' | 'help' | 'tools'>('nodes')
+const route = useRoute()
+const activeTab = computed<TabKey>(() => {
+  const navKey = route.meta.navKey
+  return typeof navKey === 'string' ? navKey as TabKey : 'nodes'
+})
 const adminTokenInput = ref(getAdminToken() || 'admin-secret')
 const showToken = ref(false)
 const metrics = ref({ nodes: 0, users: 0 })
@@ -170,11 +176,7 @@ function toggleTheme() {
 
 // Tab 定义 + 滑块位移索引
 const tabs = computed(() => [
-  { key: 'nodes' as const, label: t('nav.nodes') },
-  { key: 'users' as const, label: t('nav.users') },
-  { key: 'files' as const, label: t('nav.files') },
-  { key: 'help' as const, label: t('nav.help') },
-  { key: 'tools' as const, label: '实用工具' },
+  ...mainNavItems.map((item) => ({ key: item.key, to: item.to, label: t(item.labelKey) })),
 ])
 const tabIndex = computed(() => tabs.value.findIndex((t) => t.key === activeTab.value))
 
@@ -243,11 +245,6 @@ onBeforeUnmount(() => {
 })
 
 import { getAdminToken, setAdminToken, validateAdminToken } from './api'
-import NodesView from './views/NodesView.vue'
-import UsersView from './views/UsersView.vue'
-import FilesView from './views/FilesView.vue'
-import HelpView from './views/HelpView.vue'
-import ToolsView from './views/ToolsView.vue'
 
 const isUnlocked = ref(false)
 const unlockInput = ref('')
@@ -380,7 +377,6 @@ provide('metrics', updateMetrics)
     <!-- 桌面/中屏 (>= 768px) 现代化侧边栏 -->
     <div class="desktop-sidebar-container">
       <Sidebar
-        v-model:activeTab="activeTab"
         v-model:collapsed="isSidebarCollapsed"
         :metrics="metrics"
         :adminToken="adminTokenInput"
@@ -484,24 +480,20 @@ provide('metrics', updateMetrics)
               }"
             ></div>
           </div>
-          <button
+          <RouterLink
             v-for="t in tabs"
             :key="t.key"
+            :to="t.to"
             class="tab-btn"
             :class="{ active: activeTab === t.key }"
-            @click="activeTab = t.key"
           >
             {{ t.label }}
-          </button>
+          </RouterLink>
         </div>
 
         <!-- 页面视图容器 -->
         <div class="tab-view-container" :class="{ 'sticky-expanded': isHeightExpanded }">
-          <NodesView v-if="activeTab === 'nodes'" />
-          <UsersView v-else-if="activeTab === 'users'" />
-          <FilesView v-else-if="activeTab === 'files'" />
-          <HelpView v-else-if="activeTab === 'help'" />
-          <ToolsView v-else />
+          <RouterView />
         </div>
       </main>
     </div>
@@ -1142,6 +1134,7 @@ provide('metrics', updateMetrics)
   border-radius: 12px;
   text-align: center;
   cursor: pointer;
+  text-decoration: none;
   transition: color 0.2s ease;
 }
 

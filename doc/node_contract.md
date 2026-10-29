@@ -27,10 +27,13 @@ class NodeContract:
 | 协议 | required | optional | fixed | deps | enum |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | tuic | tag, server_address, server_port, uuid, password | congestion_control | security=tls | - | congestion_control: bbr/cubic/new_reno |
-| vless | tag, server_address, server_port, uuid | node_name, flow | security=reality | security=reality → public_key, short_id, sni, fingerprint | flow: "" / xtls-rprx-vision；fingerprint: chrome/firefox/edge/safari/360/qq/ios/android/random/randomized |
+| vless | tag, server_address, server_port, uuid | node_name, flow, transport_type, path | - | security=reality → public_key, short_id, sni, fingerprint | security: tls/reality；transport_type: direct/http/ws/quic/grpc/httpupgrade/xhttp |
 | anytls | server_address, server_port | node_name, method, sni, transport_type, path, remark | - | security=reality → public_key, short_id | - |
 
 > **字段归属说明**：`tag`/`node_name`/`server_address`/`server_port`/`security`/`public_key`/`short_id`/`fingerprint`/`flow`/`congestion_control` 等为**节点自有字段**（存 Node 表）；`uuid`/`password` 为**用户级凭证**（存 User 表，每个用户独立，见 models.py 方案 3）。
+
+`xhttp` 是 Xray 专用传输层：仅允许 VLESS + TLS，并要求 `sni`；不支持
+Reality，且当前不导出到 Sing-box 或 Mihomo。
 
 ### 校验规则（两阶段）
 

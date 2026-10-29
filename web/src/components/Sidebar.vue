@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { LocaleType } from '../i18n'
-
-export type TabKey = 'nodes' | 'users' | 'files' | 'help' | 'tools'
+import { useRoute } from 'vue-router'
+import { mainNavItems } from '../navigation'
 
 const props = defineProps<{
-  activeTab: TabKey
   metrics: { nodes: number; users: number }
   adminToken: string
   theme: 'light' | 'dark'
@@ -14,7 +12,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'update:activeTab', val: TabKey): void
   (e: 'update:collapsed', val: boolean): void
   (e: 'toggleTheme'): void
   (e: 'toggleLocale'): void
@@ -22,6 +19,7 @@ const emit = defineEmits<{
 }>()
 
 const { t, locale } = useI18n()
+const route = useRoute()
 
 // 手动强制折叠状态 (宽屏下可手动折叠成 Rail)
 const isManualCollapsed = ref(props.collapsed ?? (localStorage.getItem('noder_sidebar_collapsed') === 'true'))
@@ -91,38 +89,17 @@ function saveToken() {
 }
 
 // 导航菜单项
-const navItems = computed(() => [
-  {
-    key: 'nodes' as const,
-    label: t('nav.nodes'),
-    badge: props.metrics.nodes,
-    icon: 'nodes',
-  },
-  {
-    key: 'users' as const,
-    label: t('nav.users'),
-    badge: props.metrics.users,
-    icon: 'users',
-  },
-  {
-    key: 'files' as const,
-    label: t('nav.files'),
-    badge: undefined,
-    icon: 'files',
-  },
-  {
-    key: 'help' as const,
-    label: t('nav.help'),
-    badge: undefined,
-    icon: 'help',
-  },
-  {
-    key: 'tools' as const,
-    label: '实用工具',
-    badge: undefined,
-    icon: 'tools',
-  },
-])
+const navItems = computed(() => mainNavItems.map((item) => ({
+  ...item,
+  label: t(item.labelKey),
+  badge: item.key === 'nodes'
+    ? props.metrics.nodes
+    : item.key === 'users' ? props.metrics.users : undefined,
+})))
+
+function isNavItemActive(key: string) {
+  return route.meta.navKey === key
+}
 </script>
 
 <template>
@@ -150,14 +127,13 @@ const navItems = computed(() => [
 
     <!-- 菜单列表 -->
     <nav class="sidebar-nav">
-      <button
+      <RouterLink
         v-for="item in navItems"
         :key="item.key"
-        type="button"
+        :to="item.to"
         class="nav-item"
-        :class="{ active: activeTab === item.key }"
+        :class="{ active: isNavItemActive(item.key) }"
         :title="!isExpanded ? item.label : undefined"
-        @click="emit('update:activeTab', item.key)"
       >
         <span class="nav-icon-wrapper">
           <!-- Nodes Icon -->
@@ -203,7 +179,7 @@ const navItems = computed(() => [
         >
           <span v-if="isExpanded">{{ item.badge }}</span>
         </span>
-      </button>
+      </RouterLink>
     </nav>
 
     <!-- 底部控制面板 -->
@@ -415,6 +391,7 @@ const navItems = computed(() => [
   transition: all 0.2s ease;
   position: relative;
   white-space: nowrap;
+  text-decoration: none;
 }
 
 .nav-item:hover {
