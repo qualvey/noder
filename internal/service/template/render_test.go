@@ -51,68 +51,13 @@ func TestDetectTemplateType(t *testing.T) {
 
 func TestXrayTemplateContext(t *testing.T) {
 	user := &model.User{Name: "Xray User", Token: "xray-token", UUID: stringPtr("11111111-1111-4111-8111-111111111111")}
-	ctx := BuildTemplateContextFromEndpointsForTargetWithBaseURL(user, []*model.Endpoint{testXrayTemplateEndpoint()}, false, TemplateTypeXray, "https://proxy.example.test/base/")
+	ctx := BuildTemplateContextFromEndpointsForTarget(user, []*model.Endpoint{testXrayTemplateEndpoint()}, false, TemplateTypeXray)
 	if !strings.Contains(ctx["xray_outbounds_json"], `"protocol": "vless"`) {
 		t.Fatalf("xray outbound placeholder was not generated: %s", ctx["xray_outbounds_json"])
 	}
 	if !strings.Contains(ctx["xray_config_json"], `"inbounds"`) {
 		t.Fatalf("full xray config placeholder was not generated: %s", ctx["xray_config_json"])
 	}
-	if got, want := ctx["xray_config_url"], "https://proxy.example.test/base/xray"; got != want {
-		t.Fatalf("xray launcher URL = %q, want %q", got, want)
-	}
-}
-
-func TestRenderXrayLauncherRendersCompanionConfigYAML(t *testing.T) {
-	var source bytes.Buffer
-	writer := zip.NewWriter(&source)
-	jsonEntry, err := writer.Create("config.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := jsonEntry.Write([]byte(`{{xray_config_json}}`)); err != nil {
-		t.Fatal(err)
-	}
-	yamlEntry, err := writer.Create("config.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := yamlEntry.Write([]byte("upstream_url: \"{{xray_config_url}}\"\ntoken: \"{{token}}\"\nxray_bin: ./xray.exe\n")); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	user := &model.User{Name: "Xray User", Token: "xray-token", UUID: stringPtr("11111111-1111-4111-8111-111111111111")}
-	rendered, err := RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL(source.Bytes(), stringPtr("config.json"), user, []*model.Endpoint{testXrayTemplateEndpoint()}, nil, TemplateTypeXray, "https://proxy.example.test", nil)
-	if err != nil {
-		t.Fatalf("rendering Xray launcher ZIP failed: %v", err)
-	}
-	resultZip, err := zip.NewReader(bytes.NewReader(rendered), int64(len(rendered)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range resultZip.File {
-		if entry.Name != "config.yaml" {
-			continue
-		}
-		rc, err := entry.Open()
-		if err != nil {
-			t.Fatal(err)
-		}
-		data, err := io.ReadAll(rc)
-		_ = rc.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
-		got := string(data)
-		if !strings.Contains(got, `upstream_url: "https://proxy.example.test/xray"`) || !strings.Contains(got, `token: "xray-token"`) {
-			t.Fatalf("Xray launcher config was not rendered: %s", got)
-		}
-		return
-	}
-	t.Fatal("rendered ZIP did not contain config.yaml")
 }
 
 func TestRenderXrayZipUsesUserConfig(t *testing.T) {

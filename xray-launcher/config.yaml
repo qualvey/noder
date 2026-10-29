@@ -1,6 +1,6 @@
 # Configuration for the Windows Xray launcher.
 # The URL should point to Noder's /xray endpoint.
-upstream_url: "{{xray_config_url}}"
-token: "{{token}}"
+upstream_url: "https://example.com/xray"
+token: "replace-with-user-token"
 config_file: "config.json"
 xray_bin: "./xray.exe"
