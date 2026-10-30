@@ -1,5 +1,17 @@
 # Noder 商城微服务与配置生成引擎设计方案
 
+> 领域模型规范以 `doc/micro-service/refactor/` 和 `doc/domain_model_er.md` 为准。本文件中的旧 `Node` / `Endpoint` 表结构描述仅作为迁移前业务背景，不作为新模型定义。
+
+## 部署标准
+
+正式部署采用 Docker 化：
+
+- Noder 作为应用容器运行；
+- PostgreSQL 作为数据库容器运行；
+- PostgreSQL 使用持久化 Volume；
+- 配置、数据库连接、密钥通过环境变量或 Docker Secret 注入；
+- 数据库迁移、备份和恢复纳入发布流程。
+
 ## 一、系统定位与职责边界
 
 本项目（Noder）作为独立微服务运行，主要为外部商城后端及运维流程提供核心能力支撑：

@@ -186,6 +186,14 @@ Token 下载时进行个性化渲染；远程文件还包含 `source_url`、`cac
 | `GET` | `/api/user/nodes?token={token}` | Sing-Box outbound 数组 |
 | `GET` | `/api/user/verify?token={token}` | 用户摘要及 `singbox_config` |
 
+
+/xray?token={token} 
+
+```json
+{"detail":"Xray only supports vless, got 'tuic'"}
+```
+渲染xray 节点时，跳过tuic ,　而不是直接不渲染，有vless就可以渲染
+
 以上接口只使用启用用户和启用节点。Token 缺失、无效或用户停用返回 `401`；
 没有启用节点返回 `404`。
 
