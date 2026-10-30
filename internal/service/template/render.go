@@ -3,7 +3,6 @@ package template
 import (
 	"archive/zip"
 	"bytes"
-	"encoding/json"
 	"hash/crc32"
 	"io"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"noder/internal/jsonutil"
 	"noder/internal/model"
 )
 
@@ -38,7 +38,7 @@ func NormalizeTemplateType(value string) string {
 
 func DetectTemplateType(data []byte) string {
 	var value interface{}
-	if json.Unmarshal(data, &value) == nil {
+	if jsonutil.Unmarshal(data, &value) == nil {
 		if detected := detectTemplateTypeValue(value); detected != "" {
 			return detected
 		}
@@ -388,6 +388,9 @@ func renderZipForUserWithProgress(zipData []byte, templateName *string, user *mo
 				renderedText = pipeline.renderLauncherConfig(renderedText, user, ctx)
 			}
 			rendered := []byte(renderedText)
+			if strings.EqualFold(filepath.Ext(f.Name), ".json") {
+				rendered = jsonutil.StripComments(rendered)
+			}
 
 			header := f.FileHeader
 			header.Method = zip.Store
@@ -456,6 +459,10 @@ func RenderZipForUserTo(zipData []byte, templateName *string, user *model.User, 
 	}
 
 	ctx := BuildTemplateContext(user, nodes, strings.Contains(string(data), MihomoPlaceholder))
-	_, err = io.WriteString(dst, RenderTemplateTextWithContext(string(data), user, ctx, knownTokens))
+	rendered := RenderTemplateTextWithContext(string(data), user, ctx, knownTokens)
+	if strings.EqualFold(filepath.Ext(target.Name), ".json") {
+		rendered = string(jsonutil.StripComments([]byte(rendered)))
+	}
+	_, err = io.WriteString(dst, rendered)
 	return err
 }

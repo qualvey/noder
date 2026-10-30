@@ -17,6 +17,7 @@ import (
 	"github.com/uptrace/bun"
 	"noder/internal/config"
 	"noder/internal/db"
+	"noder/internal/jsonutil"
 	"noder/internal/model"
 )
 
@@ -43,7 +44,7 @@ func parseAndValidateConfigOverride(raw string) (*string, error) {
 	}
 
 	var data map[string]interface{}
-	if err := json.Unmarshal([]byte(trimmed), &data); err != nil {
+	if err := jsonutil.Unmarshal([]byte(trimmed), &data); err != nil {
 		return nil, fmt.Errorf("config_override 必须是合法 JSON: %v", err)
 	}
 

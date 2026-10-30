@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"noder/internal/contract"
 	"noder/internal/db"
+	"noder/internal/jsonutil"
 	"noder/internal/model"
 	"noder/internal/service/singbox"
 	"noder/internal/service/xray"
@@ -325,7 +326,7 @@ func RenderConfigStateless(w http.ResponseWriter, r *http.Request) {
 	case "sing-box":
 		if customTemplateContent != "" {
 			var tplMap map[string]interface{}
-			if err := json.Unmarshal([]byte(customTemplateContent), &tplMap); err != nil {
+			if err := jsonutil.Unmarshal([]byte(customTemplateContent), &tplMap); err != nil {
 				RespondServiceError(w, http.StatusBadRequest, fmt.Sprintf("解析自定义模板 JSON 失败: %v", err))
 				return
 			}
@@ -336,7 +337,7 @@ func RenderConfigStateless(w http.ResponseWriter, r *http.Request) {
 	case "xray":
 		if customTemplateContent != "" {
 			var tplMap map[string]interface{}
-			if err := json.Unmarshal([]byte(customTemplateContent), &tplMap); err != nil {
+			if err := jsonutil.Unmarshal([]byte(customTemplateContent), &tplMap); err != nil {
 				RespondServiceError(w, http.StatusBadRequest, fmt.Sprintf("解析自定义模板 JSON 失败: %v", err))
 				return
 			}

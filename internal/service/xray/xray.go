@@ -1,7 +1,6 @@
 package xray
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -9,6 +8,7 @@ import (
 
 	"noder/internal/config"
 	"noder/internal/contract"
+	"noder/internal/jsonutil"
 	"noder/internal/model"
 )
 
@@ -18,11 +18,11 @@ func LoadXrayTemplate() (map[string]interface{}, error) {
 	data, err := os.ReadFile(config.XrayTemplatePath)
 	if err != nil || len(data) == 0 {
 		var cfg map[string]interface{}
-		_ = json.Unmarshal([]byte(DefaultXrayTemplateJSON), &cfg)
+		_ = jsonutil.Unmarshal([]byte(DefaultXrayTemplateJSON), &cfg)
 		return cfg, nil
 	}
 	var cfg map[string]interface{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := jsonutil.Unmarshal(data, &cfg); err != nil {
 		log.Printf("Failed to unmarshal xray template: %v", err)
 		return nil, err
 	}

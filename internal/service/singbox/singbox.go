@@ -1,13 +1,13 @@
 package singbox
 
 import (
-	"encoding/json"
 	"errors"
 	"log"
 	"os"
 
 	"noder/internal/config"
 	"noder/internal/contract"
+	"noder/internal/jsonutil"
 	"noder/internal/model"
 )
 
@@ -223,11 +223,11 @@ func LoadSingboxTemplate() (map[string]interface{}, error) {
 	data, err := os.ReadFile(config.SingBoxTemplatePath)
 	if err != nil || len(data) == 0 {
 		var res map[string]interface{}
-		_ = json.Unmarshal([]byte(DefaultSingboxTemplateJSON), &res)
+		_ = jsonutil.Unmarshal([]byte(DefaultSingboxTemplateJSON), &res)
 		return res, nil
 	}
 	var res map[string]interface{}
-	if err := json.Unmarshal(data, &res); err != nil {
+	if err := jsonutil.Unmarshal(data, &res); err != nil {
 		log.Printf("Failed to unmarshal singbox template: %v", err)
 		return nil, err
 	}
@@ -302,7 +302,7 @@ func GenerateSingboxConfigFromTemplate(cfg map[string]interface{}, endpoints []*
 	// 3. 应用 config_override
 	if user != nil && user.ConfigOverride != nil && *user.ConfigOverride != "" {
 		var override map[string]interface{}
-		if err := json.Unmarshal([]byte(*user.ConfigOverride), &override); err == nil {
+		if err := jsonutil.Unmarshal([]byte(*user.ConfigOverride), &override); err == nil {
 			for k, v := range override {
 				if config.AllowedOverrideKeys[k] {
 					cfg[k] = v

@@ -3,6 +3,7 @@ package template
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
@@ -155,6 +156,16 @@ func TestDetectTemplateTypePrefersExplicitSingboxMarker(t *testing.T) {
 	}
 }
 
+func TestDetectTemplateTypeSupportsCommentedJSON(t *testing.T) {
+	data := []byte(`{
+  // Xray JSONC template
+  "outbounds": [{"protocol": "vless"}]
+}`)
+	if got := DetectTemplateType(data); got != TemplateTypeXray {
+		t.Fatalf("expected Xray pipeline, got %q", got)
+	}
+}
+
 func TestDetectTemplateTypeFromZipChecksLauncherWhenConfigIsPlaceholder(t *testing.T) {
 	var source bytes.Buffer
 	writer := zip.NewWriter(&source)
@@ -271,6 +282,55 @@ func TestRenderZipForUser(t *testing.T) {
 				t.Errorf("Non-template file altered: %s", string(data))
 			}
 		}
+	}
+}
+
+func TestRenderZipForUserStripsJSONComments(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	config, err := zw.Create("config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = config.Write([]byte(`{
+  // keep the generated config valid for strict JSON clients
+  "url": "https://example.com/a//b",
+  /* token is filled by the renderer */
+  "token": "{{token}}"
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	rendered, err := RenderZipForUser(buf.Bytes(), nil, &model.User{Token: "zip-token"}, nil, nil)
+	if err != nil {
+		t.Fatalf("RenderZipForUser failed: %v", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(rendered), int64(len(rendered)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc, err := zr.File[0].Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(rc)
+	_ = rc.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "// keep") || strings.Contains(string(data), "token is") {
+		t.Fatalf("JSON comments were not stripped: %s", data)
+	}
+	var configValue map[string]string
+	if err := json.Unmarshal(data, &configValue); err != nil {
+		t.Fatalf("rendered JSON is invalid: %v", err)
+	}
+	if configValue["url"] != "https://example.com/a//b" || configValue["token"] != "zip-token" {
+		t.Fatalf("unexpected rendered config: %#v", configValue)
 	}
 }
 

@@ -1,3 +1,362 @@
 {
-  "outbounds": []
+  "log": {
+    "loglevel": "info",
+    // "access": "/var/log/xray/xray.log",
+    // "error": "/var/log/xray/xray.log",
+    "dnsLog": true
+  },
+  "api": {
+    "tag": "api",
+    "listen": "127.0.0.1:8900",
+    "services": [
+      "HandlerService",
+      "LoggerService",
+      "StatsService",
+      "RoutingService"
+    ]
+  },
+  "dns": {
+    "servers": [
+      // 防止谷歌人机验证卡住、防止谷歌中国被监控（因为大量三方网站可能加载谷歌字体之类的）
+      {
+        "address": "1.1.1.1",
+        "skipFallback": true,
+        "domains": [
+          "geosite:google",
+          "geosite:google-cn"
+        ]
+      },
+      {
+        "address": "8.8.8.8",
+        "skipFallback": true,
+        "domains": [
+          "geosite:google",
+          "geosite:google-cn"
+        ],
+        "finalQuery": true // 终结查询链
+      },
+      // 通过直连解析社区认为在中国有节点的域，若非预期结果可能是被墙或退出中国
+      // 通过代理解析社区认为在中国有节点的域，供被墙或退出中国时回落
+      {
+        "tag": "dns-first",
+        "address": "223.5.5.5",
+        "skipFallback": true,
+        "domains": [
+          "test.ryugo.org",
+          "usp.losdot.com"
+        ],
+        "expectIPs": [
+          "!geoip:cn"
+        ],
+        "finalQuery": true // 终结查询链
+      },
+      {
+        "tag": "dns-direct",
+        "address": "223.5.5.5",
+        "skipFallback": true,
+        "domains": [
+          "geosite:cn"
+        ],
+        "expectIPs": [
+          "geoip:cn"
+        ]
+      },
+      // 通过代理解析社区认为非中国本土的域，若非预期结果则尝试优化直连
+      {
+        "address": "1.1.1.1",
+        "skipFallback": true,
+        "domains": [
+          "geosite:geolocation-!cn"
+        ],
+        "unexpectIPs": [
+          "geoip:cn"
+        ]
+      },
+      {
+        "address": "8.8.8.8",
+        "skipFallback": true,
+        "domains": [
+          "geosite:geolocation-!cn"
+        ],
+        "unexpectIPs": [
+          "geoip:cn"
+        ],
+        "finalQuery": true
+      },
+      {
+        "address": "8.8.8.8",
+        "clientIp": "222.85.85.85", // 提供你当地ISP的IP地址以获取直连优化的A/AAAA记录
+        "skipFallback": true,
+        "domains": [
+          "geosite:geolocation-!cn"
+        ]
+      },
+      {
+        "address": "8.8.4.4",
+        "clientIp": "222.85.85.85", // 同上
+        "skipFallback": true,
+        "domains": [
+          "geosite:geolocation-!cn"
+        ],
+        "finalQuery": true // 终结查询链
+        // 看到这里你可能会有疑惑：这4条规则和上面4条感觉有点冗余？可以精简吗？
+        // 其实不然，这是为了追求更极致的速度，以及一些权威DNS不支持ECS
+      },
+      // 未知域名，中国优先，若非预期结果则尝试优化代理
+      {
+        "address": "8.8.8.8",
+        "clientIp": "222.85.85.85", // 同上
+        "expectIPs": [
+          "geoip:cn"
+        ]
+      },
+      {
+        "address": "8.8.4.4",
+        "clientIp": "222.85.85.85", // 同上
+        "expectIPs": [
+          "geoip:cn"
+        ]
+      },
+      "1.1.1.1",
+      "8.8.8.8"
+    ],
+    "tag": "dns-proxy",
+    "enableParallelQuery": true // 智能并行：全部并行，智能分组，组内竞速
+  },
+  "inbounds": [
+    {
+      "listen": "10.0.0.1",
+      "port": 666,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": true
+      },
+      "tag": "sk-in"
+    },
+    //     {
+    //         "tag": "tun",
+    //      "protocol": "tun",
+    //   "sniffing": {
+    //       "enabled": true,
+    //       "destOverride": ["http", "tls", "quic"],
+    //       "routeOnly": true
+    //   },
+    //   "settings": {
+    //     "mtu": 1500,
+    //     "gateway": ["172.16.0.1/30", "fc00::1/126"],
+    //     "autoSystemRoutingTable": ["0.0.0.0/0", "::/0"],
+    //     "autoOutboundsInterface": "end0"
+    //   }
+    // },
+    {
+      "port": 12345,
+      "tag": "tp-in",
+      "protocol": "tunnel",
+      "settings": {
+        "allowedNetwork": "tcp,udp",
+        "followRedirect": true
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": true
+      },
+      "streamSettings": {
+        "sockopt": {
+          "tproxy": "tproxy"
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "vless",
+      "tag": "test",
+      "settings": {
+        "address": "usp.losdot.com",
+        "port": 443,
+        "id": "725c9d9c-5025-441b-898a-38304b719966",
+        "encryption": "none",
+        "flow": "xtls-rprx-vision"
+      },
+      "streamSettings": {
+        "sockopt": {
+          "mark": 1024
+        },
+        "method": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "pantheonsite.io",
+          "fingerprint": "chrome",
+          "password": "HmK2eIv75tzUTNd5w66NZxhPRq_fLWsUzlbsp6qfH2M",
+          "shortId": "2009419fbbb4"
+        }
+      }
+    },
+    {
+      "tag": "xhttp",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "test.ryugo.org",
+            "port": 443,
+            "users": [
+              {
+                "id": "2ca75154-044d-42a7-bff9-598eaf61e408",
+                "encryption": "none",
+                "flow": ""
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "sockopt": {
+          "mark": 1024
+        },
+        "tlsSettings": {
+          "serverName": "test.ryugo.org", // 必须填你的反代域名（套了 CDN 的域名）
+          "allowInsecure": false
+        },
+        //"realitySettings": {
+        //  "serverName": "chat.jayqiu.com",
+        //  "publicKey": "MvYkWqSUKKjROK_UKVFbvu0Ly6Fw9v0SfeV-1sMJu1k",
+        //  "shortId": "a854",
+        //  "fingerprint": "chrome",
+        //  "spiderX": "/5dc5151cf8c397d"
+        //},
+        "xhttpSettings": {
+          "path": "/api/v1/data",
+          "mode": "auto",
+          "extra": {
+            "xPaddingBytes": "100-1000"
+          }
+        }
+      }
+    },
+    {
+      "protocol": "vless",
+      "settings": {
+        "address": "64.81.118.233",
+        "port": 443,
+        "id": "94fe25a1-ec7b-4689-8dd6-8d3c1b94121b",
+        "encryption": "none",
+        "flow": "xtls-rprx-vision"
+      },
+      "streamSettings": {
+        "security": "reality",
+        "sockopt": {
+          "mark": 1024
+        },
+        "realitySettings": {
+          "serverName": "intel.com",
+          "fingerprint": "chrome",
+          "password": "-0cFE4eVRcmECM2J2dc7LcxUHrz3fcBuiO4vFzh4YSY",
+          "shortID": "00"
+        }
+      },
+      "tag": "proxy"
+    },
+    {
+      "protocol": "freedom",
+      "tag": "direct",
+      "streamSettings": {
+        "sockopt": {
+          "mark": 1024
+        }
+      }
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole",
+      "settings": {
+        "response": {
+          "type": "http"
+        }
+      }
+    },
+    {
+      "tag": "dns-out",
+      "protocol": "dns",
+      "streamSettings": {
+        "sockopt": {
+          "mark": 1024
+        }
+      },
+      "settings": {
+        "rules": [
+          {
+            "action": "hijack"
+          }
+        ]
+      }
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "inboundTag": "sk-in",
+        "outboundTag": "xhttp"
+      },
+      {
+        "inboundTag": [
+          "tp-in"
+        ],
+        "port": "53",
+        "outboundTag": "dns-out"
+      },
+      {
+        // 为 DNS 查询本身进行路由
+        "inboundTag": [
+          "dns-direct"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        // 为 DNS 查询本身进行路由
+        "inboundTag": [
+          "dns-proxy"
+        ],
+        "outboundTag": "xhttp"
+      },
+      {
+        "domain": [
+          "geosite:cn"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "ip": [
+          "geoip:cn"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  "policy": {
+    "system": {
+      "statsInboundUplink": true,
+      "statsInboundDownlink": true,
+      "statsOutboundUplink": true,
+      "statsOutboundDownlink": true
+    }
+  },
+  "stats": {},
+  "observatory": {
+    "subjectSelector": [
+      "xhttp",
+      "test"
+    ],
+    "probeUrl": "https://www.google.com/generate_204",
+    "probeInterval": "10s",
+    "enableConcurrency": true
+  }
 }

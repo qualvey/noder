@@ -1,12 +1,12 @@
 package xray
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"noder/internal/config"
+	"noder/internal/jsonutil"
 	"noder/internal/model"
 )
 
@@ -165,13 +165,13 @@ func TestGenerateXrayConfigSkipsUnsupportedEndpoints(t *testing.T) {
 	}
 }
 
-func TestXrayTemplateIsValidJSON(t *testing.T) {
+func TestXrayTemplateSupportsComments(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "templates", "xray.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var cfg map[string]interface{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := jsonutil.Unmarshal(data, &cfg); err != nil {
 		t.Fatalf("invalid template JSON: %v", err)
 	}
 }
