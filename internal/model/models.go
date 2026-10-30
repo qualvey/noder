@@ -42,8 +42,143 @@ type Node struct {
 	Country           *string `bun:"country" json:"country,omitempty"`
 	Remark            *string `bun:"remark" json:"remark,omitempty"`
 	SortOrder         int     `bun:"sort_order,default:0" json:"sort_order"`
+	// Status and Config are the canonical endpoint lifecycle/configuration
+	// fields. The legacy columns above remain temporarily for compatibility
+	// with existing SQLite installations and are not used for credentials.
+	Status string  `bun:"status,notnull,default:'active'" json:"status"`
+	Config *string `bun:"config" json:"config,omitempty"`
 
 	Users []*User `bun:"m2m:usernodelink,join:Node=User" json:"-"`
+}
+
+const (
+	CredentialStatusPendingBinding = "pending_binding"
+	CredentialStatusActive         = "active"
+	CredentialStatusDisabled       = "disabled"
+	CredentialStatusRevoked        = "revoked"
+
+	AccessGrantStatusActive   = "active"
+	AccessGrantStatusDisabled = "disabled"
+	AccessGrantStatusRevoked  = "revoked"
+)
+
+// Credential is the authoritative data-plane identity of a user. Password is
+// intentionally not a database column: PasswordCiphertext is the persisted
+// value and the transient Password field exists only for the current
+// compatibility layer until an encryption key is configured.
+type Credential struct {
+	bun.BaseModel `bun:"table:credentials"`
+
+	ID                 string     `bun:"id,pk" json:"id"`
+	UserID             int64      `bun:"user_id,notnull" json:"user_id"`
+	User               *User      `bun:"rel:belongs-to,join:user_id=id" json:"-"`
+	Scheme             string     `bun:"scheme,notnull" json:"scheme"`
+	DisplayName        *string    `bun:"display_name" json:"display_name,omitempty"`
+	UUIDValue          *string    `bun:"uuid_value" json:"uuid_value,omitempty"`
+	Username           *string    `bun:"username" json:"username,omitempty"`
+	PasswordCiphertext *string    `bun:"password_ciphertext" json:"-"`
+	Password           *string    `bun:"-" json:"-"`
+	SecretConfig       string     `bun:"secret_config,notnull,default:'{}'" json:"secret_config"`
+	Status             string     `bun:"status,notnull,default:'pending_binding'" json:"status"`
+	IsDefault          bool       `bun:"is_default,notnull,default:false" json:"is_default"`
+	ExpiresAt          *time.Time `bun:"expires_at" json:"expires_at,omitempty"`
+	RevokedAt          *time.Time `bun:"revoked_at" json:"revoked_at,omitempty"`
+	CreatedAt          time.Time  `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt          time.Time  `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
+}
+
+func (c *Credential) EffectivePassword() *string {
+	if c == nil {
+		return nil
+	}
+	if c.Password != nil {
+		return c.Password
+	}
+	return c.PasswordCiphertext
+}
+
+func (c *Credential) IsUsable(now time.Time) bool {
+	return c != nil && c.Status == CredentialStatusActive &&
+		(c.ExpiresAt == nil || c.ExpiresAt.After(now)) && c.RevokedAt == nil
+}
+
+// AccessGrant is the authoritative user-to-resource authorization. It never
+// copies UUID, username, or password values from Credential.
+type AccessGrant struct {
+	bun.BaseModel `bun:"table:access_grants"`
+
+	ID             string      `bun:"id,pk" json:"id"`
+	UserID         int64       `bun:"user_id,notnull" json:"user_id"`
+	User           *User       `bun:"rel:belongs-to,join:user_id=id" json:"-"`
+	EndpointID     int64       `bun:"endpoint_id,notnull" json:"endpoint_id"`
+	Endpoint       *Node       `bun:"rel:belongs-to,join:endpoint_id=id" json:"endpoint,omitempty"`
+	CredentialID   string      `bun:"credential_id,notnull" json:"credential_id"`
+	Credential     *Credential `bun:"rel:belongs-to,join:credential_id=id" json:"-"`
+	DisplayName    *string     `bun:"display_name" json:"display_name,omitempty"`
+	TagOverride    *string     `bun:"tag_override" json:"tag_override,omitempty"`
+	Status         string      `bun:"status,notnull,default:'active'" json:"status"`
+	IsURLTest      bool        `bun:"is_urltest,notnull,default:true" json:"is_urltest"`
+	SortOrder      int         `bun:"sort_order,notnull,default:0" json:"sort_order"`
+	OverrideConfig string      `bun:"override_config,notnull,default:'{}'" json:"override_config"`
+	Remark         *string     `bun:"remark" json:"remark,omitempty"`
+	ExpiresAt      *time.Time  `bun:"expires_at" json:"expires_at,omitempty"`
+	CreatedAt      time.Time   `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt      time.Time   `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
+}
+
+func (g *AccessGrant) IsUsable(now time.Time) bool {
+	return g != nil && g.Status == AccessGrantStatusActive &&
+		(g.ExpiresAt == nil || g.ExpiresAt.After(now))
+}
+
+// AgentNode and the two binding/deployment models are control-plane state.
+// They deliberately do not change User, Credential, or AccessGrant ownership.
+type AgentNode struct {
+	bun.BaseModel `bun:"table:agent_nodes"`
+
+	ID                     string     `bun:"id,pk" json:"id"`
+	Name                   string     `bun:"name,notnull" json:"name"`
+	ControlTokenCiphertext *string    `bun:"control_token_ciphertext" json:"-"`
+	Status                 string     `bun:"status,notnull,default:'offline'" json:"status"`
+	LastHeartbeatAt        *time.Time `bun:"last_heartbeat_at" json:"last_heartbeat_at,omitempty"`
+	Metadata               string     `bun:"metadata,notnull,default:'{}'" json:"metadata"`
+	CreatedAt              time.Time  `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt              time.Time  `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
+}
+
+type EndpointAgentBinding struct {
+	bun.BaseModel `bun:"table:endpoint_agent_bindings"`
+	EndpointID    int64      `bun:"endpoint_id,pk" json:"endpoint_id"`
+	AgentNodeID   string     `bun:"agent_node_id,pk" json:"agent_node_id"`
+	Status        string     `bun:"status,notnull,default:'active'" json:"status"`
+	LastSyncAt    *time.Time `bun:"last_sync_at" json:"last_sync_at,omitempty"`
+	LastError     *string    `bun:"last_error" json:"last_error,omitempty"`
+	CreatedAt     time.Time  `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+}
+
+type CredentialDeployment struct {
+	bun.BaseModel `bun:"table:credential_deployments"`
+	CredentialID  string     `bun:"credential_id,pk" json:"credential_id"`
+	EndpointID    int64      `bun:"endpoint_id,pk" json:"endpoint_id"`
+	AgentNodeID   string     `bun:"agent_node_id,pk" json:"agent_node_id"`
+	DesiredState  string     `bun:"desired_state,notnull" json:"desired_state"`
+	AppliedState  string     `bun:"applied_state,notnull,default:'unknown'" json:"applied_state"`
+	LastSyncAt    *time.Time `bun:"last_sync_at" json:"last_sync_at,omitempty"`
+	LastError     *string    `bun:"last_error" json:"last_error,omitempty"`
+}
+
+// LegacyMigrationMap keeps the integer IDs needed to audit and replay an old
+// SQLite import after canonical UUIDs have been assigned.
+type LegacyMigrationMap struct {
+	bun.BaseModel    `bun:"table:legacy_migration_map"`
+	ID               int64     `bun:"id,pk,autoincrement" json:"id"`
+	LegacyUserID     int64     `bun:"legacy_user_id,notnull" json:"legacy_user_id"`
+	LegacyNodeID     *int64    `bun:"legacy_node_id" json:"legacy_node_id,omitempty"`
+	LegacyEndpointID int64     `bun:"legacy_endpoint_id,notnull,unique" json:"legacy_endpoint_id"`
+	CredentialID     string    `bun:"credential_id,notnull" json:"credential_id"`
+	AccessGrantID    *string   `bun:"access_grant_id" json:"access_grant_id,omitempty"`
+	Conflict         *string   `bun:"conflict" json:"conflict,omitempty"`
+	CreatedAt        time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
 }
 
 // Endpoint 完整节点实体（入口节点 + 鉴权凭证 + 路由 Tag）
@@ -85,6 +220,7 @@ type User struct {
 	Name               string  `bun:"name,notnull" json:"name"`
 	Token              string  `bun:"token,notnull,unique" json:"token"`
 	IsActive           bool    `bun:"is_active,notnull,default:true" json:"is_active"`
+	Status             string  `bun:"status,notnull,default:'active'" json:"status"`
 	UUID               *string `bun:"uuid" json:"uuid,omitempty"`
 	Password           *string `bun:"password" json:"password,omitempty"`
 	Remark             *string `bun:"remark" json:"remark,omitempty"`

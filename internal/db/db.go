@@ -31,7 +31,11 @@ func InitDB() (*bun.DB, error) {
 	sqldb.SetMaxOpenConns(1) // SQLite 单写入连接最佳实践
 
 	DB = bun.NewDB(sqldb, sqlitedialect.New())
-	DB.RegisterModel((*model.UserNodeLink)(nil), (*model.User)(nil), (*model.Node)(nil), (*model.Endpoint)(nil))
+	DB.RegisterModel(
+		(*model.UserNodeLink)(nil), (*model.User)(nil), (*model.Node)(nil), (*model.Endpoint)(nil),
+		(*model.Credential)(nil), (*model.AccessGrant)(nil), (*model.AgentNode)(nil),
+		(*model.EndpointAgentBinding)(nil), (*model.CredentialDeployment)(nil), (*model.LegacyMigrationMap)(nil),
+	)
 
 	ctx := context.Background()
 	if err := CreateDBAndTables(ctx); err != nil {
@@ -40,6 +44,9 @@ func InitDB() (*bun.DB, error) {
 
 	if err := SeedDefaultData(ctx); err != nil {
 		return nil, fmt.Errorf("failed to seed data: %w", err)
+	}
+	if err := ProjectLegacyData(ctx); err != nil {
+		return nil, fmt.Errorf("failed to project legacy domain data: %w", err)
 	}
 
 	return DB, nil
@@ -57,6 +64,12 @@ func CreateDBAndTables(ctx context.Context) error {
 		(*model.TemplateHistory)(nil),
 		(*model.TemplateBranch)(nil),
 		(*model.AppSetting)(nil),
+		(*model.Credential)(nil),
+		(*model.AccessGrant)(nil),
+		(*model.AgentNode)(nil),
+		(*model.EndpointAgentBinding)(nil),
+		(*model.CredentialDeployment)(nil),
+		(*model.LegacyMigrationMap)(nil),
 	}
 
 	for _, m := range models {
@@ -71,6 +84,18 @@ func CreateDBAndTables(ctx context.Context) error {
 		return err
 	}
 	if _, err := DB.NewCreateIndex().Model((*model.Endpoint)(nil)).IfNotExists().Index("endpoint_node_id_idx").Column("node_id").Exec(ctx); err != nil {
+		return err
+	}
+	if _, err := DB.NewCreateIndex().Model((*model.Credential)(nil)).IfNotExists().Index("credential_user_id_idx").Column("user_id").Exec(ctx); err != nil {
+		return err
+	}
+	if _, err := DB.NewCreateIndex().Model((*model.Credential)(nil)).IfNotExists().Index("credential_uuid_value_idx").Column("uuid_value").Exec(ctx); err != nil {
+		return err
+	}
+	if _, err := DB.NewCreateIndex().Model((*model.AccessGrant)(nil)).IfNotExists().Index("access_grant_user_endpoint_idx").Unique().Column("user_id", "endpoint_id").Exec(ctx); err != nil {
+		return err
+	}
+	if _, err := DB.NewCreateIndex().Model((*model.AccessGrant)(nil)).IfNotExists().Index("access_grant_credential_idx").Column("credential_id").Exec(ctx); err != nil {
 		return err
 	}
 
@@ -92,17 +117,18 @@ func CreateDBAndTables(ctx context.Context) error {
 	`)
 
 	// 兼容旧库迁移 (ALTER TABLE)
-	nodeCols := []string{"public_key", "short_id", "fingerprint", "flow", "remark", "tag", "congestion_control", "sort_order", "country"}
+	nodeCols := []string{"public_key", "short_id", "fingerprint", "flow", "remark", "tag", "congestion_control", "sort_order", "country", "status", "config"}
 	for _, col := range nodeCols {
 		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE node ADD COLUMN %s VARCHAR", col))
 	}
 	_, _ = DB.ExecContext(ctx, "UPDATE node SET tag = node_name WHERE tag IS NULL OR tag = ''")
 	_, _ = DB.ExecContext(ctx, "UPDATE node SET transport_type = NULL, path = NULL WHERE protocol = 'tuic'")
 
-	userCols := []string{"remark", "config_override", "node_order", "template_branch_id", "external_id", "independent_node_ids"}
+	userCols := []string{"remark", "config_override", "node_order", "template_branch_id", "external_id", "independent_node_ids", "status"}
 	for _, col := range userCols {
 		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE user ADD COLUMN %s VARCHAR", col))
 	}
+	_, _ = DB.ExecContext(ctx, "UPDATE user SET status = 'active' WHERE status IS NULL OR status = ''")
 	if _, err := DB.NewCreateIndex().Model((*model.User)(nil)).IfNotExists().Index("user_external_id_idx").Column("external_id").Exec(ctx); err != nil {
 		return err
 	}

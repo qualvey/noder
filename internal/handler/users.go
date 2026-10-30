@@ -166,6 +166,7 @@ type UserReadResp struct {
 	ExternalID         *string            `json:"external_id,omitempty"`
 	Name               string             `json:"name"`
 	IsActive           bool               `json:"is_active"`
+	Status             string             `json:"status"`
 	Token              string             `json:"token"`
 	UUID               *string            `json:"uuid"`
 	Password           *string            `json:"password"`
@@ -248,6 +249,7 @@ func toUserRead(u *model.User) UserReadResp {
 		ExternalID:         u.ExternalID,
 		Name:               u.Name,
 		IsActive:           u.IsActive,
+		Status:             effectiveUserStatus(u),
 		Token:              u.Token,
 		UUID:               u.UUID,
 		Password:           u.Password,
@@ -259,6 +261,16 @@ func toUserRead(u *model.User) UserReadResp {
 		TemplateBranchID:   u.TemplateBranchID,
 		IndependentNodeIDs: parseIDList(u.IndependentNodeIDs),
 	}
+}
+
+func effectiveUserStatus(u *model.User) string {
+	if u != nil && u.Status != "" {
+		return u.Status
+	}
+	if u != nil && u.IsActive {
+		return "active"
+	}
+	return "disabled"
 }
 
 func parseIDList(raw *string) []int64 {
@@ -355,6 +367,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		ExternalID:         req.ExternalID,
 		Token:              token,
 		IsActive:           isActive,
+		Status:             map[bool]string{true: "active", false: "disabled"}[isActive],
 		UUID:               &userUUID,
 		Password:           &userPassword,
 		Remark:             req.Remark,
@@ -604,6 +617,11 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if active, ok := body["is_active"].(bool); ok {
 		user.IsActive = active
+		user.Status = map[bool]string{true: "active", false: "disabled"}[active]
+	}
+	if status, ok := body["status"].(string); ok && (status == "active" || status == "disabled") {
+		user.Status = status
+		user.IsActive = status == "active"
 	}
 	if u, ok := body["uuid"].(string); ok {
 		user.UUID = &u
@@ -1013,6 +1031,7 @@ func AddUserEndpoint(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	_ = db.ProjectLegacyUser(r.Context(), userID)
 
 	_ = db.DB.NewSelect().Model(ep).Relation("Node").Where("endpoint.id = ?", ep.ID).Scan(r.Context())
 	RespondJSON(w, http.StatusOK, toEndpointRead(ep))
@@ -1085,6 +1104,7 @@ func UpdateUserEndpoint(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	_ = db.ProjectLegacyUser(r.Context(), ep.UserID)
 
 	_ = db.DB.NewSelect().Model(&ep).Relation("Node").Where("endpoint.id = ?", epID).Scan(r.Context())
 	RespondJSON(w, http.StatusOK, toEndpointRead(&ep))

@@ -191,7 +191,7 @@ func GenerateXrayConfigFromTemplate(cfg map[string]interface{}, endpoints []*mod
 	}
 
 	for _, ep := range endpoints {
-		if !ep.IsActive || ep.Node == nil || !ep.Node.IsActive {
+		if !ep.IsActive || ep.Node == nil || !ep.Node.IsActive || ep.Node.Protocol != "vless" {
 			continue
 		}
 		outbound, err := BuildXrayEndpointOutbound(ep)

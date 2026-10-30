@@ -40,13 +40,23 @@ func getActiveUser(ctx context.Context, token string) (*model.User, error) {
 		Relation("Nodes").
 		Where("user.token = ?", token).
 		Scan(ctx)
-	if err != nil || !user.IsActive {
+	if err != nil || !user.IsActive || user.Status == "disabled" {
 		return nil, &contract.APIError{StatusCode: http.StatusUnauthorized, Detail: "Invalid or inactive user token"}
 	}
 	return &user, nil
 }
 
 func getUserActiveEndpoints(user *model.User) []*model.Endpoint {
+	// Resolve the refactored domain first. The projection call is additive and
+	// makes legacy admin bindings visible without allowing them to overwrite an
+	// existing canonical grant.
+	if user != nil && user.ID > 0 && db.DB != nil {
+		_ = db.ProjectLegacyUser(context.Background(), user.ID)
+		if endpoints, found, err := db.GetActiveDomainEndpoints(context.Background(), user.ID); err == nil && found {
+			return endpoints
+		}
+	}
+
 	// Once endpoint records exist, they are the source of truth. Do not fall
 	// back to the legacy user-node links when all endpoints are disabled:
 	// an explicitly disabled endpoint must not be rendered.

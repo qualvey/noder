@@ -56,6 +56,7 @@ func main() {
 	handler.RegisterAuthRoutes(r)
 	handler.RegisterNodeRoutes(r)
 	handler.RegisterUserRoutes(r)
+	handler.RegisterDomainRoutes(r)
 	handler.RegisterTemplateRoutes(r)
 	handler.RegisterSettingsRoutes(r)
 	handler.RegisterFileRoutes(r)

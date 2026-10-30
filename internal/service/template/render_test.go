@@ -108,7 +108,14 @@ func TestRenderSingboxLauncherConfigUsesSingboxURL(t *testing.T) {
 	}
 
 	user := &model.User{Token: "real-user-token"}
-	rendered, err := RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL(source.Bytes(), stringPtr("config.json"), user, nil, nil, TemplateTypeSing, "http://localhost:8000", nil)
+	detected, err := DetectTemplateTypeFromZip(source.Bytes(), "config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detected != TemplateTypeSing {
+		t.Fatalf("expected sing-box pipeline, got %q", detected)
+	}
+	rendered, err := RenderZipForUserWithProgressFromEndpointsForTargetAndBaseURL(source.Bytes(), stringPtr("config.json"), user, nil, nil, detected, "http://localhost:8000", nil)
 	if err != nil {
 		t.Fatalf("rendering sing-box launcher ZIP failed: %v", err)
 	}
@@ -139,6 +146,84 @@ func TestRenderSingboxLauncherConfigUsesSingboxURL(t *testing.T) {
 		return
 	}
 	t.Fatal("rendered ZIP did not contain sing-launcher config.yml")
+}
+
+func TestDetectTemplateTypePrefersExplicitSingboxMarker(t *testing.T) {
+	data := []byte("upstream_url: \"https://example.com/xray\"\nsing_box_bin: \"./sing-box.exe\"\n")
+	if got := DetectTemplateType(data); got != TemplateTypeSing {
+		t.Fatalf("expected sing-box pipeline, got %q", got)
+	}
+}
+
+func TestDetectTemplateTypeFromZipChecksLauncherWhenConfigIsPlaceholder(t *testing.T) {
+	var source bytes.Buffer
+	writer := zip.NewWriter(&source)
+	config, err := writer.Create("xray-launcher/config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Write([]byte(`{{xray_config_json}}`)); err != nil {
+		t.Fatal(err)
+	}
+	launcher, err := writer.Create("xray-launcher/config.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := launcher.Write([]byte("upstream_url: \"https://example.com/xray\"\nxray_bin: \"./xray.exe\"\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := DetectTemplateTypeFromZip(source.Bytes(), "config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != TemplateTypeXray {
+		t.Fatalf("expected Xray pipeline from launcher metadata, got %q", got)
+	}
+}
+
+func TestTargetTemplateContextsAreIsolated(t *testing.T) {
+	sni := "example.com"
+	user := &model.User{Token: "token"}
+	endpoints := []*model.Endpoint{{
+		Node: &model.Node{
+			Protocol:      "vless",
+			Tag:           "node",
+			ServerAddress: "127.0.0.1",
+			ServerPort:    443,
+			Security:      "tls",
+			SNI:           &sni,
+			IsActive:      true,
+		},
+		Tag:      "node",
+		UUID:     "00000000-0000-0000-0000-000000000001",
+		IsActive: true,
+	}}
+
+	singboxContext := BuildTemplateContextFromEndpointsForTargetWithBaseURL(user, endpoints, false, TemplateTypeSing, "https://example.com")
+	if singboxContext["singbox_config_url"] != "https://example.com/sub" {
+		t.Fatalf("unexpected sing-box URL: %q", singboxContext["singbox_config_url"])
+	}
+	if _, ok := singboxContext["xray_config_url"]; ok {
+		t.Fatal("sing-box context leaked the Xray URL")
+	}
+	if _, ok := singboxContext["xray_config_json"]; ok {
+		t.Fatal("sing-box context leaked the Xray config")
+	}
+
+	xrayContext := BuildTemplateContextFromEndpointsForTargetWithBaseURL(user, endpoints, false, TemplateTypeXray, "https://example.com")
+	if xrayContext["xray_config_url"] != "https://example.com/xray" {
+		t.Fatalf("unexpected Xray URL: %q", xrayContext["xray_config_url"])
+	}
+	if _, ok := xrayContext["singbox_config_url"]; ok {
+		t.Fatal("Xray context leaked the sing-box URL")
+	}
+	if _, ok := xrayContext["singbox_config_json"]; ok {
+		t.Fatal("Xray context leaked the sing-box config")
+	}
 }
 
 func stringPtr(value string) *string { return &value }

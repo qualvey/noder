@@ -84,15 +84,10 @@ func RegisterServiceUser(w http.ResponseWriter, r *http.Request) {
 		name = extID
 	}
 
-	userUUID := uuid.New().String()
-	userPwd := randomHex(8)
-
 	user := &model.User{
 		ExternalID: &extID,
 		Name:       name,
 		Token:      token,
-		UUID:       &userUUID,
-		Password:   &userPwd,
 		Remark:     req.Remark,
 		IsActive:   true,
 	}
@@ -155,8 +150,9 @@ func AddUserServiceCredential(w http.ResponseWriter, r *http.Request) {
 		RespondServiceError(w, http.StatusBadRequest, "添加凭证失败：uuid 不能为空")
 		return
 	}
-
-	// 校验同名凭证去重
+	// Keep the legacy display-name uniqueness rule before creating the
+	// canonical row, otherwise a rejected compatibility stub would leave an
+	// orphan Credential.
 	tagExists, _ := db.DB.NewSelect().
 		Model((*model.Endpoint)(nil)).
 		Where("user_id = ? AND tag = ?", user.ID, nodeTag).
@@ -164,6 +160,40 @@ func AddUserServiceCredential(w http.ResponseWriter, r *http.Request) {
 	if tagExists {
 		RespondServiceError(w, http.StatusBadRequest, fmt.Sprintf("添加凭证失败：该用户已存在同名节点凭证 '%s'", nodeTag))
 		return
+	}
+
+	// Credential is now the authoritative owner of authentication data. Keep
+	// the legacy endpoint stub below only as a compatibility projection for
+	// existing management clients.
+	var credential model.Credential
+	credentialQuery := db.DB.NewSelect().Model(&credential).
+		Where("user_id = ? AND scheme = ? AND uuid_value = ?", user.ID, "generic", credUUID)
+	if req.Password != nil {
+		credentialQuery = credentialQuery.Where("password_ciphertext = ?", *req.Password)
+	} else {
+		credentialQuery = credentialQuery.Where("password_ciphertext IS NULL")
+	}
+	credentialErr := credentialQuery.Scan(r.Context())
+	if credentialErr != nil {
+		var owner model.Credential
+		if err := db.DB.NewSelect().Model(&owner).Where("uuid_value = ?", credUUID).Scan(r.Context()); err == nil && owner.UserID != user.ID {
+			RespondServiceError(w, http.StatusBadRequest, "添加凭证失败：uuid 已被其他用户使用")
+			return
+		}
+		credential = model.Credential{
+			ID:                 uuid.NewString(),
+			UserID:             user.ID,
+			Scheme:             "generic",
+			DisplayName:        &nodeTag,
+			UUIDValue:          &credUUID,
+			PasswordCiphertext: req.Password,
+			Status:             model.CredentialStatusPendingBinding,
+			SecretConfig:       "{}",
+		}
+		if _, err := db.DB.NewInsert().Model(&credential).Exec(r.Context()); err != nil {
+			RespondServiceError(w, http.StatusInternalServerError, fmt.Sprintf("添加凭证失败：%v", err))
+			return
+		}
 	}
 
 	count, _ := db.DB.NewSelect().Model((*model.Endpoint)(nil)).Where("user_id = ?", user.ID).Count(r.Context())

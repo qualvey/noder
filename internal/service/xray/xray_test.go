@@ -134,6 +134,37 @@ func TestGenerateXrayConfigPreservesTemplateAndRejectsDuplicateTag(t *testing.T)
 	}
 }
 
+func TestGenerateXrayConfigSkipsUnsupportedEndpoints(t *testing.T) {
+	tuic := &model.Node{
+		Tag:           "tuic-01",
+		Protocol:      "tuic",
+		ServerAddress: "tuic.example.com",
+		ServerPort:    443,
+		IsActive:      true,
+	}
+	vless := testXrayNode()
+
+	cfg, err := GenerateXrayConfigFromTemplate(
+		map[string]interface{}{"outbounds": []interface{}{}},
+		[]*model.Endpoint{
+			{Node: tuic, Tag: "tuic-01", UUID: "tuic-uuid", IsActive: true},
+			{Node: vless, Tag: "vless-01", UUID: "11111111-1111-4111-8111-111111111111", IsActive: true},
+		},
+		testXrayUser(),
+	)
+	if err != nil {
+		t.Fatalf("mixed Xray endpoints should render: %v", err)
+	}
+
+	outbounds := cfg["outbounds"].([]interface{})
+	if len(outbounds) != 1 {
+		t.Fatalf("expected only the VLESS outbound, got %#v", outbounds)
+	}
+	if outbounds[0].(map[string]interface{})["tag"] != "vless-01" {
+		t.Fatalf("unexpected rendered outbound: %#v", outbounds[0])
+	}
+}
+
 func TestXrayTemplateIsValidJSON(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "templates", "xray.json"))
 	if err != nil {
