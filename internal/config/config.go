@@ -6,20 +6,21 @@ import (
 )
 
 var (
-	BaseDir              string
-	DBPath               string
-	SingBoxTemplatePath  string
-	XrayTemplatePath     string
-	MihomoTemplatePath   string
-	StaticDir            string
-	FilesDir             string
-	AdminSecretToken     string
-	MallServiceSecret    string
-	AllowedProtocols     = map[string]bool{"tuic": true, "vless": true, "anytls": true, "socks5": true}
-	AllowedOverrideKeys  = map[string]bool{"route": true, "dns": true}
-	AllowedFileTypes     = map[string]bool{"apk": true, "zip": true, "text": true}
-	MaxFileSize          int64 = 100 * 1024 * 1024 // 100MB
-	RemoteCacheTTL       int64 = 86400             // 1 天 (秒)
+	BaseDir             string
+	DBPath              string
+	DatabaseURL         string
+	SingBoxTemplatePath string
+	XrayTemplatePath    string
+	MihomoTemplatePath  string
+	StaticDir           string
+	FilesDir            string
+	AdminSecretToken    string
+	MallServiceSecret   string
+	AllowedProtocols          = map[string]bool{"tuic": true, "vless": true, "anytls": true, "socks5": true}
+	AllowedOverrideKeys       = map[string]bool{"route": true, "dns": true}
+	AllowedFileTypes          = map[string]bool{"apk": true, "zip": true, "text": true}
+	MaxFileSize         int64 = 100 * 1024 * 1024 // 100MB
+	RemoteCacheTTL      int64 = 86400             // 1 天 (秒)
 )
 
 func Init(baseDir string) {
@@ -35,11 +36,18 @@ func Init(baseDir string) {
 	}
 
 	DBPath = filepath.Join(BaseDir, "data.db")
+	if dbPath := os.Getenv("DB_PATH"); dbPath != "" {
+		DBPath = dbPath
+	}
+	DatabaseURL = os.Getenv("DATABASE_URL")
 	SingBoxTemplatePath = filepath.Join(BaseDir, "templates", "sing-box.json")
 	XrayTemplatePath = filepath.Join(BaseDir, "templates", "xray.json")
 	MihomoTemplatePath = filepath.Join(BaseDir, "templates", "mihomo.yml")
 	StaticDir = filepath.Join(BaseDir, "static")
 	FilesDir = filepath.Join(BaseDir, "data", "files")
+	if filesDir := os.Getenv("FILES_DIR"); filesDir != "" {
+		FilesDir = filesDir
+	}
 
 	AdminSecretToken = os.Getenv("ADMIN_SECRET_TOKEN")
 	if AdminSecretToken == "" {

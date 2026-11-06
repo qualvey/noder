@@ -1,6 +1,54 @@
 # Sing-Box Subscription Middleman (订阅中间件管理服务 - Noder)
 
-基于 Go + Chi + SQLite + Vue 3 打造的 Sing-Box 与 Mihomo 节点及订阅动态生成中间件系统。
+基于 Go + Chi + PostgreSQL + Vue 3 打造的 Sing-Box 与 Mihomo 节点及订阅动态生成中间件系统。
+
+## 🐳 Docker Compose 部署
+
+Compose 会先启动 PostgreSQL，再用一次性 `migrate` 服务把现有的
+`data.db`（包括 SQLite 的 WAL 文件）导入 PostgreSQL，最后启动 Noder。
+迁移完成后应用只连接 PostgreSQL，上传文件保存于 Docker volume。
+
+```bash
+cp .env.example .env
+# 编辑 .env，至少修改 POSTGRES_PASSWORD 和管理员密钥
+docker compose up -d --build
+docker compose logs -f noder migrate
+```
+
+### 生产环境：使用 GitHub Actions 发布的镜像
+
+生产机不需要克隆源码或本地构建。GitHub Actions 会将镜像发布到
+`ghcr.io/qualvey/noder`，生产机只需保存 `compose.prod.yaml` 和 `.env`。
+首次切换时，先停止 systemd 的 `noder` 服务；生产 Compose 会从
+`/var/lib/noder/data.db` 及 `/var/lib/noder/data/files` 导入旧数据，之后只使用
+PostgreSQL 和 Docker volume。
+
+```bash
+sudo mkdir -p /opt/noder
+sudo cp compose.prod.yaml /opt/noder/compose.prod.yaml
+# 在 /opt/noder/.env 中填写 PostgreSQL 密码及现有服务 Token
+sudo chmod 600 /opt/noder/.env
+
+sudo systemctl stop noder
+sudo systemctl disable noder
+cd /opt/noder
+NODER_IMAGE_TAG=latest docker compose -f compose.prod.yaml up -d
+```
+
+GitHub Actions 的 `CD` environment 需要配置 `DEPLOY_HOST`、`DEPLOY_USER`、
+`DEPLOY_PORT`、`DEPLOY_SSH_KEY`、`GHCR_USERNAME` 和 `GHCR_PULL_TOKEN`。推送到
+`main` 后，Actions 会构建多架构镜像、推送 GHCR，并通过 SSH 只更新 Compose
+文件和镜像；源码不会部署到生产机。
+
+迁移器会在目标库写入完成标记，重复执行不会重复导入。若要重新导入，
+请先备份 PostgreSQL，再显式执行：
+
+```bash
+docker compose run --rm migrate --replace --sqlite /migration/data.db
+```
+
+`DATABASE_URL` 存在时应用使用 PostgreSQL；未设置时仍可按原方式使用本地
+SQLite。
 
 采用 **方案 3：独立凭证与动态拼接** 架构设计：
 - **`Node` 表**：仅存储服务器基础设施属性（IP、端口、协议类型、TLS SNI、传输方式等），**不存储任何用户鉴权信息（如 UUID 或密码）**。
@@ -93,6 +141,9 @@ make deb-all        # 构建 amd64 与 arm64 架构 deb 包
 
 | 环境变量名 | 说明 | 默认值 |
 | :--- | :--- | :--- |
+| `DATABASE_URL` | PostgreSQL 连接串；设置后关闭 SQLite | 空（使用 SQLite） |
+| `DB_PATH` | SQLite 文件路径 | `<工作目录>/data.db` |
+| `FILES_DIR` | 上传文件目录 | `<工作目录>/data/files` |
 | `ADMIN_SECRET_TOKEN` | 管理员 API 鉴权密钥（用于网页后台 CRUD 操作 header `X-Admin-Token`） | `admin-secret` |
 
 ---

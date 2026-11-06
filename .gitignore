@@ -1,4 +1,5 @@
 # Database & runtime files
+.env
 data.db
 *.sqlite
 *.sqlite3

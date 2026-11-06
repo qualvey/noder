@@ -102,3 +102,61 @@ func TestGetActiveDomainEndpointsEnforcesLifecycle(t *testing.T) {
 		t.Fatalf("expected one revocation deployment, count=%d err=%v", deploymentCount, err)
 	}
 }
+
+func TestProjectLegacyEndpointMatchesCredentialWithoutPassword(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "noder-domain-password-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+	config.Init(tmpDir)
+	database, err := InitDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	user := &model.User{Name: "credential-password-user", Token: "credential-password-token", IsActive: true}
+	if _, err := DB.NewInsert().Model(user).Exec(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	node := &model.Node{Tag: "tuic-password-node", NodeName: "tuic-password-node", Protocol: "tuic", ServerAddress: "example.com", ServerPort: 443, Security: "tls", IsActive: true}
+	if _, err := DB.NewInsert().Model(node).Exec(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	password := "first-password"
+	ep := &model.Endpoint{
+		UserID: user.ID, NodeID: &node.ID, Tag: "tuic-password", UUID: "same-uuid",
+		Password: &password, Status: "active", IsActive: true, IsURLTest: boolPtr(true),
+	}
+	if _, err := DB.NewInsert().Model(ep).Exec(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ProjectLegacyUser(t.Context(), user.ID); err != nil {
+		t.Fatal(err)
+	}
+	var credential model.Credential
+	if err := DB.NewSelect().Model(&credential).Where("user_id = ?", user.ID).Scan(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	password = "changed-password"
+	if _, err := DB.NewUpdate().Model(ep).Column("password").WherePK().Exec(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncLegacyUserCredentials(t.Context(), user.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	var credentials []model.Credential
+	if err := DB.NewSelect().Model(&credentials).Where("user_id = ?", user.ID).Scan(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(credentials) != 1 {
+		t.Fatalf("password change must not create a second credential: got %d", len(credentials))
+	}
+	if credentials[0].PasswordCiphertext == nil || *credentials[0].PasswordCiphertext != password {
+		t.Fatalf("credential password was not updated: %#v", credentials[0].PasswordCiphertext)
+	}
+}

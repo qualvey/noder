@@ -1,0 +1,17 @@
+.git
+.gitignore
+.git.bak
+data.db*
+data/
+dist/
+noder
+noder.exe
+web/node_modules/
+web/pages-dist/
+templates/sing-box-1.14.2-linux-amd64/
+Xray-windows-64/
+xray-launcher/
+sing-launcher/
+*.zip
+*.log
+*.swp

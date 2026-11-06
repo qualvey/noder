@@ -81,16 +81,11 @@ func projectLegacyEndpoint(ctx context.Context, user *model.User, legacy *model.
 
 	var credential model.Credential
 	query := DB.NewSelect().Model(&credential).
-		Where("user_id = ? AND (scheme = ? OR scheme = 'generic')", user.ID, scheme)
+		Where("user_id = ?", user.ID)
 	if legacy.UUID != "" {
 		query = query.Where("uuid_value = ?", legacy.UUID)
 	} else {
-		query = query.Where("uuid_value IS NULL")
-	}
-	if legacy.Password != nil {
-		query = query.Where("password_ciphertext = ?", *legacy.Password)
-	} else {
-		query = query.Where("password_ciphertext IS NULL")
+		query = query.Where("uuid_value IS NULL AND (scheme = ? OR scheme = 'generic')", scheme)
 	}
 	err := query.Scan(ctx)
 	if err != nil {
@@ -130,7 +125,24 @@ func projectLegacyEndpoint(ctx context.Context, user *model.User, legacy *model.
 		Where("user_id = ? AND endpoint_id = ?", user.ID, *legacy.NodeID).Scan(ctx)
 	var grantID *string
 	if grantErr == nil {
+		// The compatibility endpoint can change its UUID while keeping the
+		// physical node. Keep the existing access grant attached to the
+		// credential resolved above; otherwise the canonical projection would
+		// continue exporting the previous credential forever.
+		if grant.CredentialID != credential.ID {
+			if _, err := DB.NewUpdate().Model(&grant).
+				Set("credential_id = ?", credential.ID).WherePK().Exec(ctx); err != nil {
+				return err
+			}
+		}
 		grantID = &grant.ID
+		if credential.Status == model.CredentialStatusPendingBinding && grant.Status == model.AccessGrantStatusActive {
+			if _, err := DB.NewUpdate().Model(&credential).
+				Set("status = ?", model.CredentialStatusActive).WherePK().Exec(ctx); err != nil {
+				return err
+			}
+			credential.Status = model.CredentialStatusActive
+		}
 	} else {
 		status := model.AccessGrantStatusActive
 		if legacy.Status != "" && legacy.Status != model.AccessGrantStatusActive || !legacy.IsActive {
@@ -179,6 +191,54 @@ func projectLegacyEndpoint(ctx context.Context, user *model.User, legacy *model.
 		Set("credential_id = ?", credential.ID).
 		Set("access_grant_id = ?", grantID).Exec(ctx); err != nil {
 		return err
+	}
+	return nil
+}
+
+// SyncLegacyUserCredentials applies an explicit compatibility-management
+// change to the canonical credentials. It is intentionally separate from
+// ProjectLegacyUser: subscriptions call the latter as an additive migration,
+// and must never overwrite a credential that was edited through the canonical
+// credential API with stale values from a legacy endpoint.
+func SyncLegacyUserCredentials(ctx context.Context, userID int64) error {
+	var endpoints []*model.Endpoint
+	if err := DB.NewSelect().Model(&endpoints).Relation("Node").
+		Where("endpoint.user_id = ?", userID).Scan(ctx); err != nil {
+		return err
+	}
+	for _, legacy := range endpoints {
+		if legacy == nil || (legacy.Password == nil && legacy.Username == nil) {
+			continue
+		}
+		scheme := "legacy"
+		if legacy.Node != nil && strings.TrimSpace(legacy.Node.Protocol) != "" {
+			scheme = strings.ToLower(strings.TrimSpace(legacy.Node.Protocol))
+		}
+		query := DB.NewSelect().Model((*model.Credential)(nil)).Where("user_id = ?", userID)
+		if legacy.UUID != "" {
+			query = query.Where("uuid_value = ?", legacy.UUID)
+		} else {
+			query = query.Where("uuid_value IS NULL AND (scheme = ? OR scheme = 'generic')", scheme)
+		}
+		var credential model.Credential
+		if err := query.Scan(ctx, &credential); err != nil {
+			// ProjectLegacyUser normally creates this row first. Ignore a missing
+			// row here so this helper remains safe for partially migrated data.
+			continue
+		}
+
+		columns := make([]string, 0, 2)
+		if legacy.Password != nil {
+			credential.PasswordCiphertext = legacy.Password
+			columns = append(columns, "password_ciphertext")
+		}
+		if legacy.Username != nil {
+			credential.Username = legacy.Username
+			columns = append(columns, "username")
+		}
+		if _, err := DB.NewUpdate().Model(&credential).Column(columns...).WherePK().Exec(ctx); err != nil {
+			return fmt.Errorf("update credential for legacy endpoint %d: %w", legacy.ID, err)
+		}
 	}
 	return nil
 }

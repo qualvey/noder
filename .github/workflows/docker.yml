@@ -1,0 +1,121 @@
+name: Build and Deploy Docker Image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  publish:
+    name: Build and publish image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy image to production
+    needs: publish
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: CD
+    steps:
+      - name: Checkout deployment files
+        uses: actions/checkout@v4
+        sparse-checkout: |
+          compose.prod.yaml
+
+      - name: Copy Compose file
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.DEPLOY_HOST }}
+          username: ${{ vars.DEPLOY_USER }}
+          port: ${{ vars.DEPLOY_PORT || 22 }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: compose.prod.yaml
+          target: /tmp/noder-deploy
+
+      - name: Pull image and restart Compose stack
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_TAG: sha-${{ github.sha }}
+          GHCR_USERNAME: ${{ vars.GHCR_USERNAME }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        with:
+          host: ${{ vars.DEPLOY_HOST }}
+          username: ${{ vars.DEPLOY_USER }}
+          port: ${{ vars.DEPLOY_PORT || 22 }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: IMAGE_TAG,GHCR_USERNAME,GHCR_PULL_TOKEN
+          script: |
+            set -e
+            sudo mkdir -p /opt/noder
+            sudo install -m 0644 /tmp/noder-deploy/compose.prod.yaml /opt/noder/compose.prod.yaml
+            rm -rf /tmp/noder-deploy
+
+            printf '%s' "$GHCR_PULL_TOKEN" | sudo docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            sudo env NODER_IMAGE_TAG="$IMAGE_TAG" docker compose --project-directory /opt/noder --env-file /opt/noder/.env -f /opt/noder/compose.prod.yaml pull
+
+            # The old systemd service owns port 8000 until the first cutover.
+            sudo systemctl stop noder 2>/dev/null || true
+            sudo systemctl disable noder 2>/dev/null || true
+            sudo env NODER_IMAGE_TAG="$IMAGE_TAG" docker compose --project-directory /opt/noder --env-file /opt/noder/.env -f /opt/noder/compose.prod.yaml up -d --remove-orphans
+
+            for i in $(seq 1 30); do
+              if curl --fail --silent http://127.0.0.1:8000/ >/dev/null; then
+                exit 0
+              fi
+              sleep 2
+            done
+            sudo docker compose --project-directory /opt/noder --env-file /opt/noder/.env -f /opt/noder/compose.prod.yaml ps
+            exit 1

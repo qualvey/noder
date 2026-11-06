@@ -168,12 +168,7 @@ func AddUserServiceCredential(w http.ResponseWriter, r *http.Request) {
 	// existing management clients.
 	var credential model.Credential
 	credentialQuery := db.DB.NewSelect().Model(&credential).
-		Where("user_id = ? AND scheme = ? AND uuid_value = ?", user.ID, "generic", credUUID)
-	if req.Password != nil {
-		credentialQuery = credentialQuery.Where("password_ciphertext = ?", *req.Password)
-	} else {
-		credentialQuery = credentialQuery.Where("password_ciphertext IS NULL")
-	}
+		Where("user_id = ? AND uuid_value = ?", user.ID, credUUID)
 	credentialErr := credentialQuery.Scan(r.Context())
 	if credentialErr != nil {
 		var owner model.Credential
@@ -193,6 +188,16 @@ func AddUserServiceCredential(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := db.DB.NewInsert().Model(&credential).Exec(r.Context()); err != nil {
 			RespondServiceError(w, http.StatusInternalServerError, fmt.Sprintf("添加凭证失败：%v", err))
+			return
+		}
+	} else if req.Password != nil {
+		// Password is mutable credential data, not part of credential identity.
+		// A retry with the same UUID must not create a second credential merely
+		// because the password changed.
+		credential.PasswordCiphertext = req.Password
+		if _, err := db.DB.NewUpdate().Model(&credential).
+			Column("password_ciphertext").WherePK().Exec(r.Context()); err != nil {
+			RespondServiceError(w, http.StatusInternalServerError, fmt.Sprintf("更新凭证失败：%v", err))
 			return
 		}
 	}

@@ -113,6 +113,7 @@ type AccessGrant struct {
 	EndpointID     int64       `bun:"endpoint_id,notnull" json:"endpoint_id"`
 	Endpoint       *Node       `bun:"rel:belongs-to,join:endpoint_id=id" json:"endpoint,omitempty"`
 	CredentialID   string      `bun:"credential_id,notnull" json:"credential_id"`
+	ExternalRef    *string     `bun:"external_ref,nullzero" json:"-"` // 外部权益引用（Mall 的 order_item_id）；NULL 表示历史/手工开通
 	Credential     *Credential `bun:"rel:belongs-to,join:credential_id=id" json:"-"`
 	DisplayName    *string     `bun:"display_name" json:"display_name,omitempty"`
 	TagOverride    *string     `bun:"tag_override" json:"tag_override,omitempty"`

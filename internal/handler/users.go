@@ -110,6 +110,21 @@ func resolveEndpointUUID(rawUUID *string, defaultUUID string) string {
 	return uuid.New().String()
 }
 
+func validateEndpointCredential(ctx context.Context, nodeID int64, password *string) error {
+	if nodeID <= 0 {
+		return nil
+	}
+	var node model.Node
+	if err := db.DB.NewSelect().Model(&node).Where("id = ?", nodeID).Scan(ctx); err != nil {
+		return fmt.Errorf("Node %d not found", nodeID)
+	}
+	if strings.EqualFold(strings.TrimSpace(node.Protocol), "tuic") &&
+		(password == nil || strings.TrimSpace(*password) == "") {
+		return fmt.Errorf("TUIC endpoint requires a password")
+	}
+	return nil
+}
+
 func toEndpointRead(ep *model.Endpoint) EndpointReadResp {
 	status := ep.Status
 	if status == "" {
@@ -348,6 +363,14 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		configOverride = norm
+	}
+	for _, epIn := range req.Endpoints {
+		if epIn.NodeID != nil {
+			if err := validateEndpointCredential(r.Context(), *epIn.NodeID, epIn.Password); err != nil {
+				RespondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 	}
 
 	var nodeOrder *string
@@ -704,6 +727,30 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	// 端点与节点更新
 	if rawEndpoints, exists := body["endpoints"]; exists {
+		// Validate before deleting the old endpoint rows. A TUIC endpoint
+		// without its credential password is not a valid configuration.
+		if epList, ok := rawEndpoints.([]interface{}); ok {
+			for _, item := range epList {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				var nodeID int64
+				if f, ok := m["node_id"].(float64); ok {
+					nodeID = int64(f)
+				}
+				var password *string
+				if raw, present := m["password"]; present {
+					if value, ok := raw.(string); ok {
+						password = &value
+					}
+				}
+				if err := validateEndpointCredential(r.Context(), nodeID, password); err != nil {
+					RespondError(w, http.StatusBadRequest, err.Error())
+					return
+				}
+			}
+		}
 		_, _ = db.DB.NewDelete().Model((*model.Endpoint)(nil)).Where("user_id = ?", id).Exec(r.Context())
 		_, _ = db.DB.NewDelete().Model((*model.UserNodeLink)(nil)).Where("user_id = ?", id).Exec(r.Context())
 		user.NodeOrder = nil
@@ -814,6 +861,16 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else if rawNodeIDs, exists := body["node_ids"]; exists {
+		if idsList, ok := rawNodeIDs.([]interface{}); ok {
+			for _, item := range idsList {
+				if f, ok := item.(float64); ok {
+					if err := validateEndpointCredential(r.Context(), int64(f), user.Password); err != nil {
+						RespondError(w, http.StatusBadRequest, err.Error())
+						return
+					}
+				}
+			}
+		}
 		if rawNodeIDs == nil {
 			_, _ = db.DB.NewDelete().Model((*model.UserNodeLink)(nil)).Where("user_id = ?", id).Exec(r.Context())
 			_, _ = db.DB.NewDelete().Model((*model.Endpoint)(nil)).Where("user_id = ?", id).Exec(r.Context())
@@ -872,6 +929,19 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := db.DB.NewUpdate().Model(&user).Where("id = ?", id).Exec(r.Context()); err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// The compatibility user API still writes legacy endpoints, while
+	// subscriptions resolve credentials and access grants from the canonical
+	// domain. Project the change immediately so a PUT cannot return one
+	// password while the next subscription still uses an older credential.
+	if err := db.ProjectLegacyUser(r.Context(), id); err != nil {
+		RespondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := db.SyncLegacyUserCredentials(r.Context(), id); err != nil {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1005,6 +1075,12 @@ func AddUserEndpoint(w http.ResponseWriter, r *http.Request) {
 		count, _ := db.DB.NewSelect().Model((*model.Endpoint)(nil)).Where("user_id = ?", userID).Count(r.Context())
 		sortOrder = count
 	}
+	if nodeIDPtr != nil {
+		if err := validateEndpointCredential(r.Context(), *nodeIDPtr, req.Password); err != nil {
+			RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	status := "active"
 	if req.Status != nil && *req.Status != "" {
@@ -1033,6 +1109,7 @@ func AddUserEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = db.ProjectLegacyUser(r.Context(), userID)
+	_ = db.SyncLegacyUserCredentials(r.Context(), userID)
 
 	_ = db.DB.NewSelect().Model(ep).Relation("Node").Where("endpoint.id = ?", ep.ID).Scan(r.Context())
 	RespondJSON(w, http.StatusOK, toEndpointRead(ep))
@@ -1100,12 +1177,19 @@ func UpdateUserEndpoint(w http.ResponseWriter, r *http.Request) {
 	if r, ok := body["remark"].(string); ok {
 		ep.Remark = &r
 	}
+	if ep.NodeID != nil {
+		if err := validateEndpointCredential(r.Context(), *ep.NodeID, ep.Password); err != nil {
+			RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	if _, err := db.DB.NewUpdate().Model(&ep).Where("id = ?", epID).Exec(r.Context()); err != nil {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	_ = db.ProjectLegacyUser(r.Context(), ep.UserID)
+	_ = db.SyncLegacyUserCredentials(r.Context(), ep.UserID)
 
 	_ = db.DB.NewSelect().Model(&ep).Relation("Node").Where("endpoint.id = ?", epID).Scan(r.Context())
 	RespondJSON(w, http.StatusOK, toEndpointRead(&ep))

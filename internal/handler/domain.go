@@ -131,6 +131,11 @@ func CreateAccessGrant(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusNotFound, "Endpoint not found")
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(endpoint.Protocol), "tuic") &&
+		(credential.PasswordCiphertext == nil || strings.TrimSpace(*credential.PasswordCiphertext) == "") {
+		RespondError(w, http.StatusBadRequest, "TUIC credential requires a password")
+		return
+	}
 
 	var existing model.AccessGrant
 	if err := db.DB.NewSelect().Model(&existing).

@@ -11,7 +11,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
+	"github.com/uptrace/bun/driver/pgdriver"
 	"gopkg.in/yaml.v3"
 	_ "modernc.org/sqlite"
 
@@ -22,15 +24,9 @@ import (
 var DB *bun.DB
 
 func InitDB() (*bun.DB, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", config.DBPath)
-	sqldb, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open sqlite: %w", err)
+	if _, err := OpenDB(); err != nil {
+		return nil, err
 	}
-
-	sqldb.SetMaxOpenConns(1) // SQLite 单写入连接最佳实践
-
-	DB = bun.NewDB(sqldb, sqlitedialect.New())
 	DB.RegisterModel(
 		(*model.UserNodeLink)(nil), (*model.User)(nil), (*model.Node)(nil), (*model.Endpoint)(nil),
 		(*model.Credential)(nil), (*model.AccessGrant)(nil), (*model.AgentNode)(nil),
@@ -49,6 +45,31 @@ func InitDB() (*bun.DB, error) {
 		return nil, fmt.Errorf("failed to project legacy domain data: %w", err)
 	}
 
+	return DB, nil
+}
+
+// OpenDB opens the configured database without creating tables or seeding
+// records. The migration command uses this to provision an empty PostgreSQL
+// database before copying the legacy SQLite data into it.
+func OpenDB() (*bun.DB, error) {
+	if config.DatabaseURL != "" {
+		sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(config.DatabaseURL)))
+		DB = bun.NewDB(sqldb, pgdialect.New())
+	} else {
+		dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", config.DBPath)
+		sqldb, err := sql.Open("sqlite", dsn)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open sqlite: %w", err)
+		}
+		sqldb.SetMaxOpenConns(1) // SQLite 单写入连接最佳实践
+		DB = bun.NewDB(sqldb, sqlitedialect.New())
+	}
+
+	DB.RegisterModel(
+		(*model.UserNodeLink)(nil), (*model.User)(nil), (*model.Node)(nil), (*model.Endpoint)(nil),
+		(*model.Credential)(nil), (*model.AccessGrant)(nil), (*model.AgentNode)(nil),
+		(*model.EndpointAgentBinding)(nil), (*model.CredentialDeployment)(nil), (*model.LegacyMigrationMap)(nil),
+	)
 	return DB, nil
 }
 
@@ -92,19 +113,26 @@ func CreateDBAndTables(ctx context.Context) error {
 	if _, err := DB.NewCreateIndex().Model((*model.Credential)(nil)).IfNotExists().Index("credential_uuid_value_idx").Column("uuid_value").Exec(ctx); err != nil {
 		return err
 	}
-	if _, err := DB.NewCreateIndex().Model((*model.AccessGrant)(nil)).IfNotExists().Index("access_grant_user_endpoint_idx").Unique().Column("user_id", "endpoint_id").Exec(ctx); err != nil {
-		return err
-	}
 	if _, err := DB.NewCreateIndex().Model((*model.AccessGrant)(nil)).IfNotExists().Index("access_grant_credential_idx").Column("credential_id").Exec(ctx); err != nil {
 		return err
 	}
+	// D10（权益粒度 = 订单项）：同用户同 endpoint 可有多条 grant（不同出口/多份订阅），
+	// 旧唯一索引 user+endpoint 已弃用（scripts/migrate_d10.sh 负责存量库 DROP）。
+	// 唯一性按订单约束：external_ref（Mall 的 order_item_id）唯一——防重复交付 + 幂等。
+	// 注意：credential_id 不做全局唯一。legacy 投影里多个 grant 共享同一 credential
+	// （同 UUID 渲染到多个节点）是合法状态；D10 新权益由 activate 语义保证每次新建凭证。
+	if _, err := DB.NewCreateIndex().Model((*model.AccessGrant)(nil)).IfNotExists().Index("access_grant_external_ref_idx").Unique().Column("external_ref").Exec(ctx); err != nil {
+		return err
+	}
 
-	// 存量数据平滑迁移：将 usernodelink 转为 endpoint
+	// 存量数据平滑迁移：将 usernodelink 转为 endpoint. Keep this SQL
+	// portable because the same compatibility schema is used by SQLite and
+	// PostgreSQL during the one-time import.
 	_, _ = DB.ExecContext(ctx, `
 		INSERT INTO endpoint (user_id, node_id, tag, uuid, password, is_active, sort_order)
 		SELECT l.user_id, l.node_id,
 		       COALESCE(NULLIF(n.tag, ''), n.node_name, 'Node-' || n.id),
-		       COALESCE(NULLIF(u.uuid, ''), NULLIF(u.token, ''), lower(hex(randomblob(16)))),
+		       COALESCE(NULLIF(u.uuid, ''), NULLIF(u.token, ''), 'legacy-' || CAST(u.id AS TEXT)),
 		       u.password,
 		       1,
 		       0
@@ -139,10 +167,10 @@ func CreateDBAndTables(ctx context.Context) error {
 	}
 	_, _ = DB.ExecContext(ctx, "UPDATE endpoint SET status = 'active' WHERE status IS NULL OR status = ''")
 	// Migrate the former node-level urltest exclusion to endpoint-level flags.
-	_, _ = DB.ExecContext(ctx, "UPDATE endpoint SET is_urltest = 1 WHERE is_urltest IS NULL")
+	_, _ = DB.ExecContext(ctx, "UPDATE endpoint SET is_urltest = TRUE WHERE is_urltest IS NULL")
 	_, _ = DB.ExecContext(ctx, `
 		UPDATE endpoint
-		SET is_urltest = 0
+		SET is_urltest = FALSE
 		WHERE node_id IS NOT NULL
 		  AND EXISTS (
 			SELECT 1 FROM user u

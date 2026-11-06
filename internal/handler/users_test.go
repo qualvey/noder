@@ -25,6 +25,26 @@ func TestResolveEndpointUUIDUsesUserUUIDByDefault(t *testing.T) {
 	}
 }
 
+func TestCreateUserRejectsTuicEndpointWithoutPassword(t *testing.T) {
+	r, cleanup := setupServiceTest(t)
+	defer cleanup()
+	RegisterUserRoutes(r)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"name": "tuic-without-password",
+		"endpoints": []map[string]interface{}{
+			{"node_id": 1, "tag": "invalid-tuic"},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/users/", bytes.NewReader(body))
+	req.Header.Set("X-Admin-Token", "admin-secret")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for TUIC without password, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestUserEndpointsDefaultToUserUUID(t *testing.T) {
 	r, cleanup := setupServiceTest(t)
 	defer cleanup()
@@ -34,8 +54,8 @@ func TestUserEndpointsDefaultToUserUUID(t *testing.T) {
 		"name": "endpoint-uuid-default-test",
 		"uuid": "user-uuid-default",
 		"endpoints": []map[string]interface{}{
-			{"node_id": 1, "tag": "default-endpoint", "is_active": false, "is_urltest": false, "sort_order": 0},
-			{"node_id": 1, "tag": "urltest-endpoint", "is_active": true, "is_urltest": true, "sort_order": 1},
+			{"node_id": 1, "tag": "default-endpoint", "password": "tuic-password", "is_active": false, "is_urltest": false, "sort_order": 0},
+			{"node_id": 1, "tag": "urltest-endpoint", "password": "tuic-password", "is_active": true, "is_urltest": true, "sort_order": 1},
 		},
 	})
 	createReq := httptest.NewRequest(http.MethodPost, "/api/users/", bytes.NewReader(createBody))
@@ -65,7 +85,7 @@ func TestUserEndpointsDefaultToUserUUID(t *testing.T) {
 
 	updateBody, _ := json.Marshal(map[string]interface{}{
 		"endpoints": []map[string]interface{}{
-			{"node_id": 1, "tag": "default-endpoint", "is_active": false, "is_urltest": false, "sort_order": 0},
+			{"node_id": 1, "tag": "default-endpoint", "password": "tuic-password", "is_active": false, "is_urltest": false, "sort_order": 0},
 			{"node_id": 2, "tag": "enabled-endpoint", "is_active": true, "is_urltest": true, "sort_order": 1},
 		},
 	})

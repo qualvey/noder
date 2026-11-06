@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-noder}
+      POSTGRES_USER: ${POSTGRES_USER:-noder}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    image: ${NODER_IMAGE:-ghcr.io/qualvey/noder}:${NODER_IMAGE_TAG:-latest}
+    entrypoint: ["/usr/local/bin/noder-migrate"]
+    command: ["--sqlite", "/migration/data.db", "--files-source", "/migration/data/files", "--files-destination", "/var/lib/noder/files"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-noder}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-noder}?sslmode=disable
+      ADMIN_SECRET_TOKEN: ${ADMIN_SECRET_TOKEN:-admin-secret}
+      MALL_SERVICE_SECRET: ${MALL_SERVICE_SECRET:-service-secret}
+    # The legacy systemd installation keeps the SQLite database and files here.
+    # Keep this mount read-only: the importer must never modify the old store.
+    volumes:
+      - ${LEGACY_DATA_DIR:-/var/lib/noder}:/migration:ro
+      - noder_data:/var/lib/noder
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  noder:
+    image: ${NODER_IMAGE:-ghcr.io/qualvey/noder}:${NODER_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-noder}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-noder}?sslmode=disable
+      DB_PATH: /var/lib/noder/data.db
+      FILES_DIR: /var/lib/noder/files
+      ADMIN_SECRET_TOKEN: ${ADMIN_SECRET_TOKEN:-admin-secret}
+      MALL_SERVICE_SECRET: ${MALL_SERVICE_SECRET:-service-secret}
+      PORT: 8000
+    ports:
+      - "${NODER_PORT:-8000}:8000"
+    volumes:
+      - noder_data:/var/lib/noder
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+  noder_data:
