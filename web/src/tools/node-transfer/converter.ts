@@ -236,6 +236,36 @@ export function buildShareLinks(configs: BaseOutboundConfig[]): string {
   return configs.map((c) => buildShareLink(c)).filter(Boolean).join('\n')
 }
 
+function sanitizeDaeTag(raw: string, fallback: string): string {
+  const base = (raw || fallback || 'node').trim() || 'node'
+  return base.replace(/[\r\n]+/g, ' ').replace(/'/g, "\\'")
+}
+
+/**
+ * 将节点配置生成 dae node {} 块，使用分享链接作为节点条目。
+ * sockopt.mark 等不属于 dae 分享链接参数的字段不会写入链接。
+ */
+export function buildDaeNodeBlock(configs: BaseOutboundConfig[]): string {
+  const used = new Set<string>()
+  const lines = configs
+    .map((config, index) => {
+      const link = buildShareLink(config)
+      if (!link) return ''
+      const fallback = config.tag || `${config.type || 'node'}-${index + 1}`
+      let tag = sanitizeDaeTag(fallback, `node-${index + 1}`)
+      let suffix = 2
+      while (used.has(tag)) {
+        tag = `${sanitizeDaeTag(fallback, `node-${index + 1}`)}-${suffix++}`
+      }
+      used.add(tag)
+      return `    '${tag}': '${link.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+    })
+    .filter(Boolean)
+
+  if (lines.length === 0) return 'node {\n}'
+  return `node {\n${lines.join('\n')}\n}`
+}
+
 /**
  * 提取节点配置展示详情
  */

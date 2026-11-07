@@ -152,18 +152,27 @@ export function toXrayOutbound(meta: NodeMeta): XrayOutboundConfig {
   }
   if (!meta.uuid) throw new Error('Xray VLESS 配置缺少 UUID')
 
-  if (meta.transport?.type === 'xhttp') {
+  const transportType = meta.transport?.type === 'splithttp' ? 'xhttp' : meta.transport?.type
+  if (transportType === 'xhttp') {
     if (meta.security !== 'tls') throw new Error('Xray XHTTP 仅支持与 TLS 结合，不支持 Reality')
     if (!meta.serverName) throw new Error('Xray XHTTP 配置缺少反代域名 SNI')
+
+    const xhttpExtra = meta.transport?.extra || {}
+    const xPaddingBytes =
+      typeof xhttpExtra.xPaddingBytes === 'string' ? xhttpExtra.xPaddingBytes : '100-1000'
+    const extra: { xPaddingBytes: string } = { xPaddingBytes }
+
     return {
       protocol: 'vless',
       tag: meta.tag || 'xhttp',
       settings: {
-        vnext: [{
-          address: meta.server,
-          port: meta.serverPort,
-          users: [{ id: meta.uuid, encryption: 'none', flow: meta.flow || '' }],
-        }],
+        vnext: [
+          {
+            address: meta.server,
+            port: meta.serverPort,
+            users: [{ id: meta.uuid, encryption: 'none', flow: meta.flow || '' }],
+          },
+        ],
       },
       streamSettings: {
         network: 'xhttp',
@@ -171,9 +180,9 @@ export function toXrayOutbound(meta: NodeMeta): XrayOutboundConfig {
         sockopt: { mark: 1024 },
         tlsSettings: { serverName: meta.serverName, allowInsecure: false },
         xhttpSettings: {
-          path: meta.transport.path || '/',
-          mode: 'auto',
-          extra: { xPaddingBytes: '100-1000' },
+          path: meta.transport?.path || xhttpExtra.path || '/',
+          mode: (meta.transport?.mode || xhttpExtra.mode || 'auto') as 'auto',
+          extra,
         },
       },
     }

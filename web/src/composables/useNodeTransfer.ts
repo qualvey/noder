@@ -11,6 +11,7 @@ import {
   parseLinksToConfigs,
   buildShareLink,
   buildShareLinks,
+  buildDaeNodeBlock,
   extractConfigDetails,
   getAllHandlers,
   getHandlerByProtocol,
@@ -26,6 +27,8 @@ export interface TransferNodeResult {
   meta: NodeMeta
   shareLink: string
   shareJson: string
+  singBoxError: string
+  daeNode: string
   xrayJson: string
   xrayError: string
   details: ConfigDetailItem[]
@@ -86,20 +89,47 @@ export function useNodeTransfer(options: UseNodeTransferOptions = {}) {
     if (parsedConfigs.value.length === 0 || parseError.value) return []
     return parsedConfigs.value.map((cfg, idx) => {
       const meta = toNodeMeta(cfg)
-      const singBoxConfig = toSingBoxConfig(meta)
+
+      let singBoxConfig: BaseOutboundConfig = cfg
+      let singBoxError = ''
+      try {
+        singBoxConfig = toSingBoxConfig(meta)
+      } catch (e: any) {
+        singBoxError = e.message || '无法生成 sing-box 配置'
+        singBoxConfig = cfg
+      }
+
+      let xrayJson = ''
+      let xrayError = ''
+      try {
+        xrayJson = JSON.stringify(toXrayConfig(meta), null, 2)
+      } catch (e: any) {
+        xrayError = e.message || '无法生成 Xray 配置'
+      }
+
+      let shareLink = ''
+      try {
+        shareLink = buildShareLink(singBoxConfig)
+      } catch {
+        shareLink = buildShareLink(cfg)
+      }
+
+      const daeNode = shareLink
+        ? buildDaeNodeBlock([{ ...singBoxConfig, tag: singBoxConfig.tag || cfg.tag || `node-${idx + 1}` }])
+        : ''
+
       return {
         index: idx + 1,
         config: singBoxConfig,
         meta,
-        shareLink: buildShareLink(singBoxConfig),
-        shareJson: JSON.stringify(singBoxConfig, null, 2),
-        ...(() => {
-        try {
-          return { xrayJson: JSON.stringify(toXrayConfig(meta), null, 2), xrayError: '' }
-        } catch (e: any) {
-          return { xrayJson: '', xrayError: e.message || '无法生成 Xray 配置' }
-        }
-      })(),
+        shareLink,
+        shareJson: singBoxError
+          ? JSON.stringify({ error: singBoxError, note: '该节点可能仅支持 Xray/DAE 输出' }, null, 2)
+          : JSON.stringify(singBoxConfig, null, 2),
+        singBoxError,
+        daeNode,
+        xrayJson,
+        xrayError,
         details: extractConfigDetails(singBoxConfig),
       }
     })
@@ -143,11 +173,22 @@ export function useNodeTransfer(options: UseNodeTransferOptions = {}) {
 
   const allSingBoxJsonText = computed(() => {
     if (nodeResults.value.length === 0 || parseError.value) return ''
-    return JSON.stringify(
-      buildSingBoxConfig(nodeResults.value.map((result) => result.config)),
-      null,
-      2,
-    )
+    const configs = nodeResults.value
+      .filter((result) => !result.singBoxError)
+      .map((result) => result.config)
+    if (configs.length === 0) {
+      return JSON.stringify(
+        { error: '当前节点不支持生成 sing-box 完整配置（例如 Xray xhttp）', nodes: nodeResults.value.length },
+        null,
+        2,
+      )
+    }
+    return JSON.stringify(buildSingBoxConfig(configs), null, 2)
+  })
+
+  const allDaeText = computed(() => {
+    if (nodeResults.value.length === 0 || parseError.value) return ''
+    return buildDaeNodeBlock(nodeResults.value.map((result) => result.config))
   })
 
   // 当前选中节点的配置参数详情
@@ -219,6 +260,7 @@ export function useNodeTransfer(options: UseNodeTransferOptions = {}) {
     allShareJsonText,
     allXrayJsonText,
     allSingBoxJsonText,
+    allDaeText,
     parseWarnings,
     configDetails,
     handlePasteSample,

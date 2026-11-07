@@ -44,12 +44,22 @@ export interface TlsConfig {
   }
 }
 
+export interface XhttpExtraConfig {
+  xPaddingBytes?: string
+  host?: string
+  path?: string
+  mode?: string
+  [key: string]: unknown
+}
+
 export interface TransportConfig {
   type?: 'ws' | 'http' | 'grpc' | 'quic' | 'httpupgrade' | 'xhttp' | string
   path?: string
   host?: string | string[]
   headers?: Record<string, string>
   service_name?: string
+  mode?: 'auto' | 'packet-up' | 'stream-up' | 'stream-one' | string
+  extra?: XhttpExtraConfig
 }
 
 export interface VlessOutboundConfig extends BaseOutboundConfig {

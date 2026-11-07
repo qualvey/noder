@@ -2,6 +2,7 @@ import type {
   VlessOutboundConfig,
   ProtocolHandler,
   ConfigDetailItem,
+  XhttpExtraConfig,
 } from '../types'
 import { safeDecodeURIComponent, extractTransportHost } from '../utils'
 
@@ -50,7 +51,7 @@ export const vlessHandler: ProtocolHandler<VlessOutboundConfig> = {
     if (!c.uuid) return '缺少 uuid 字段'
     const transport = (c.transport as Record<string, unknown> | undefined)?.type
     const tls = c.tls as Record<string, unknown> | undefined
-    if (transport === 'xhttp' && (!tls?.enabled || (tls.reality as Record<string, unknown> | undefined)?.enabled)) {
+    if ((transport === 'xhttp' || transport === 'splithttp') && (!tls?.enabled || (tls.reality as Record<string, unknown> | undefined)?.enabled)) {
       return 'XHTTP 仅支持与 TLS 结合，不支持 Reality'
     }
     return null
@@ -115,16 +116,18 @@ export const vlessHandler: ProtocolHandler<VlessOutboundConfig> = {
     }
 
     // Transport
-    const transportType = searchParams.get('type')
+    const rawTransportType = searchParams.get('type') || searchParams.get('network')
+    const normalizedTransportType = rawTransportType === 'splithttp' ? 'xhttp' : rawTransportType
     const validTransports = ['ws', 'http', 'grpc', 'quic', 'httpupgrade', 'xhttp']
-    if (transportType && validTransports.includes(transportType)) {
-      if (transportType === 'xhttp' && security !== 'tls') {
+    if (normalizedTransportType && validTransports.includes(normalizedTransportType)) {
+      const effectiveSecurity = security || (config.tls?.enabled ? (config.tls.reality?.enabled ? 'reality' : 'tls') : 'none')
+      if (normalizedTransportType === 'xhttp' && effectiveSecurity !== 'tls') {
         throw new Error('XHTTP 仅支持 TLS，不支持 Reality')
       }
       config.transport = {
-        type: transportType,
+        type: normalizedTransportType,
       }
-      if (transportType === 'ws' || transportType === 'http' || transportType === 'httpupgrade') {
+      if (normalizedTransportType === 'ws' || normalizedTransportType === 'http' || normalizedTransportType === 'httpupgrade') {
         const path = searchParams.get('path')
         if (path) {
           config.transport.path = safeDecodeURIComponent(path)
@@ -133,10 +136,31 @@ export const vlessHandler: ProtocolHandler<VlessOutboundConfig> = {
         if (host) {
           config.transport.host = [safeDecodeURIComponent(host)]
         }
-      } else if (transportType === 'grpc') {
+      } else if (normalizedTransportType === 'grpc') {
         const serviceName = searchParams.get('serviceName')
         if (serviceName) {
           config.transport.service_name = safeDecodeURIComponent(serviceName)
+        }
+      } else if (normalizedTransportType === 'xhttp') {
+        const path = searchParams.get('path')
+        if (path) config.transport.path = safeDecodeURIComponent(path)
+        const mode = searchParams.get('mode')
+        if (mode) config.transport.mode = mode
+        const host = searchParams.get('host')
+        if (host) config.transport.host = [safeDecodeURIComponent(host)]
+        const extra = searchParams.get('extra')
+        if (extra) {
+          try {
+            const parsed = JSON.parse(extra) as XhttpExtraConfig
+            if (parsed && typeof parsed === 'object') {
+              config.transport.extra = parsed
+              if (!config.transport.path && typeof parsed.path === 'string') config.transport.path = parsed.path
+              if (!config.transport.mode && typeof parsed.mode === 'string') config.transport.mode = parsed.mode
+              if (!config.transport.host && typeof parsed.host === 'string') config.transport.host = [parsed.host]
+            }
+          } catch {
+            // 保留无效 extra 由上层/用户处理，避免解析整个链接失败
+          }
         }
       }
     }
@@ -152,9 +176,12 @@ export const vlessHandler: ProtocolHandler<VlessOutboundConfig> = {
 
     const params: string[] = []
 
+    // Standard VLESS links typically include encryption=none.
+    params.push('encryption=none')
+
     // Flow
     if (config.flow) {
-      params.push(`flow=${config.flow}`)
+      params.push(`flow=${encodeURIComponent(config.flow)}`)
     }
 
     // Security & TLS & Reality
@@ -170,46 +197,62 @@ export const vlessHandler: ProtocolHandler<VlessOutboundConfig> = {
 
     // SNI
     if (config.tls?.server_name) {
-      params.push(`sni=${config.tls.server_name}`)
+      params.push(`sni=${encodeURIComponent(config.tls.server_name)}`)
     }
 
     // uTLS Fingerprint
     if (config.tls?.utls?.enabled && config.tls.utls.fingerprint) {
-      params.push(`fp=${config.tls.utls.fingerprint}`)
+      params.push(`fp=${encodeURIComponent(config.tls.utls.fingerprint)}`)
     }
 
     // Reality parameters
     if (security === 'reality' && config.tls?.reality) {
       const pbk = config.tls.reality.public_key
       if (pbk) {
-        params.push(`pbk=${pbk}`)
+        params.push(`pbk=${encodeURIComponent(pbk)}`)
       }
       const sid = config.tls.reality.short_id
       if (sid) {
-        params.push(`sid=${sid}`)
+        params.push(`sid=${encodeURIComponent(sid)}`)
       }
     }
 
     // Transport settings
+    const rawTransportType = config.transport?.type === 'splithttp' ? 'xhttp' : config.transport?.type
     const validTransports = ['ws', 'http', 'grpc', 'quic', 'httpupgrade', 'xhttp']
-    if (config.transport?.type && validTransports.includes(config.transport.type)) {
-      const transportType = config.transport.type
-      if (transportType === 'xhttp' && (security !== 'tls' || config.tls?.reality?.enabled)) {
+    if (rawTransportType && validTransports.includes(rawTransportType)) {
+      if (rawTransportType === 'xhttp' && (security !== 'tls' || config.tls?.reality?.enabled)) {
         throw new Error('XHTTP 仅支持与 TLS 结合，不支持 Reality')
       }
-      params.push(`type=${transportType}`)
+      params.push(`type=${rawTransportType}`)
 
-      if (transportType === 'ws' || transportType === 'http' || transportType === 'httpupgrade') {
-        if (config.transport.path) {
+      if (rawTransportType === 'ws' || rawTransportType === 'http' || rawTransportType === 'httpupgrade') {
+        if (config.transport?.path) {
           params.push(`path=${encodeURIComponent(config.transport.path)}`)
         }
         const host = extractTransportHost(config.transport)
         if (host) {
           params.push(`host=${encodeURIComponent(host)}`)
         }
-      } else if (transportType === 'grpc') {
-        if (config.transport.service_name) {
+      } else if (rawTransportType === 'grpc') {
+        if (config.transport?.service_name) {
           params.push(`serviceName=${encodeURIComponent(config.transport.service_name)}`)
+        }
+      } else if (rawTransportType === 'xhttp') {
+        const path = config.transport?.path || config.transport?.extra?.path
+        if (path) {
+          params.push(`path=${encodeURIComponent(path)}`)
+        }
+        const mode = config.transport?.mode || config.transport?.extra?.mode
+        if (mode) {
+          params.push(`mode=${encodeURIComponent(mode)}`)
+        }
+        const host = extractTransportHost(config.transport) || config.transport?.extra?.host
+        if (host) {
+          params.push(`host=${encodeURIComponent(host)}`)
+        }
+        if (config.transport?.extra && Object.keys(config.transport.extra).length > 0) {
+          params.push(`extra=${encodeURIComponent(JSON.stringify(config.transport.extra))}`)
         }
       }
     }

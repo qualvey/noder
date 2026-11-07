@@ -24,13 +24,14 @@ const {
   handleCopyAll,
   allXrayJsonText,
   allSingBoxJsonText,
+  allDaeText,
   parseWarnings,
 } = useNodeTransfer({
   onSuccess: (msg) => toast?.(msg, 'success'),
   onError: (msg) => toast?.(msg, 'error'),
 })
 
-const activeOutputTab = ref<'primary' | 'xray'>('primary')
+const activeOutputTab = ref<'primary' | 'xray' | 'dae'>('primary')
 
 function downloadSingBox() {
   if (!allSingBoxJsonText.value) return
@@ -158,15 +159,24 @@ function downloadSingBox() {
             </button>
             <button class="copy-all-btn" @click="downloadSingBox">下载 JSON</button>
             <button
-              v-if="nodeCount > 1"
               class="copy-all-btn"
               @click="
                 activeOutputTab === 'xray'
-                  ? handleCopy(allXrayJsonText, `已复制全部 Xray 配置`)
-                  : handleCopyAll()
+                  ? handleCopy(allXrayJsonText, '已复制全部 Xray 配置')
+                  : activeOutputTab === 'dae'
+                    ? handleCopy(allDaeText, '已复制 DAE node 配置')
+                    : handleCopyAll()
               "
             >
-              复制{{ activeOutputTab === 'xray' ? '全部 Xray 配置' : `全部 (${nodeCount})` }}
+              {{
+                activeOutputTab === 'xray'
+                  ? '复制全部 Xray 配置'
+                  : activeOutputTab === 'dae'
+                    ? '复制 DAE node'
+                    : nodeCount > 1
+                      ? `复制全部 (${nodeCount})`
+                      : '复制'
+              }}
             </button>
           </div>
         </div>
@@ -183,6 +193,12 @@ function downloadSingBox() {
             @click="activeOutputTab = 'xray'"
           >
             Xray VLESS
+          </button>
+          <button
+            :class="{ active: activeOutputTab === 'dae' }"
+            @click="activeOutputTab = 'dae'"
+          >
+            DAE node
           </button>
         </nav>
 
@@ -216,22 +232,32 @@ function downloadSingBox() {
                   :value="
                     activeOutputTab === 'xray'
                       ? item.xrayJson || item.xrayError
-                      : conversionDirection === 'json2link'
-                        ? item.shareLink
-                        : item.shareJson
+                      : activeOutputTab === 'dae'
+                        ? item.daeNode
+                        : conversionDirection === 'json2link'
+                          ? item.shareLink
+                          : item.shareJson
                   "
                 ></textarea>
                 <button
                   class="node-copy-btn"
                   title="复制此节点"
-                  v-if="activeOutputTab !== 'xray' || item.xrayJson"
+                  v-if="
+                    activeOutputTab === 'xray'
+                      ? !!item.xrayJson
+                      : activeOutputTab === 'dae'
+                        ? !!item.daeNode
+                        : !!(conversionDirection === 'json2link' ? item.shareLink : item.shareJson)
+                  "
                   @click.stop="
                     handleCopy(
                       activeOutputTab === 'xray'
                         ? item.xrayJson
-                        : conversionDirection === 'json2link'
-                          ? item.shareLink
-                          : item.shareJson,
+                        : activeOutputTab === 'dae'
+                          ? item.daeNode
+                          : conversionDirection === 'json2link'
+                            ? item.shareLink
+                            : item.shareJson,
                       `已复制节点 #${item.index}`,
                     )
                   "
