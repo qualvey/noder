@@ -222,7 +222,7 @@ func SeedDefaultData(ctx context.Context) error {
 	var setting model.AppSetting
 	err := DB.NewSelect().Model(&setting).Where("key = ?", "shared_download_token").Scan(ctx)
 	if err != nil {
-		token := randomHex(16)
+		token := randomHex(32)
 		_, _ = DB.NewInsert().Model(&model.AppSetting{Key: "shared_download_token", Value: token}).Exec(ctx)
 	}
 

@@ -45,7 +45,7 @@ func GetSharedToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func ResetSharedToken(w http.ResponseWriter, r *http.Request) {
-	newToken := randomHex(16)
+	newToken := randomHex(32)
 	_, _ = db.DB.NewInsert().
 		Model(&model.AppSetting{Key: "shared_download_token", Value: newToken}).
 		On("CONFLICT (key) DO UPDATE").
