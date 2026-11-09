@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -194,6 +195,28 @@ func AllocateUserSocks5(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// socks5GrantBlocked reports whether a canonical grant for (user, node)
+// exists and is not currently usable (expired/revoked/disabled). A missing
+// grant means the row is legacy/unprojected and is not filtered here.
+func socks5GrantBlocked(ctx interface{ Deadline() (time.Time, bool); Done() <-chan struct{}; Err() error; Value(any) any }, userID, nodeID int64, now time.Time) bool {
+	var grants []*model.AccessGrant
+	if err := db.DB.NewSelect().Model(&grants).
+		Relation("Credential").
+		Where("access_grant.user_id = ? AND access_grant.endpoint_id = ?", userID, nodeID).
+		Scan(ctx); err != nil || len(grants) == 0 {
+		return false
+	}
+	for _, g := range grants {
+		if g == nil || g.Credential == nil {
+			continue
+		}
+		if g.IsUsable(now) && g.Credential.IsUsable(now) {
+			return false
+		}
+	}
+	return true
+}
+
 // GetUserSocks5List 获取用户 Socks5 节点列表 (纯净直出)
 func GetUserSocks5List(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
@@ -234,12 +257,16 @@ func GetUserSocks5List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	now := time.Now()
 	format := strings.ToLower(r.URL.Query().Get("format"))
 	if format == "text" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		for _, ep := range endpoints {
 			if ep.Node != nil && ep.Node.Protocol == "socks5" && ep.Node.IsActive && ep.Username != nil && ep.Password != nil {
+				if ep.NodeID != nil && socks5GrantBlocked(r.Context(), user.ID, *ep.NodeID, now) {
+					continue
+				}
 				_, _ = fmt.Fprintf(w, "%s:%d:%s:%s\n", ep.Node.ServerAddress, ep.Node.ServerPort, *ep.Username, *ep.Password)
 			}
 		}
@@ -249,6 +276,9 @@ func GetUserSocks5List(w http.ResponseWriter, r *http.Request) {
 	var items []Socks5ItemResp
 	for _, ep := range endpoints {
 		if ep.Node != nil && ep.Node.Protocol == "socks5" && ep.Node.IsActive && ep.Username != nil && ep.Password != nil {
+			if ep.NodeID != nil && socks5GrantBlocked(r.Context(), user.ID, *ep.NodeID, now) {
+				continue
+			}
 			proxyFormat := fmt.Sprintf("%s:%d:%s:%s", ep.Node.ServerAddress, ep.Node.ServerPort, *ep.Username, *ep.Password)
 			proxyURL := fmt.Sprintf("socks5://%s:%s@%s:%d#%s", *ep.Username, *ep.Password, ep.Node.ServerAddress, ep.Node.ServerPort, ep.Tag)
 			ctry := ""
@@ -306,24 +336,58 @@ func GetGostNodeAuthList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var endpoints []*model.Endpoint
-	err = db.DB.NewSelect().
-		Model(&endpoints).
-		Relation("User").
-		Where("endpoint.node_id = ? AND endpoint.is_active = true AND endpoint.status = 'active'", nodeID).
-		Scan(r.Context())
-	if err != nil {
+	type authRow struct {
+		Username string  `bun:"username"`
+		Password *string `bun:"password"`
+	}
+	var rows []authRow
+	// Canonical path (D10): only usable grant+credential pairs, same semantics as /sub.
+	now := time.Now()
+	if err := db.DB.NewSelect().
+		TableExpr("access_grants AS g").
+		Join("JOIN credentials AS c ON c.id = g.credential_id").
+		Join("JOIN \"user\" AS u ON u.id = g.user_id").
+		ColumnExpr("c.username AS username").
+		ColumnExpr("c.password_ciphertext AS password").
+		Where("g.endpoint_id = ? AND g.status = ? AND (g.expires_at IS NULL OR g.expires_at > ?)", nodeID, model.AccessGrantStatusActive, now).
+		Where("c.status = ? AND c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > ?)", model.CredentialStatusActive, now).
+		Where("c.username IS NOT NULL AND c.username <> ''").
+		Where("u.is_active = true").
+		Scan(r.Context(), &rows); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	// Legacy fallback: include unprojected legacy endpoint auth only when no
+	// grant exists at all for (user,node). If any grant exists, its expiry/
+	// status is authoritative and must not be bypassed.
+	var legacyRows []authRow
+	if err := db.DB.NewSelect().
+		TableExpr("endpoint AS ep").
+		Join("JOIN \"user\" AS u ON u.id = ep.user_id").
+		ColumnExpr("ep.username AS username").
+		ColumnExpr("ep.password AS password").
+		Where("ep.node_id = ? AND ep.is_active = true AND ep.status = 'active'", nodeID).
+		Where("ep.username IS NOT NULL AND ep.username <> '' AND ep.password IS NOT NULL AND ep.password <> ''").
+		Where("u.is_active = true").
+		Where("NOT EXISTS (SELECT 1 FROM access_grants ag WHERE ag.user_id = ep.user_id AND ag.endpoint_id = ep.node_id)").
+		Scan(r.Context(), &legacyRows); err == nil {
+		rows = append(rows, legacyRows...)
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintln(w, "# username password")
-	for _, ep := range endpoints {
-		if ep.User != nil && ep.User.IsActive && ep.Username != nil && strings.TrimSpace(*ep.Username) != "" && ep.Password != nil && strings.TrimSpace(*ep.Password) != "" {
-			_, _ = fmt.Fprintf(w, "%s %s\n", *ep.Username, *ep.Password)
+	seen := map[string]bool{}
+	for _, row := range rows {
+		if row.Password == nil || strings.TrimSpace(*row.Password) == "" {
+			continue
 		}
+		key := row.Username + "\x00" + *row.Password
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		_, _ = fmt.Fprintf(w, "%s %s\n", row.Username, *row.Password)
 	}
 }
 
