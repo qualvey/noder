@@ -31,6 +31,7 @@ func InitDB() (*bun.DB, error) {
 		(*model.UserNodeLink)(nil), (*model.User)(nil), (*model.Node)(nil), (*model.Endpoint)(nil),
 		(*model.Credential)(nil), (*model.AccessGrant)(nil), (*model.AgentNode)(nil),
 		(*model.EndpointAgentBinding)(nil), (*model.CredentialDeployment)(nil), (*model.LegacyMigrationMap)(nil),
+		(*model.SubscriptionOperation)(nil),
 	)
 
 	ctx := context.Background()
@@ -69,6 +70,7 @@ func OpenDB() (*bun.DB, error) {
 		(*model.UserNodeLink)(nil), (*model.User)(nil), (*model.Node)(nil), (*model.Endpoint)(nil),
 		(*model.Credential)(nil), (*model.AccessGrant)(nil), (*model.AgentNode)(nil),
 		(*model.EndpointAgentBinding)(nil), (*model.CredentialDeployment)(nil), (*model.LegacyMigrationMap)(nil),
+		(*model.SubscriptionOperation)(nil),
 	)
 	return DB, nil
 }
@@ -91,6 +93,7 @@ func CreateDBAndTables(ctx context.Context) error {
 		(*model.EndpointAgentBinding)(nil),
 		(*model.CredentialDeployment)(nil),
 		(*model.LegacyMigrationMap)(nil),
+		(*model.SubscriptionOperation)(nil),
 	}
 
 	for _, m := range models {
@@ -180,6 +183,16 @@ func CreateDBAndTables(ctx context.Context) error {
 		  )
 	`)
 	_, _ = DB.ExecContext(ctx, "UPDATE user SET independent_node_ids = NULL WHERE independent_node_ids IS NOT NULL")
+
+	// D10 Mall delivery: subscription fields on access_grants.
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE access_grants ADD COLUMN format VARCHAR")
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE access_grants ADD COLUMN exit_route_tag VARCHAR")
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE access_grants ADD COLUMN delivered_at TIMESTAMP")
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE access_grants ADD COLUMN traffic_quota_bytes BIGINT DEFAULT 0")
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE access_grants ADD COLUMN traffic_used_bytes BIGINT DEFAULT 0")
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE access_grants ADD COLUMN traffic_updated_at TIMESTAMP")
+	_, _ = DB.ExecContext(ctx, "UPDATE access_grants SET traffic_quota_bytes = 0 WHERE traffic_quota_bytes IS NULL")
+	_, _ = DB.ExecContext(ctx, "UPDATE access_grants SET traffic_used_bytes = 0 WHERE traffic_used_bytes IS NULL")
 
 	// 清理历史上节点删除失败后遗留的端点和用户-节点关联。
 	_, _ = DB.ExecContext(ctx, `

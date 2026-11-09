@@ -63,6 +63,14 @@ func RespondServiceSuccess(w http.ResponseWriter, data interface{}) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// RespondServiceJSON writes a service response envelope with an explicit HTTP
+// status and arbitrary top-level body fields merged into {code,message,...}.
+func RespondServiceJSON(w http.ResponseWriter, httpStatus int, body map[string]interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(httpStatus)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
 // RespondServiceError 返回微服务统一规范错误响应
 func RespondServiceError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
@@ -70,5 +78,17 @@ func RespondServiceError(w http.ResponseWriter, status int, msg string) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"code":    status,
 		"message": msg,
+	})
+}
+
+// RespondServiceCodedError returns the Mall-facing error envelope:
+// {code: 4xxxx, message, error}.
+func RespondServiceCodedError(w http.ResponseWriter, httpStatus, code int, errCode, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(httpStatus)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"code":    code,
+		"message": msg,
+		"error":   errCode,
 	})
 }

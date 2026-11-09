@@ -408,6 +408,13 @@ func RegisterServiceRoutes(r chi.Router) {
 			r.Post("/users/{token}/credentials", AddUserServiceCredential)
 			r.Post("/render-config", RenderConfigStateless)
 			r.Post("/users/{token}/socks5/allocate", AllocateUserSocks5)
+
+			// D10 Mall subscription delivery
+			r.Post("/subscriptions/activate", ActivateSubscription)
+			r.Get("/subscriptions/{id}", GetSubscription)
+			r.Post("/subscriptions/{id}/extend", ExtendSubscription)
+			r.Post("/subscriptions/{id}/quota", QuotaSubscription)
+			r.Post("/subscriptions/{id}/revoke", RevokeSubscription)
 		})
 	})
 }

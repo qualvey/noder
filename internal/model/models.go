@@ -57,9 +57,13 @@ const (
 	CredentialStatusDisabled       = "disabled"
 	CredentialStatusRevoked        = "revoked"
 
-	AccessGrantStatusActive   = "active"
-	AccessGrantStatusDisabled = "disabled"
-	AccessGrantStatusRevoked  = "revoked"
+	AccessGrantStatusActive           = "active"
+	AccessGrantStatusDisabled         = "disabled"
+	AccessGrantStatusRevoked          = "revoked"
+	AccessGrantStatusExpired          = "expired"
+	AccessGrantStatusTrafficExhausted = "traffic_exhausted"
+	AccessGrantStatusPendingActivation = "pending_activation"
+	AccessGrantStatusActivationFailed  = "activation_failed"
 )
 
 // Credential is the authoritative data-plane identity of a user. Password is
@@ -107,24 +111,30 @@ func (c *Credential) IsUsable(now time.Time) bool {
 type AccessGrant struct {
 	bun.BaseModel `bun:"table:access_grants"`
 
-	ID             string      `bun:"id,pk" json:"id"`
-	UserID         int64       `bun:"user_id,notnull" json:"user_id"`
-	User           *User       `bun:"rel:belongs-to,join:user_id=id" json:"-"`
-	EndpointID     int64       `bun:"endpoint_id,notnull" json:"endpoint_id"`
-	Endpoint       *Node       `bun:"rel:belongs-to,join:endpoint_id=id" json:"endpoint,omitempty"`
-	CredentialID   string      `bun:"credential_id,notnull" json:"credential_id"`
-	ExternalRef    *string     `bun:"external_ref,nullzero" json:"-"` // 外部权益引用（Mall 的 order_item_id）；NULL 表示历史/手工开通
-	Credential     *Credential `bun:"rel:belongs-to,join:credential_id=id" json:"-"`
-	DisplayName    *string     `bun:"display_name" json:"display_name,omitempty"`
-	TagOverride    *string     `bun:"tag_override" json:"tag_override,omitempty"`
-	Status         string      `bun:"status,notnull,default:'active'" json:"status"`
-	IsURLTest      bool        `bun:"is_urltest,notnull,default:true" json:"is_urltest"`
-	SortOrder      int         `bun:"sort_order,notnull,default:0" json:"sort_order"`
-	OverrideConfig string      `bun:"override_config,notnull,default:'{}'" json:"override_config"`
-	Remark         *string     `bun:"remark" json:"remark,omitempty"`
-	ExpiresAt      *time.Time  `bun:"expires_at" json:"expires_at,omitempty"`
-	CreatedAt      time.Time   `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt      time.Time   `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
+	ID               string      `bun:"id,pk" json:"id"`
+	UserID           int64       `bun:"user_id,notnull" json:"user_id"`
+	User             *User       `bun:"rel:belongs-to,join:user_id=id" json:"-"`
+	EndpointID       int64       `bun:"endpoint_id,notnull" json:"endpoint_id"`
+	Endpoint         *Node       `bun:"rel:belongs-to,join:endpoint_id=id" json:"endpoint,omitempty"`
+	CredentialID     string      `bun:"credential_id,notnull" json:"credential_id"`
+	ExternalRef      *string     `bun:"external_ref,nullzero" json:"-"` // 外部权益引用（Mall 的 order_item_id）；NULL 表示历史/手工开通
+	Credential       *Credential `bun:"rel:belongs-to,join:credential_id=id" json:"-"`
+	DisplayName      *string     `bun:"display_name" json:"display_name,omitempty"`
+	TagOverride      *string     `bun:"tag_override" json:"tag_override,omitempty"`
+	Status           string      `bun:"status,notnull,default:'active'" json:"status"`
+	Format           *string     `bun:"format" json:"format,omitempty"`                  // socks | landing
+	ExitRouteTag     *string     `bun:"exit_route_tag" json:"exit_route_tag,omitempty"`  // landing 出口路由标签；socks 为空
+	IsURLTest        bool        `bun:"is_urltest,notnull,default:true" json:"is_urltest"`
+	SortOrder        int         `bun:"sort_order,notnull,default:0" json:"sort_order"`
+	OverrideConfig   string      `bun:"override_config,notnull,default:'{}'" json:"override_config"`
+	Remark           *string     `bun:"remark" json:"remark,omitempty"`
+	DeliveredAt      *time.Time  `bun:"delivered_at" json:"delivered_at,omitempty"`
+	ExpiresAt        *time.Time  `bun:"expires_at" json:"expires_at,omitempty"`
+	TrafficQuotaBytes int64      `bun:"traffic_quota_bytes,notnull,default:0" json:"traffic_quota_bytes"` // 0 = 不限
+	TrafficUsedBytes  int64      `bun:"traffic_used_bytes,notnull,default:0" json:"traffic_used_bytes"`
+	TrafficUpdatedAt  *time.Time `bun:"traffic_updated_at" json:"traffic_updated_at,omitempty"`
+	CreatedAt        time.Time   `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt        time.Time   `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
 }
 
 func (g *AccessGrant) IsUsable(now time.Time) bool {
@@ -180,6 +190,20 @@ type LegacyMigrationMap struct {
 	AccessGrantID    *string   `bun:"access_grant_id" json:"access_grant_id,omitempty"`
 	Conflict         *string   `bun:"conflict" json:"conflict,omitempty"`
 	CreatedAt        time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+}
+
+// SubscriptionOperation provides idempotency for extend/quota operations
+// keyed by Mall order_item_id (external_ref semantics, but for operations
+// against an existing grant rather than grant creation).
+type SubscriptionOperation struct {
+	bun.BaseModel `bun:"table:subscription_operations"`
+
+	ID          int64     `bun:"id,pk,autoincrement" json:"id"`
+	OrderItemID string    `bun:"order_item_id,notnull,unique" json:"order_item_id"`
+	GrantID     string    `bun:"grant_id,notnull" json:"grant_id"`
+	Operation   string    `bun:"operation,notnull" json:"operation"` // extend | quota
+	Result      string    `bun:"result,notnull,default:'{}'" json:"result"`
+	CreatedAt   time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
 }
 
 // Endpoint 完整节点实体（入口节点 + 鉴权凭证 + 路由 Tag）
