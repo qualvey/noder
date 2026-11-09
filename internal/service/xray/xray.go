@@ -177,10 +177,10 @@ func BuildXrayOutbound(node *model.Node, user *model.User) (map[string]interface
 }
 
 func GenerateXrayConfigFromTemplate(cfg map[string]interface{}, endpoints []*model.Endpoint, user *model.User) (map[string]interface{}, error) {
-	var outbounds []interface{}
 	seenTags := make(map[string]bool)
+	var templateOutbounds []interface{}
 	if raw, ok := cfg["outbounds"].([]interface{}); ok {
-		outbounds = append(outbounds, raw...)
+		templateOutbounds = append(templateOutbounds, raw...)
 		for _, rawOutbound := range raw {
 			if outbound, ok := rawOutbound.(map[string]interface{}); ok {
 				if tag, ok := outbound["tag"].(string); ok && tag != "" {
@@ -190,6 +190,7 @@ func GenerateXrayConfigFromTemplate(cfg map[string]interface{}, endpoints []*mod
 		}
 	}
 
+	var generatedOutbounds []interface{}
 	for _, ep := range endpoints {
 		if !ep.IsActive || ep.Node == nil || !ep.Node.IsActive || ep.Node.Protocol != "vless" {
 			continue
@@ -203,11 +204,62 @@ func GenerateXrayConfigFromTemplate(cfg map[string]interface{}, endpoints []*mod
 			return nil, contract.NewBadRequest(fmt.Sprintf("duplicate Xray outbound tag: %s", tag))
 		}
 		seenTags[tag] = true
-		outbounds = append(outbounds, outbound)
+		generatedOutbounds = append(generatedOutbounds, outbound)
 	}
 
+	// Render user nodes at the front, preserving project priority order (as passed in).
+	outbounds := make([]interface{}, 0, len(generatedOutbounds)+len(templateOutbounds))
+	outbounds = append(outbounds, generatedOutbounds...)
+	outbounds = append(outbounds, templateOutbounds...)
 	cfg["outbounds"] = outbounds
+
+	if len(generatedOutbounds) > 0 {
+		if first, ok := generatedOutbounds[0].(map[string]interface{}); ok {
+			if tag, ok := first["tag"].(string); ok && tag != "" {
+				setXrayRoutingOutboundTag(cfg, "dns-proxy", tag)
+			}
+		}
+	}
+
 	return cfg, nil
+}
+
+func setXrayRoutingOutboundTag(cfg map[string]interface{}, inboundTag, outboundTag string) {
+	routing, ok := cfg["routing"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	rules, ok := routing["rules"].([]interface{})
+	if !ok {
+		return
+	}
+	for _, raw := range rules {
+		rule, ok := raw.(map[string]interface{})
+		if !ok || !xrayRuleHasInboundTag(rule, inboundTag) {
+			continue
+		}
+		rule["outboundTag"] = outboundTag
+	}
+}
+
+func xrayRuleHasInboundTag(rule map[string]interface{}, want string) bool {
+	switch v := rule["inboundTag"].(type) {
+	case string:
+		return v == want
+	case []interface{}:
+		for _, item := range v {
+			if s, ok := item.(string); ok && s == want {
+				return true
+			}
+		}
+	case []string:
+		for _, s := range v {
+			if s == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func GenerateXrayConfigFromEndpoints(endpoints []*model.Endpoint, user *model.User) (map[string]interface{}, error) {

@@ -123,8 +123,15 @@ func TestGenerateXrayConfigPreservesTemplateAndRejectsDuplicateTag(t *testing.T)
 	if cfg["log"] == nil {
 		t.Error("template field log was not preserved")
 	}
-	if len(cfg["outbounds"].([]interface{})) != 2 {
-		t.Fatalf("expected template outbound plus generated outbound, got %#v", cfg["outbounds"])
+	outbounds := cfg["outbounds"].([]interface{})
+	if len(outbounds) != 2 {
+		t.Fatalf("expected generated outbound plus template outbound, got %#v", outbounds)
+	}
+	if outbounds[0].(map[string]interface{})["tag"] != "vless-01" {
+		t.Fatalf("expected user nodes prepended in priority order, got %#v", outbounds)
+	}
+	if outbounds[1].(map[string]interface{})["tag"] != "direct" {
+		t.Fatalf("expected template outbound preserved after user nodes, got %#v", outbounds)
 	}
 
 	duplicate := testXrayNode()
@@ -162,6 +169,54 @@ func TestGenerateXrayConfigSkipsUnsupportedEndpoints(t *testing.T) {
 	}
 	if outbounds[0].(map[string]interface{})["tag"] != "vless-01" {
 		t.Fatalf("unexpected rendered outbound: %#v", outbounds[0])
+	}
+}
+
+func TestGenerateXrayConfigPrependsUserNodesAndRewritesDNSProxy(t *testing.T) {
+	first := testXrayNode()
+	first.Tag = "node-a"
+	second := testXrayNode()
+	second.Tag = "node-b"
+
+	cfg, err := GenerateXrayConfigFromTemplate(
+		map[string]interface{}{
+			"outbounds": []interface{}{map[string]interface{}{"protocol": "freedom", "tag": "direct"}},
+			"routing": map[string]interface{}{
+				"rules": []interface{}{
+					map[string]interface{}{"inboundTag": []interface{}{"dns-proxy"}, "outboundTag": "Proxy"},
+					map[string]interface{}{"inboundTag": []interface{}{"dns-direct"}, "outboundTag": "direct"},
+				},
+			},
+		},
+		[]*model.Endpoint{
+			{Node: first, Tag: "node-a", UUID: "11111111-1111-4111-8111-111111111111", IsActive: true},
+			{Node: second, Tag: "node-b", UUID: "11111111-1111-4111-8111-111111111111", IsActive: true},
+		},
+		testXrayUser(),
+	)
+	if err != nil {
+		t.Fatalf("GenerateXrayConfigFromTemplate failed: %v", err)
+	}
+
+	outbounds := cfg["outbounds"].([]interface{})
+	gotTags := []string{
+		outbounds[0].(map[string]interface{})["tag"].(string),
+		outbounds[1].(map[string]interface{})["tag"].(string),
+		outbounds[2].(map[string]interface{})["tag"].(string),
+	}
+	wantTags := []string{"node-a", "node-b", "direct"}
+	for i := range wantTags {
+		if gotTags[i] != wantTags[i] {
+			t.Fatalf("unexpected outbound order: got %#v want %#v", gotTags, wantTags)
+		}
+	}
+
+	rules := cfg["routing"].(map[string]interface{})["rules"].([]interface{})
+	if rules[0].(map[string]interface{})["outboundTag"] != "node-a" {
+		t.Fatalf("dns-proxy rule should point to first node, got %#v", rules[0])
+	}
+	if rules[1].(map[string]interface{})["outboundTag"] != "direct" {
+		t.Fatalf("other routing rules should be preserved, got %#v", rules[1])
 	}
 }
 

@@ -1,8 +1,6 @@
 {
   "log": {
     "loglevel": "info",
-    // "access": "/var/log/xray/xray.log",
-    // "error": "/var/log/xray/xray.log",
     "dnsLog": true
   },
   "api": {
@@ -134,29 +132,9 @@
       },
       "tag": "sk-in"
     },
-    //     {
-    //         "tag": "tun",
-    //      "protocol": "tun",
-    //   "sniffing": {
-    //       "enabled": true,
-    //       "destOverride": ["http", "tls", "quic"],
-    //       "routeOnly": true
-    //   },
-    //   "settings": {
-    //     "mtu": 1500,
-    //     "gateway": ["172.16.0.1/30", "fc00::1/126"],
-    //     "autoSystemRoutingTable": ["0.0.0.0/0", "::/0"],
-    //     "autoOutboundsInterface": "end0"
-    //   }
-    // },
     {
-      "port": 12345,
-      "tag": "tp-in",
-      "protocol": "tunnel",
-      "settings": {
-        "allowedNetwork": "tcp,udp",
-        "followRedirect": true
-      },
+      "tag": "tun",
+      "protocol": "tun",
       "sniffing": {
         "enabled": true,
         "destOverride": [
@@ -166,105 +144,21 @@
         ],
         "routeOnly": true
       },
-      "streamSettings": {
-        "sockopt": {
-          "tproxy": "tproxy"
-        }
+      "settings": {
+        "mtu": 1500,
+        "gateway": [
+          "172.16.0.1/30",
+          "fc00::1/126"
+        ],
+        "autoSystemRoutingTable": [
+          "0.0.0.0/0",
+          "::/0"
+        ],
+        "autoOutboundsInterface": "end0"
       }
     }
   ],
   "outbounds": [
-    {
-      "protocol": "vless",
-      "tag": "test",
-      "settings": {
-        "address": "usp.losdot.com",
-        "port": 443,
-        "id": "725c9d9c-5025-441b-898a-38304b719966",
-        "encryption": "none",
-        "flow": "xtls-rprx-vision"
-      },
-      "streamSettings": {
-        "sockopt": {
-          "mark": 1024
-        },
-        "method": "raw",
-        "security": "reality",
-        "realitySettings": {
-          "serverName": "pantheonsite.io",
-          "fingerprint": "chrome",
-          "password": "HmK2eIv75tzUTNd5w66NZxhPRq_fLWsUzlbsp6qfH2M",
-          "shortId": "2009419fbbb4"
-        }
-      }
-    },
-    {
-      "tag": "xhttp",
-      "protocol": "vless",
-      "settings": {
-        "vnext": [
-          {
-            "address": "test.ryugo.org",
-            "port": 443,
-            "users": [
-              {
-                "id": "2ca75154-044d-42a7-bff9-598eaf61e408",
-                "encryption": "none",
-                "flow": ""
-              }
-            ]
-          }
-        ]
-      },
-      "streamSettings": {
-        "network": "xhttp",
-        "security": "tls",
-        "sockopt": {
-          "mark": 1024
-        },
-        "tlsSettings": {
-          "serverName": "test.ryugo.org", // 必须填你的反代域名（套了 CDN 的域名）
-          "allowInsecure": false
-        },
-        //"realitySettings": {
-        //  "serverName": "chat.jayqiu.com",
-        //  "publicKey": "MvYkWqSUKKjROK_UKVFbvu0Ly6Fw9v0SfeV-1sMJu1k",
-        //  "shortId": "a854",
-        //  "fingerprint": "chrome",
-        //  "spiderX": "/5dc5151cf8c397d"
-        //},
-        "xhttpSettings": {
-          "path": "/api/v1/data",
-          "mode": "auto",
-          "extra": {
-            "xPaddingBytes": "100-1000"
-          }
-        }
-      }
-    },
-    {
-      "protocol": "vless",
-      "settings": {
-        "address": "64.81.118.233",
-        "port": 443,
-        "id": "94fe25a1-ec7b-4689-8dd6-8d3c1b94121b",
-        "encryption": "none",
-        "flow": "xtls-rprx-vision"
-      },
-      "streamSettings": {
-        "security": "reality",
-        "sockopt": {
-          "mark": 1024
-        },
-        "realitySettings": {
-          "serverName": "intel.com",
-          "fingerprint": "chrome",
-          "password": "-0cFE4eVRcmECM2J2dc7LcxUHrz3fcBuiO4vFzh4YSY",
-          "shortID": "00"
-        }
-      },
-      "tag": "proxy"
-    },
     {
       "protocol": "freedom",
       "tag": "direct",
@@ -286,11 +180,7 @@
     {
       "tag": "dns-out",
       "protocol": "dns",
-      "streamSettings": {
-        "sockopt": {
-          "mark": 1024
-        }
-      },
+      "streamSettings": {},
       "settings": {
         "rules": [
           {
@@ -303,13 +193,6 @@
   "routing": {
     "rules": [
       {
-        "inboundTag": "sk-in",
-        "outboundTag": "xhttp"
-      },
-      {
-        "inboundTag": [
-          "tp-in"
-        ],
         "port": "53",
         "outboundTag": "dns-out"
       },
@@ -325,7 +208,7 @@
         "inboundTag": [
           "dns-proxy"
         ],
-        "outboundTag": "xhttp"
+        "outboundTag": "direct"
       },
       {
         "domain": [
@@ -351,10 +234,7 @@
   },
   "stats": {},
   "observatory": {
-    "subjectSelector": [
-      "xhttp",
-      "test"
-    ],
+    "subjectSelector": [],
     "probeUrl": "https://www.google.com/generate_204",
     "probeInterval": "10s",
     "enableConcurrency": true
