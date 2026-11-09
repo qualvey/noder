@@ -62,14 +62,26 @@ func RegisterServiceUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 检查 external_id 唯一性
-	exists, _ := db.DB.NewSelect().Model((*model.User)(nil)).Where("external_id = ?", extID).Exists(r.Context())
-	if exists {
-		RespondServiceError(w, http.StatusBadRequest, fmt.Sprintf("注册失败：external_id '%s' 已被使用", extID))
+	// 幂等：external_id 已存在则返回 200 + 同一个 user（绝不报 400）。
+	// 支付回调/worker 重试、人工重开都可能重放，幂等必须是接口语义。
+	var existing model.User
+	if err := db.DB.NewSelect().Model(&existing).Where("external_id = ?", extID).Scan(r.Context()); err == nil {
+		baseURL := getBaseURL(r)
+		subURLs := map[string]string{
+			"singbox":   fmt.Sprintf("%s/sub?token=%s", baseURL, existing.Token),
+			"xray":      fmt.Sprintf("%s/xray?token=%s", baseURL, existing.Token),
+			"raw_nodes": fmt.Sprintf("%s/node?token=%s", baseURL, existing.Token),
+		}
+		RespondServiceSuccess(w, ServiceUserRegisterRespData{
+			UserID:           existing.ID,
+			Token:            existing.Token,
+			ExternalID:       extID,
+			SubscriptionURLs: subURLs,
+		})
 		return
 	}
 
-	token := randomHex(16)
+	token := randomHex(32)
 	if req.Token != nil && strings.TrimSpace(*req.Token) != "" {
 		tok := strings.TrimSpace(*req.Token)
 		tokExists, _ := db.DB.NewSelect().Model((*model.User)(nil)).Where("token = ?", tok).Exists(r.Context())
