@@ -68,3 +68,10 @@ xray-launcher/LICENSE
 xray.zip
 .gitignore
 server
+data.db-wal.before-d10
+data.db.bak-20261105-191850
+data.db.bak-20261105-192348
+data.db.bak-20261105-192404
+data.db.bak-20261105-192426
+data.db.bak-20261105-192432
+data.db.before-d10

@@ -76,6 +76,12 @@ jobs:
           sparse-checkout: |
             compose.prod.yaml
 
+      - name: Debug deploy vars
+        run: |
+          echo "DEPLOY_HOST=${{ vars.DEPLOY_HOST }}"
+          echo "DEPLOY_USER=${{ vars.DEPLOY_USER }}"
+          echo "DEPLOY_PORT=${{ vars.DEPLOY_PORT }}"
+
       - name: Copy Compose file
         uses: appleboy/scp-action@v0.1.7
         with:
