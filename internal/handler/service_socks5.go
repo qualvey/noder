@@ -412,6 +412,7 @@ func RegisterServiceRoutes(r chi.Router) {
 			// D10 Mall subscription delivery
 			r.Post("/subscriptions/activate", ActivateSubscription)
 			r.Get("/subscriptions/{id}", GetSubscription)
+			r.Post("/subscriptions/{id}/release", ReleaseSubscription)
 			r.Post("/subscriptions/{id}/extend", ExtendSubscription)
 			r.Post("/subscriptions/{id}/quota", QuotaSubscription)
 			r.Post("/subscriptions/{id}/revoke", RevokeSubscription)

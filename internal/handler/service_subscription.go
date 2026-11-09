@@ -77,6 +77,7 @@ func activateResponse(r *http.Request, grant *model.AccessGrant, user *model.Use
 	resp := map[string]interface{}{
 		"delivered":       delivered,
 		"subscription_id": grant.ID,
+		"status":          grant.Status,
 		"user_id":         user.ID,
 		"credential_id":   grant.CredentialID,
 		"sub_urls":        subURLsForToken(r, user.Token),
@@ -193,7 +194,7 @@ func ActivateSubscription(w http.ResponseWriter, r *http.Request) {
 		DisplayName:  &email,
 		Username:     &email,
 		UUIDValue:    &credUUID,
-		Status:       model.CredentialStatusActive,
+		Status:       model.CredentialStatusPendingBinding, // activated on manual release
 		SecretConfig: "{}",
 		ExpiresAt:    expiresAt,
 	}
@@ -216,7 +217,7 @@ func ActivateSubscription(w http.ResponseWriter, r *http.Request) {
 		CredentialID:      credID,
 		ExternalRef:       &req.OrderItemID,
 		DisplayName:       &email,
-		Status:            model.AccessGrantStatusActive,
+		Status:            model.AccessGrantStatusPendingActivation, // no auto-release; manual /release required
 		Format:            &req.Format,
 		ExitRouteTag:      &req.ExitRouteTag,
 		IsURLTest:         true,
@@ -243,24 +244,8 @@ func ActivateSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Best-effort desired_state for agent bindings (Agent may be offline).
-	createDesiredDeployments(r.Context(), grant.CredentialID, grant.EndpointID, model.CredentialStatusActive)
-
-	// Readiness per §4.6: endpoint+credential+grant ready => delivered.
-	delivered := endpointActive && cred.Status == model.CredentialStatusActive && grant.Status == model.AccessGrantStatusActive
-	if !delivered {
-		reason := "endpoint_inactive"
-		RespondServiceJSON(w, http.StatusAccepted, map[string]interface{}{
-			"code":            202,
-			"message":         "not ready",
-			"delivered":       false,
-			"subscription_id": grant.ID,
-			"reason":          reason,
-			"retryable":       true,
-		})
-		return
-	}
-	RespondServiceSuccess(w, activateResponse(r, grant, user, true, endpointActive))
+	// Do not auto-deploy or auto-activate: manual release required before client use.
+	RespondServiceSuccess(w, activateResponse(r, grant, user, false, endpointActive))
 }
 
 func createDesiredDeployments(ctx context.Context, credentialID string, endpointID int64, desired string) {
@@ -350,7 +335,8 @@ func ExtendSubscription(w http.ResponseWriter, r *http.Request) {
 		RespondServiceCodedError(w, http.StatusConflict, 40901, "SUBSCRIPTION_REVOKED", "subscription is revoked")
 		return
 	}
-	if status != model.AccessGrantStatusActive && status != model.AccessGrantStatusExpired && status != model.AccessGrantStatusTrafficExhausted {
+	if status != model.AccessGrantStatusActive && status != model.AccessGrantStatusExpired &&
+		status != model.AccessGrantStatusTrafficExhausted && status != model.AccessGrantStatusPendingActivation {
 		RespondServiceCodedError(w, http.StatusConflict, 40902, "INVALID_SUBSCRIPTION_STATE", fmt.Sprintf("cannot extend subscription in state %s", status))
 		return
 	}
@@ -387,7 +373,8 @@ func ExtendSubscription(w http.ResponseWriter, r *http.Request) {
 	if req.TrafficQuotaBytes > 0 {
 		grant.TrafficQuotaBytes += req.TrafficQuotaBytes
 	}
-	if grant.Status != model.AccessGrantStatusRevoked {
+	// Preserve pending_activation (manual release still required); otherwise reactivate.
+	if grant.Status != model.AccessGrantStatusRevoked && grant.Status != model.AccessGrantStatusPendingActivation {
 		grant.Status = model.AccessGrantStatusActive
 	}
 	grant.UpdatedAt = now
@@ -489,6 +476,61 @@ func QuotaSubscription(w http.ResponseWriter, r *http.Request) {
 		"traffic_quota_bytes": grant.TrafficQuotaBytes,
 		"traffic_used_bytes":  grant.TrafficUsedBytes,
 	})
+}
+
+func ReleaseSubscription(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if id == "" {
+		RespondServiceCodedError(w, http.StatusBadRequest, 40001, "INVALID_ARGUMENT", "id is required")
+		return
+	}
+	var grant model.AccessGrant
+	if err := db.DB.NewSelect().Model(&grant).Where("id = ?", id).Scan(r.Context()); err != nil {
+		RespondServiceCodedError(w, http.StatusNotFound, 40402, "SUBSCRIPTION_NOT_FOUND", "subscription not found")
+		return
+	}
+	if grant.Status == model.AccessGrantStatusRevoked {
+		RespondServiceCodedError(w, http.StatusConflict, 40901, "SUBSCRIPTION_REVOKED", "subscription is revoked")
+		return
+	}
+	var user model.User
+	if err := db.DB.NewSelect().Model(&user).Where("id = ?", grant.UserID).Scan(r.Context()); err != nil {
+		RespondServiceError(w, http.StatusInternalServerError, "failed to load user")
+		return
+	}
+	var ep model.Node
+	endpointActive := db.DB.NewSelect().Model(&ep).Where("id = ?", grant.EndpointID).Scan(r.Context()) == nil &&
+		ep.IsActive && (ep.Status == "" || ep.Status == model.AccessGrantStatusActive)
+
+	if grant.Status == model.AccessGrantStatusActive {
+		RespondServiceSuccess(w, activateResponse(r, &grant, &user, true, endpointActive))
+		return
+	}
+	if grant.Status != model.AccessGrantStatusPendingActivation && grant.Status != model.AccessGrantStatusActivationFailed {
+		RespondServiceCodedError(w, http.StatusConflict, 40902, "INVALID_SUBSCRIPTION_STATE", fmt.Sprintf("cannot release subscription in state %s", grant.Status))
+		return
+	}
+
+	now := time.Now().UTC()
+	grant.Status = model.AccessGrantStatusActive
+	grant.UpdatedAt = now
+	if _, err := db.DB.NewUpdate().Model(&grant).Column("status", "updated_at").WherePK().Exec(r.Context()); err != nil {
+		log.Printf("release: update grant failed subscription_id=%s endpoint_id=%d error=%v", grant.ID, grant.EndpointID, err)
+		RespondServiceError(w, http.StatusInternalServerError, "failed to release subscription")
+		return
+	}
+	if _, err := db.DB.NewUpdate().Model((*model.Credential)(nil)).
+		Set("status = ?", model.CredentialStatusActive).
+		Set("updated_at = ?", now).
+		Where("id = ?", grant.CredentialID).Exec(r.Context()); err != nil {
+		log.Printf("release: update credential failed subscription_id=%s endpoint_id=%d error=%v", grant.ID, grant.EndpointID, err)
+		RespondServiceError(w, http.StatusInternalServerError, "failed to activate credential")
+		return
+	}
+	createDesiredDeployments(r.Context(), grant.CredentialID, grant.EndpointID, model.CredentialStatusActive)
+	log.Printf("release: subscription released subscription_id=%s endpoint_id=%d order_item_ref=%v", grant.ID, grant.EndpointID, grant.ExternalRef)
+
+	RespondServiceSuccess(w, activateResponse(r, &grant, &user, true, endpointActive))
 }
 
 func RevokeSubscription(w http.ResponseWriter, r *http.Request) {
