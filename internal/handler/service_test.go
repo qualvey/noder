@@ -81,18 +81,26 @@ func TestServiceUserRegister(t *testing.T) {
 		t.Fatalf("invalid singbox url: %v", subURLs["singbox"])
 	}
 
-	// 2. Duplicate external_id should return 400
+	// 2. Duplicate external_id is idempotent: returns 200 with the same user.
 	req2 := httptest.NewRequest("POST", "/api/service/users/register", bytes.NewReader(bodyBytes))
 	req2.Header.Set("X-Service-Token", "test-service-token")
 	req2.Header.Set("Content-Type", "application/json")
 	w2 := httptest.NewRecorder()
 	r.ServeHTTP(w2, req2)
 
-	if w2.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 on duplicate external_id, got %d", w2.Code)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 on duplicate external_id (idempotent), got %d: %s", w2.Code, w2.Body.String())
 	}
-	if !strings.Contains(w2.Body.String(), "mall_user_10086") {
-		t.Fatalf("expected error message to mention external_id, got: %s", w2.Body.String())
+	var resp2 map[string]interface{}
+	if err := json.Unmarshal(w2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("json parse error: %v", err)
+	}
+	if resp2["code"].(float64) != 0 {
+		t.Fatalf("expected code 0, got %v", resp2["code"])
+	}
+	data2 := resp2["data"].(map[string]interface{})
+	if data2["external_id"] != "mall_user_10086" || data2["token"] != "custom_token_123" {
+		t.Fatalf("expected same user on idempotent retry, got %v", data2)
 	}
 }
 
