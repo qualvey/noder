@@ -420,7 +420,75 @@ func timePtrFormat(t *time.Time) interface{} {
 }
 
 func QuotaSubscription(w http.ResponseWriter, r *http.Request) {
-	RespondServiceCodedError(w, http.StatusNotImplemented, 50001, "NOT_IMPLEMENTED", "not implemented")
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	var req quotaReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondServiceError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	req.OrderItemID = strings.TrimSpace(req.OrderItemID)
+	if id == "" || req.OrderItemID == "" {
+		RespondServiceCodedError(w, http.StatusBadRequest, 40001, "INVALID_ARGUMENT", "id and order_item_id are required")
+		return
+	}
+	if req.DeltaBytes <= 0 {
+		RespondServiceCodedError(w, http.StatusBadRequest, 40002, "INVALID_DELTA", "delta_bytes must be positive")
+		return
+	}
+
+	var grant model.AccessGrant
+	if err := db.DB.NewSelect().Model(&grant).Where("id = ?", id).Scan(r.Context()); err != nil {
+		RespondServiceCodedError(w, http.StatusNotFound, 40402, "SUBSCRIPTION_NOT_FOUND", "subscription not found")
+		return
+	}
+	now := time.Now().UTC()
+	if grant.Status == model.AccessGrantStatusRevoked {
+		RespondServiceCodedError(w, http.StatusConflict, 40901, "SUBSCRIPTION_REVOKED", "subscription is revoked")
+		return
+	}
+
+	op := &model.SubscriptionOperation{OrderItemID: req.OrderItemID, GrantID: grant.ID, Operation: "quota", Result: "{}"}
+	res, err := db.DB.NewInsert().Model(op).On("CONFLICT (order_item_id) DO NOTHING").Exec(r.Context())
+	if err != nil {
+		log.Printf("quota: record operation failed order_item_id=%s endpoint_id=%d error=%v", req.OrderItemID, grant.EndpointID, err)
+		RespondServiceError(w, http.StatusInternalServerError, "failed to record operation")
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		RespondServiceSuccess(w, map[string]interface{}{
+			"subscription_id":    grant.ID,
+			"status":             effectiveGrantStatus(&grant, now),
+			"traffic_quota_bytes": grant.TrafficQuotaBytes,
+			"traffic_used_bytes":  grant.TrafficUsedBytes,
+		})
+		return
+	}
+
+	grant.TrafficQuotaBytes += req.DeltaBytes
+	grant.TrafficUpdatedAt = &now
+	grant.UpdatedAt = now
+	reactivated := false
+	if grant.Status == model.AccessGrantStatusTrafficExhausted {
+		grant.Status = model.AccessGrantStatusActive
+		reactivated = true
+	}
+	if _, err := db.DB.NewUpdate().Model(&grant).
+		Column("traffic_quota_bytes", "traffic_updated_at", "status", "updated_at").
+		WherePK().Exec(r.Context()); err != nil {
+		log.Printf("quota: update grant failed order_item_id=%s endpoint_id=%d error=%v", req.OrderItemID, grant.EndpointID, err)
+		RespondServiceError(w, http.StatusInternalServerError, "failed to add quota")
+		return
+	}
+	if reactivated {
+		createDesiredDeployments(r.Context(), grant.CredentialID, grant.EndpointID, model.CredentialStatusActive)
+	}
+
+	RespondServiceSuccess(w, map[string]interface{}{
+		"subscription_id":    grant.ID,
+		"status":             grant.Status,
+		"traffic_quota_bytes": grant.TrafficQuotaBytes,
+		"traffic_used_bytes":  grant.TrafficUsedBytes,
+	})
 }
 
 func RevokeSubscription(w http.ResponseWriter, r *http.Request) {
