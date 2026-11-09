@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"noder/internal/db"
 	"noder/internal/model"
@@ -280,7 +281,46 @@ func createDesiredDeployments(ctx context.Context, credentialID string, endpoint
 }
 
 func GetSubscription(w http.ResponseWriter, r *http.Request) {
-	RespondServiceCodedError(w, http.StatusNotImplemented, 50001, "NOT_IMPLEMENTED", "not implemented")
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if id == "" {
+		RespondServiceCodedError(w, http.StatusBadRequest, 40001, "INVALID_ARGUMENT", "id is required")
+		return
+	}
+	var grant model.AccessGrant
+	if err := db.DB.NewSelect().Model(&grant).Where("id = ?", id).Scan(r.Context()); err != nil {
+		RespondServiceCodedError(w, http.StatusNotFound, 40402, "SUBSCRIPTION_NOT_FOUND", "subscription not found")
+		return
+	}
+	var user model.User
+	if err := db.DB.NewSelect().Model(&user).Where("id = ?", grant.UserID).Scan(r.Context()); err != nil {
+		RespondServiceError(w, http.StatusInternalServerError, "failed to load user")
+		return
+	}
+	var ep model.Node
+	endpointActive := db.DB.NewSelect().Model(&ep).Where("id = ?", grant.EndpointID).Scan(r.Context()) == nil &&
+		ep.IsActive && (ep.Status == "" || ep.Status == model.AccessGrantStatusActive)
+
+	now := time.Now().UTC()
+	status := effectiveGrantStatus(&grant, now)
+	data := map[string]interface{}{
+		"status":    status,
+		"readiness": grantReadiness(&grant, endpointActive),
+		"sub_urls":  subURLsForToken(r, user.Token),
+		"traffic": map[string]interface{}{
+			"quota_bytes": grant.TrafficQuotaBytes,
+			"used_bytes":  grant.TrafficUsedBytes,
+			"updated_at":  nil,
+		},
+	}
+	if grant.ExpiresAt != nil {
+		data["expires_at"] = grant.ExpiresAt.UTC().Format(time.RFC3339)
+	} else {
+		data["expires_at"] = nil
+	}
+	if grant.TrafficUpdatedAt != nil {
+		data["traffic"].(map[string]interface{})["updated_at"] = grant.TrafficUpdatedAt.UTC().Format(time.RFC3339)
+	}
+	RespondServiceSuccess(w, data)
 }
 
 func ExtendSubscription(w http.ResponseWriter, r *http.Request) {
