@@ -324,7 +324,99 @@ func GetSubscription(w http.ResponseWriter, r *http.Request) {
 }
 
 func ExtendSubscription(w http.ResponseWriter, r *http.Request) {
-	RespondServiceCodedError(w, http.StatusNotImplemented, 50001, "NOT_IMPLEMENTED", "not implemented")
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	var req extendReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondServiceError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	req.OrderItemID = strings.TrimSpace(req.OrderItemID)
+	if id == "" || req.OrderItemID == "" {
+		RespondServiceCodedError(w, http.StatusBadRequest, 40001, "INVALID_ARGUMENT", "id and order_item_id are required")
+		return
+	}
+	if req.DurationSeconds < 0 {
+		req.DurationSeconds = 0
+	}
+
+	var grant model.AccessGrant
+	if err := db.DB.NewSelect().Model(&grant).Where("id = ?", id).Scan(r.Context()); err != nil {
+		RespondServiceCodedError(w, http.StatusNotFound, 40402, "SUBSCRIPTION_NOT_FOUND", "subscription not found")
+		return
+	}
+	now := time.Now().UTC()
+	status := effectiveGrantStatus(&grant, now)
+	if grant.Status == model.AccessGrantStatusRevoked {
+		RespondServiceCodedError(w, http.StatusConflict, 40901, "SUBSCRIPTION_REVOKED", "subscription is revoked")
+		return
+	}
+	if status != model.AccessGrantStatusActive && status != model.AccessGrantStatusExpired && status != model.AccessGrantStatusTrafficExhausted {
+		RespondServiceCodedError(w, http.StatusConflict, 40902, "INVALID_SUBSCRIPTION_STATE", fmt.Sprintf("cannot extend subscription in state %s", status))
+		return
+	}
+
+	op := &model.SubscriptionOperation{OrderItemID: req.OrderItemID, GrantID: grant.ID, Operation: "extend", Result: "{}"}
+	res, err := db.DB.NewInsert().Model(op).On("CONFLICT (order_item_id) DO NOTHING").Exec(r.Context())
+	if err != nil {
+		log.Printf("extend: record operation failed order_item_id=%s endpoint_id=%d error=%v", req.OrderItemID, grant.EndpointID, err)
+		RespondServiceError(w, http.StatusInternalServerError, "failed to record operation")
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		// Idempotent replay.
+		var user model.User
+		_ = db.DB.NewSelect().Model(&user).Where("id = ?", grant.UserID).Scan(r.Context())
+		var ep model.Node
+		endpointActive := db.DB.NewSelect().Model(&ep).Where("id = ?", grant.EndpointID).Scan(r.Context()) == nil && ep.IsActive && (ep.Status == "" || ep.Status == model.AccessGrantStatusActive)
+		RespondServiceSuccess(w, map[string]interface{}{
+			"subscription_id": grant.ID,
+			"expires_at":      timePtrFormat(grant.ExpiresAt),
+			"status":          effectiveGrantStatus(&grant, now),
+			"sub_urls":        subURLsForToken(r, user.Token),
+			"readiness":       grantReadiness(&grant, endpointActive),
+		})
+		return
+	}
+
+	base := now
+	if grant.ExpiresAt != nil && grant.ExpiresAt.After(base) {
+		base = *grant.ExpiresAt
+	}
+	newExp := base.Add(time.Duration(req.DurationSeconds) * time.Second)
+	grant.ExpiresAt = &newExp
+	if req.TrafficQuotaBytes > 0 {
+		grant.TrafficQuotaBytes += req.TrafficQuotaBytes
+	}
+	if grant.Status != model.AccessGrantStatusRevoked {
+		grant.Status = model.AccessGrantStatusActive
+	}
+	grant.UpdatedAt = now
+	if _, err := db.DB.NewUpdate().Model(&grant).
+		Column("expires_at", "traffic_quota_bytes", "status", "updated_at").
+		WherePK().Exec(r.Context()); err != nil {
+		log.Printf("extend: update grant failed order_item_id=%s endpoint_id=%d error=%v", req.OrderItemID, grant.EndpointID, err)
+		RespondServiceError(w, http.StatusInternalServerError, "failed to extend subscription")
+		return
+	}
+
+	var user model.User
+	_ = db.DB.NewSelect().Model(&user).Where("id = ?", grant.UserID).Scan(r.Context())
+	var ep model.Node
+	endpointActive := db.DB.NewSelect().Model(&ep).Where("id = ?", grant.EndpointID).Scan(r.Context()) == nil && ep.IsActive && (ep.Status == "" || ep.Status == model.AccessGrantStatusActive)
+	RespondServiceSuccess(w, map[string]interface{}{
+		"subscription_id": grant.ID,
+		"expires_at":      newExp.UTC().Format(time.RFC3339),
+		"status":          grant.Status,
+		"sub_urls":        subURLsForToken(r, user.Token),
+		"readiness":       grantReadiness(&grant, endpointActive),
+	})
+}
+
+func timePtrFormat(t *time.Time) interface{} {
+	if t == nil {
+		return nil
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 func QuotaSubscription(w http.ResponseWriter, r *http.Request) {
