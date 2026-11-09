@@ -492,5 +492,45 @@ func QuotaSubscription(w http.ResponseWriter, r *http.Request) {
 }
 
 func RevokeSubscription(w http.ResponseWriter, r *http.Request) {
-	RespondServiceCodedError(w, http.StatusNotImplemented, 50001, "NOT_IMPLEMENTED", "not implemented")
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	var req revokeReq
+	_ = json.NewDecoder(r.Body).Decode(&req) // reason optional
+	if id == "" {
+		RespondServiceCodedError(w, http.StatusBadRequest, 40001, "INVALID_ARGUMENT", "id is required")
+		return
+	}
+
+	var grant model.AccessGrant
+	if err := db.DB.NewSelect().Model(&grant).Where("id = ?", id).Scan(r.Context()); err != nil {
+		RespondServiceCodedError(w, http.StatusNotFound, 40402, "SUBSCRIPTION_NOT_FOUND", "subscription not found")
+		return
+	}
+	// Already revoked => 200 (refund flow retries).
+	if grant.Status == model.AccessGrantStatusRevoked {
+		RespondServiceSuccess(w, map[string]interface{}{"subscription_id": grant.ID, "status": model.AccessGrantStatusRevoked})
+		return
+	}
+
+	now := time.Now().UTC()
+	if _, err := db.DB.NewUpdate().Model(&grant).
+		Set("status = ?", model.AccessGrantStatusRevoked).
+		Set("updated_at = ?", now).
+		WherePK().Exec(r.Context()); err != nil {
+		log.Printf("revoke: update grant failed subscription_id=%s endpoint_id=%d error=%v", grant.ID, grant.EndpointID, err)
+		RespondServiceError(w, http.StatusInternalServerError, "failed to revoke subscription")
+		return
+	}
+	if _, err := db.DB.NewUpdate().Model((*model.Credential)(nil)).
+		Set("status = ?", model.CredentialStatusRevoked).
+		Set("revoked_at = ?", now).
+		Set("updated_at = ?", now).
+		Where("id = ?", grant.CredentialID).Exec(r.Context()); err != nil {
+		log.Printf("revoke: update credential failed subscription_id=%s endpoint_id=%d credential_id=%s error=%v", grant.ID, grant.EndpointID, grant.CredentialID, err)
+		RespondServiceError(w, http.StatusInternalServerError, "failed to revoke credential")
+		return
+	}
+	createDesiredDeployments(r.Context(), grant.CredentialID, grant.EndpointID, model.CredentialStatusRevoked)
+	log.Printf("revoke: subscription revoked subscription_id=%s endpoint_id=%d order_item_ref=%v reason=%s", grant.ID, grant.EndpointID, grant.ExternalRef, strings.TrimSpace(req.Reason))
+
+	RespondServiceSuccess(w, map[string]interface{}{"subscription_id": grant.ID, "status": model.AccessGrantStatusRevoked})
 }
