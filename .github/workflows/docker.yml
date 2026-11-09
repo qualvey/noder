@@ -72,8 +72,9 @@ jobs:
     steps:
       - name: Checkout deployment files
         uses: actions/checkout@v4
-        sparse-checkout: |
-          compose.prod.yaml
+        with:
+          sparse-checkout: |
+            compose.prod.yaml
 
       - name: Copy Compose file
         uses: appleboy/scp-action@v0.1.7
