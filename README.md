@@ -67,6 +67,7 @@ SQLite。
 - `templates/`、`static/`：默认配置模板与前端构建产物
 
 完整 API 字段、鉴权方式、请求示例和状态码见 **[API 参考](doc/api.md)**。
+测试规范、策略与测试用例见 **[测试工程文档中心](doc/testing/README.md)**。
 
 ---
 
