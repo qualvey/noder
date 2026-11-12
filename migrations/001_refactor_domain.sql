@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS endpoints (
     protocol VARCHAR(32) NOT NULL,
     name VARCHAR(128),
     tag VARCHAR(128) NOT NULL,
+    inbound_tag VARCHAR(128),
     server_address TEXT NOT NULL,
     server_port INTEGER NOT NULL,
     country VARCHAR(8),
@@ -101,10 +102,20 @@ CREATE TABLE IF NOT EXISTS credential_deployments (
     agent_node_id UUID NOT NULL REFERENCES agent_nodes(id) ON DELETE RESTRICT,
     desired_state VARCHAR(32) NOT NULL,
     applied_state VARCHAR(32) NOT NULL DEFAULT 'unknown',
+    revision VARCHAR(64) NOT NULL DEFAULT '0',
     last_sync_at TIMESTAMPTZ,
     last_error TEXT,
     PRIMARY KEY (credential_id, endpoint_id, agent_node_id)
 );
+CREATE INDEX IF NOT EXISTS credential_deployment_agent_endpoint_rev_idx
+    ON credential_deployments(agent_node_id, endpoint_id, revision);
+
+CREATE TABLE IF NOT EXISTS agent_traffic_reports (
+    report_id TEXT PRIMARY KEY,
+    agent_node_id UUID NOT NULL REFERENCES agent_nodes(id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS agent_traffic_report_created_idx ON agent_traffic_reports(created_at);
 
 CREATE TABLE IF NOT EXISTS legacy_migration_map (
     id BIGSERIAL PRIMARY KEY,

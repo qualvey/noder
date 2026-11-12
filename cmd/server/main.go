@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -21,17 +21,20 @@ import (
 	"noder/internal/config"
 	"noder/internal/db"
 	"noder/internal/handler"
+	"noder/internal/logger"
 )
 
 var Version = "dev"
 
 func main() {
+	logger.Init("", "", "")
 	config.Init("")
 
 	// 初始化数据库及迁移
 	_, err := db.InitDB()
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		logger.Error("Failed to initialize database", "err", err)
+		os.Exit(1)
 	}
 
 	r := chi.NewRouter()
@@ -39,7 +42,7 @@ func main() {
 	// 基础中间件
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
+	r.Use(logger.HTTPMiddleware)
 	r.Use(middleware.Recoverer)
 
 	// CORS 跨域配置
@@ -63,6 +66,7 @@ func main() {
 	handler.RegisterDownloadRoutes(r)
 	handler.RegisterSubscriptionRoutes(r)
 	handler.RegisterServiceRoutes(r)
+	handler.RegisterAgentRoutes(r)
 
 	// 挂载 SPA 前端静态资源
 	mountSPA(r)
@@ -71,6 +75,35 @@ func main() {
 	if port == "" {
 		port = "8000"
 	}
+
+	driver := "SQLite (modernc)"
+	dsn := config.DBPath
+	if config.DatabaseURL != "" {
+		driver = "PostgreSQL"
+		dsn = "postgresql://***"
+	}
+
+	env := os.Getenv("APP_ENV")
+	if env == "" {
+		env = "development"
+	}
+
+	logger.PrintBootSummary(logger.BootInfo{
+		Version:     Version,
+		Environment: env,
+		GoVersion:   runtime.Version(),
+		PID:         os.Getpid(),
+		Port:        port,
+		DataDir:     config.BaseDir,
+		DBDriver:    driver,
+		DBDSN:       dsn,
+		MallSecret:  config.MallServiceSecret,
+		JWTSecret:   config.AdminSecretToken,
+		Routers: []string{
+			"Auth", "Node", "User", "Domain", "Template", "Settings",
+			"File", "Download", "Subscription", "Service", "AgentV1", "SPA",
+		},
+	})
 
 	server := &http.Server{
 		Addr:    ":" + port,
@@ -82,29 +115,30 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("Noder (Go Edition %s) server listening on http://0.0.0.0:%s", Version, port)
+		logger.Info("HTTP server started listening", "addr", "http://0.0.0.0:"+port, "version", Version)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("Server error: %v", err)
+			logger.Error("Server listen error", "err", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-stop
-	log.Println("Shutting down server gracefully...")
+	logger.Info("Shutting down server gracefully...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+		logger.Error("Server forced to shutdown", "err", err)
 	}
 
-	log.Println("Server exited successfully")
+	logger.Info("Server exited successfully")
 }
 
 func mountSPA(r *chi.Mux) {
 	subFS, err := fs.Sub(noder.StaticFS, "static")
 	if err != nil {
-		log.Printf("Warning: failed to load embedded static fs: %v", err)
+		logger.Warn("Failed to load embedded static fs", "err", err)
 		return
 	}
 

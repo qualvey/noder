@@ -24,6 +24,7 @@ type Node struct {
 
 	ID                int64   `bun:"id,pk,autoincrement" json:"id"`
 	Tag               string  `bun:"tag,notnull" json:"tag"`
+	InboundTag        *string `bun:"inbound_tag" json:"inbound_tag,omitempty"` // Xray inbound tag for agent gRPC AlterInbound; defaults to Tag
 	NodeName          string  `bun:"node_name" json:"node_name"`
 	Protocol          string  `bun:"protocol,notnull" json:"protocol"`
 	ServerAddress     string  `bun:"server_address,notnull" json:"server_address"`
@@ -49,6 +50,17 @@ type Node struct {
 	Config *string `bun:"config" json:"config,omitempty"`
 
 	Users []*User `bun:"m2m:usernodelink,join:Node=User" json:"-"`
+}
+
+// EffectiveInboundTag returns the Xray inbound tag for agent operations.
+func (n *Node) EffectiveInboundTag() string {
+	if n == nil {
+		return ""
+	}
+	if n.InboundTag != nil && *n.InboundTag != "" {
+		return *n.InboundTag
+	}
+	return n.Tag
 }
 
 const (
@@ -174,8 +186,19 @@ type CredentialDeployment struct {
 	AgentNodeID   string     `bun:"agent_node_id,pk" json:"agent_node_id"`
 	DesiredState  string     `bun:"desired_state,notnull" json:"desired_state"`
 	AppliedState  string     `bun:"applied_state,notnull,default:'unknown'" json:"applied_state"`
+	// Revision is a monotonic version (millisecond timestamp string) bumped on
+	// every desired-state change. Used for incremental sync and conflict detection.
+	Revision      string     `bun:"revision,notnull,default:'0'" json:"revision"`
 	LastSyncAt    *time.Time `bun:"last_sync_at" json:"last_sync_at,omitempty"`
 	LastError     *string    `bun:"last_error" json:"last_error,omitempty"`
+}
+
+// AgentTrafficReport deduplicates traffic report_id values (idempotency, 24h TTL).
+type AgentTrafficReport struct {
+	bun.BaseModel `bun:"table:agent_traffic_reports"`
+	ReportID      string    `bun:"report_id,pk" json:"report_id"`
+	AgentNodeID   string    `bun:"agent_node_id,notnull" json:"agent_node_id"`
+	CreatedAt     time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
 }
 
 // LegacyMigrationMap keeps the integer IDs needed to audit and replay an old

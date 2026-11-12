@@ -198,7 +198,12 @@ func AllocateUserSocks5(w http.ResponseWriter, r *http.Request) {
 // socks5GrantBlocked reports whether a canonical grant for (user, node)
 // exists and is not currently usable (expired/revoked/disabled). A missing
 // grant means the row is legacy/unprojected and is not filtered here.
-func socks5GrantBlocked(ctx interface{ Deadline() (time.Time, bool); Done() <-chan struct{}; Err() error; Value(any) any }, userID, nodeID int64, now time.Time) bool {
+func socks5GrantBlocked(ctx interface {
+	Deadline() (time.Time, bool)
+	Done() <-chan struct{}
+	Err() error
+	Value(any) any
+}, userID, nodeID int64, now time.Time) bool {
 	var grants []*model.AccessGrant
 	if err := db.DB.NewSelect().Model(&grants).
 		Relation("Credential").
@@ -258,7 +263,34 @@ func GetUserSocks5List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
+
+	type canonicalSocksRow struct {
+		GrantID       string  `bun:"grant_id"`
+		EndpointID    int64   `bun:"endpoint_id"`
+		Status        string  `bun:"status"`
+		Username      *string `bun:"username"`
+		Password      *string `bun:"password"`
+		Tag           string  `bun:"tag"`
+		ServerAddress string  `bun:"server_address"`
+		ServerPort    int     `bun:"server_port"`
+		Country       *string `bun:"country"`
+	}
+	var canonicalRows []canonicalSocksRow
+	_ = db.DB.NewSelect().
+		TableExpr("access_grants AS g").
+		Join("JOIN credentials AS c ON c.id = g.credential_id").
+		Join("JOIN node AS n ON n.id = g.endpoint_id").
+		ColumnExpr("g.id AS grant_id, g.endpoint_id AS endpoint_id, g.status AS status").
+		ColumnExpr("c.username AS username, c.password_ciphertext AS password").
+		ColumnExpr("n.tag AS tag, n.server_address AS server_address, n.server_port AS server_port, n.country AS country").
+		Where("g.user_id = ? AND g.status = ? AND (g.expires_at IS NULL OR g.expires_at > ?)", user.ID, model.AccessGrantStatusActive, now).
+		Where("c.status = ? AND c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > ?)", model.CredentialStatusActive, now).
+		Where("n.protocol = 'socks5' AND n.is_active = true").
+		Scan(r.Context(), &canonicalRows)
+
 	format := strings.ToLower(r.URL.Query().Get("format"))
+	seenLines := make(map[string]bool)
+
 	if format == "text" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
@@ -267,7 +299,20 @@ func GetUserSocks5List(w http.ResponseWriter, r *http.Request) {
 				if ep.NodeID != nil && socks5GrantBlocked(r.Context(), user.ID, *ep.NodeID, now) {
 					continue
 				}
-				_, _ = fmt.Fprintf(w, "%s:%d:%s:%s\n", ep.Node.ServerAddress, ep.Node.ServerPort, *ep.Username, *ep.Password)
+				line := fmt.Sprintf("%s:%d:%s:%s", ep.Node.ServerAddress, ep.Node.ServerPort, *ep.Username, *ep.Password)
+				if !seenLines[line] {
+					seenLines[line] = true
+					_, _ = fmt.Fprintln(w, line)
+				}
+			}
+		}
+		for _, row := range canonicalRows {
+			if row.Username != nil && row.Password != nil && *row.Username != "" && *row.Password != "" {
+				line := fmt.Sprintf("%s:%d:%s:%s", row.ServerAddress, row.ServerPort, *row.Username, *row.Password)
+				if !seenLines[line] {
+					seenLines[line] = true
+					_, _ = fmt.Fprintln(w, line)
+				}
 			}
 		}
 		return
@@ -280,6 +325,10 @@ func GetUserSocks5List(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			proxyFormat := fmt.Sprintf("%s:%d:%s:%s", ep.Node.ServerAddress, ep.Node.ServerPort, *ep.Username, *ep.Password)
+			if seenLines[proxyFormat] {
+				continue
+			}
+			seenLines[proxyFormat] = true
 			proxyURL := fmt.Sprintf("socks5://%s:%s@%s:%d#%s", *ep.Username, *ep.Password, ep.Node.ServerAddress, ep.Node.ServerPort, ep.Tag)
 			ctry := ""
 			if ep.Country != nil {
@@ -299,6 +348,33 @@ func GetUserSocks5List(w http.ResponseWriter, r *http.Request) {
 				ProxyURL:    proxyURL,
 			})
 		}
+	}
+
+	for _, row := range canonicalRows {
+		if row.Username == nil || row.Password == nil || *row.Username == "" || *row.Password == "" {
+			continue
+		}
+		proxyFormat := fmt.Sprintf("%s:%d:%s:%s", row.ServerAddress, row.ServerPort, *row.Username, *row.Password)
+		if seenLines[proxyFormat] {
+			continue
+		}
+		seenLines[proxyFormat] = true
+		proxyURL := fmt.Sprintf("socks5://%s:%s@%s:%d#%s", *row.Username, *row.Password, row.ServerAddress, row.ServerPort, row.Tag)
+		ctry := ""
+		if row.Country != nil {
+			ctry = *row.Country
+		}
+		items = append(items, Socks5ItemResp{
+			EndpointID:  row.EndpointID,
+			Status:      row.Status,
+			Country:     ctry,
+			IP:          row.ServerAddress,
+			Port:        row.ServerPort,
+			Username:    *row.Username,
+			Password:    *row.Password,
+			ProxyFormat: proxyFormat,
+			ProxyURL:    proxyURL,
+		})
 	}
 
 	RespondServiceSuccess(w, map[string]interface{}{
@@ -405,6 +481,7 @@ func RegisterServiceRoutes(r chi.Router) {
 			r.Use(ServiceAuth)
 
 			r.Post("/users/register", RegisterServiceUser)
+			r.Post("/users", RegisterServiceUser) // Mall noder_client compatibility
 			r.Post("/users/{token}/credentials", AddUserServiceCredential)
 			r.Post("/render-config", RenderConfigStateless)
 			r.Post("/users/{token}/socks5/allocate", AllocateUserSocks5)

@@ -31,7 +31,7 @@ func InitDB() (*bun.DB, error) {
 		(*model.UserNodeLink)(nil), (*model.User)(nil), (*model.Node)(nil), (*model.Endpoint)(nil),
 		(*model.Credential)(nil), (*model.AccessGrant)(nil), (*model.AgentNode)(nil),
 		(*model.EndpointAgentBinding)(nil), (*model.CredentialDeployment)(nil), (*model.LegacyMigrationMap)(nil),
-		(*model.SubscriptionOperation)(nil),
+		(*model.SubscriptionOperation)(nil), (*model.AgentTrafficReport)(nil),
 	)
 
 	ctx := context.Background()
@@ -70,7 +70,7 @@ func OpenDB() (*bun.DB, error) {
 		(*model.UserNodeLink)(nil), (*model.User)(nil), (*model.Node)(nil), (*model.Endpoint)(nil),
 		(*model.Credential)(nil), (*model.AccessGrant)(nil), (*model.AgentNode)(nil),
 		(*model.EndpointAgentBinding)(nil), (*model.CredentialDeployment)(nil), (*model.LegacyMigrationMap)(nil),
-		(*model.SubscriptionOperation)(nil),
+		(*model.SubscriptionOperation)(nil), (*model.AgentTrafficReport)(nil),
 	)
 	return DB, nil
 }
@@ -94,6 +94,7 @@ func CreateDBAndTables(ctx context.Context) error {
 		(*model.CredentialDeployment)(nil),
 		(*model.LegacyMigrationMap)(nil),
 		(*model.SubscriptionOperation)(nil),
+		(*model.AgentTrafficReport)(nil),
 	}
 
 	for _, m := range models {
@@ -148,11 +149,12 @@ func CreateDBAndTables(ctx context.Context) error {
 	`)
 
 	// 兼容旧库迁移 (ALTER TABLE)
-	nodeCols := []string{"public_key", "short_id", "fingerprint", "flow", "remark", "tag", "congestion_control", "sort_order", "country", "status", "config"}
+	nodeCols := []string{"public_key", "short_id", "fingerprint", "flow", "remark", "tag", "congestion_control", "sort_order", "country", "status", "config", "inbound_tag"}
 	for _, col := range nodeCols {
 		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE node ADD COLUMN %s VARCHAR", col))
 	}
 	_, _ = DB.ExecContext(ctx, "UPDATE node SET tag = node_name WHERE tag IS NULL OR tag = ''")
+	_, _ = DB.ExecContext(ctx, "UPDATE node SET inbound_tag = tag WHERE inbound_tag IS NULL OR inbound_tag = ''")
 	_, _ = DB.ExecContext(ctx, "UPDATE node SET transport_type = NULL, path = NULL WHERE protocol = 'tuic'")
 
 	userCols := []string{"remark", "config_override", "node_order", "template_branch_id", "external_id", "independent_node_ids", "status"}
@@ -193,6 +195,16 @@ func CreateDBAndTables(ctx context.Context) error {
 	_, _ = DB.ExecContext(ctx, "ALTER TABLE access_grants ADD COLUMN traffic_updated_at TIMESTAMP")
 	_, _ = DB.ExecContext(ctx, "UPDATE access_grants SET traffic_quota_bytes = 0 WHERE traffic_quota_bytes IS NULL")
 	_, _ = DB.ExecContext(ctx, "UPDATE access_grants SET traffic_used_bytes = 0 WHERE traffic_used_bytes IS NULL")
+
+	// Xray Agent alignment (noder-alignment.md): deployment revision/conflict + agent traffic dedup.
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE credential_deployments ADD COLUMN revision VARCHAR DEFAULT '0'")
+	_, _ = DB.ExecContext(ctx, "UPDATE credential_deployments SET revision = '0' WHERE revision IS NULL OR revision = ''")
+	if _, err := DB.NewCreateIndex().Model((*model.CredentialDeployment)(nil)).IfNotExists().Index("credential_deployment_agent_endpoint_rev_idx").Column("agent_node_id", "endpoint_id", "revision").Exec(ctx); err != nil {
+		return err
+	}
+	if _, err := DB.NewCreateIndex().Model((*model.AgentTrafficReport)(nil)).IfNotExists().Index("agent_traffic_report_created_idx").Column("created_at").Exec(ctx); err != nil {
+		return err
+	}
 
 	// 清理历史上节点删除失败后遗留的端点和用户-节点关联。
 	_, _ = DB.ExecContext(ctx, `

@@ -220,7 +220,82 @@ GET /dl/{id}?token={user_token}
 服务端会按用户凭证渲染模板；使用 `download=1` 或 `raw=1` 可跳过 ZIP 引导页
 并直接返回文件。响应包含 `Content-Disposition`。
 
-## 5. 配置与安全提示
+## 5. 服务侧 API（Mall 自动化交付，P1）
+
+统一前缀 ` /api/service/*`，鉴权 `X-Service-Token`（`ServiceAuth`），外壳 `{code,message,data}`，`code!=0` 仍 `HTTP 200`。
+
+### 5.1 开通 POST /api/service/subscriptions/activate
+
+只建 `pending_activation`，不下发。
+
+**Request**
+```json
+{
+  "external_id": "u_xxx",
+  "endpoint_id": 123,
+  "format": "landing",
+  "exit_route_tag": "exit-us-la-01",
+  "duration_seconds": 2592000,
+  "traffic_quota_bytes": 107374182400,
+  "order_item_id": "oi_xxx",
+  "tag_override": "美国·洛杉矶 #2"
+}
+```
+| 字段 | 必填 | 校验 | 说明 |
+|---|---|---|---|
+| `external_id` | 是 | `1..64` | Mall user_id |
+| `endpoint_id` | 是 | 存在且 `is_active` | 否则 `40401 ENDPOINT_NOT_FOUND` |
+| `format` | 是 | `socks\|landing` | `socks` 强制 `exit_route_tag=""` |
+| `exit_route_tag` | 否 | `landing` 必填，`socks` 非空 `40001` | 组成 `(endpoint,tag)` 二元键 |
+| `duration_seconds` | 是 | `>0` | 起点 `activate now`，`release` 不重算 |
+| `traffic_quota_bytes` | 是 | `>=0`，`socks` 必须 `0` | `0=不限` |
+| `order_item_id` | 是 | `UNIQUE external_ref` | 幂等键 |
+| `tag_override` | 否 | `<=64` | 同用户同出口多份时区分，否则自动 `#N` |
+
+**Response 200**
+```json
+{"code":0,"message":"success","data":{"subscription_id":"<grant.id>","status":"pending_activation","delivered":false,"delivered_at":"...","expires_at":"...","user_id":42,"credential_id":"...","sub_urls":{},"readiness":{"endpoint_active":true,"agent_online":false,"route_ok":false,"egress_ip_match":false}}}
+```
+幂等重放按 `order_item_id` 返回现 grant，`delivered = status==active && (socks?endpointActive:agentOnline&&hasDeployment)`。
+
+**Failure（HTTP status + `{code, error, message}`）**
+```json
+// 400 参数错误
+{"code":40001,"error":"INVALID_ARGUMENT","message":"exit_route_tag is required for landing"}
+// 400 socks 额度非法
+{"code":40001,"error":"INVALID_ARGUMENT","message":"traffic_quota_bytes must be 0 for socks (unlimited)"}
+// 404 端点不存在
+{"code":40401,"error":"ENDPOINT_NOT_FOUND","message":"endpoint not found"}
+// 409 幂等冲突由DB兜底，重放返回200现grant而非409
+```
+`RespondServiceCodedError` 外壳见 `internal/handler/service_auth.go:84`，`RespondServiceError` 为裸 `{code:HTTP, message}`（如 `Invalid JSON body`）。
+
+### 5.2 放行 POST /api/service/subscriptions/{id}/release
+
+`{id}=grant.id`，无body。建议携带 `Idempotency-Key: <order_item_id>:release`。
+
+| 前置状态 | 结果 |
+|---|---|
+| `pending_activation\|activation_failed` 且 `bindingCount>0` | `200 delivered=true status=active`，写 `credential_deployments(desired=active)` |
+| `pending_activation\|activation_failed` 且 `bindingCount==0`（仅 landing） | `40902 BINDING_MISSING` |
+| `active` | `200` 幂等 |
+| `revoked` | `40901 SUBSCRIPTION_REVOKED` |
+| `expired/traffic_exhausted` | `40902 INVALID_SUBSCRIPTION_STATE` |
+
+成功后 `/sub` 渲染、`socks auth-list` 生效。错误 `40402 SUBSCRIPTION_NOT_FOUND`。
+
+### 5.3 查询/续费/加油包/撤销
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/service/subscriptions/{id}` | 查询状态、`expires_at`、`readiness`、`traffic`、`sub_urls` |
+| `POST` | `/api/service/subscriptions/{id}/extend` | `{"duration_seconds":..,"traffic_quota_bytes":..,"order_item_id":".."} ` 续费，`expires_at=max(now,expires)+duration` |
+| `POST` | `/api/service/subscriptions/{id}/quota` | `{"delta_bytes":..,"order_item_id":".."} ` 加油包，`delta>0` |
+| `POST` | `/api/service/subscriptions/{id}/revoke` | `{"reason":"refund"} ` 撤销，幂等 200 |
+
+详见 `doc/attach-mall.md#7` 与 `doc/spec/mall-attach-noder.md#7`。
+
+## 6. 配置与安全提示
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |

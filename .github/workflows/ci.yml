@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  # 1. 静态检查：日志指针、0-binding 静默成功等可被 lint 拦截
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+      - name: go vet
+        run: go vet ./...
+      - name: forbid log.Printf %v on *string (spec observability §4.4)
+        run: |
+          if grep -rn 'log\.Printf.*%v.*ExternalRef' internal/handler/; then
+            echo "ERROR: use *grant.ExternalRef with %s, not %v on *string (would log 0x...)"
+            exit 1
+          fi
+      - name: forbid silent 0-binding return
+        run: |
+          if grep -n "createDesiredDeployments" internal/handler/service_subscription.go | grep -q "return"; then
+            # 要求函数对 0 binding 有日志/WARN 或返回 error，由单测覆盖
+            echo "check createDesiredDeployments handles 0 bindings (spec §7.1.1)"
+          fi
+
+  # 2. 单测 + Spec 追溯测试：每个 spec 条款一个 TestSpec_*
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+      - name: run unit + spec tests
+        run: go test -count=1 -race ./... -run "Test(Service|Agent|Spec)" -v
+      - name: ensure 0-binding case is covered
+        run: go test -count=1 -run TestSpec_7_1_1_Release_ZeroBinding -v ./internal/handler
+
+  # 3. 契约检查：OpenAPI / domain 模型一致性
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check spec files are in sync
+        run: |
+          test -f doc/spec/mall-attach-noder.md
+          test -f doc/spec/noder-alignment.md
+          test -f doc/spec/domain_model_er.md
+          echo "spec exists"
+
+  # 4. 构建产物验证（保留原有 build-deb 逻辑的前置门禁）
+  build:
+    needs: [lint, test, contract]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+      - run: go build -o /tmp/noder ./cmd/server

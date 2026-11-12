@@ -20,16 +20,14 @@
         "address": "1.1.1.1",
         "skipFallback": true,
         "domains": [
-          "geosite:google",
-          "geosite:google-cn"
+          "geosite:google"
         ]
       },
       {
         "address": "8.8.8.8",
         "skipFallback": true,
         "domains": [
-          "geosite:google",
-          "geosite:google-cn"
+          "geosite:google"
         ],
         "finalQuery": true // 终结查询链
       },
@@ -123,7 +121,7 @@
   },
   "inbounds": [
     {
-      "listen": "10.0.0.1",
+      "listen": "127.0.0.1",
       "port": 666,
       "protocol": "socks",
       "settings": {

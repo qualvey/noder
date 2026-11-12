@@ -1,4 +1,4 @@
-.PHONY: all build clean frontend backend run dev release deb deb-arm64 deb-all help
+.PHONY: all build clean frontend backend run dev release deb deb-arm64 deb-all help lint test spec
 
 # 默认目标：全量构建
 all: build
@@ -58,6 +58,17 @@ deb-arm64:
 
 deb-all:
 	@bash ./scripts/build-deb.sh --arch all
+
+# 质量门禁（对应 CI）
+lint:
+	go vet ./...
+	@! grep -rn 'log\.Printf.*%v.*ExternalRef' internal/handler/ || (echo "forbid %v on *string ExternalRef (observability §4.4)" && exit 1)
+
+test:
+	go test -count=1 -race ./... -run "Test(Service|Agent|Spec)" -v
+
+spec:
+	go test -count=1 -run TestSpec_ -v ./internal/handler
 
 # 清理缓存
 clean:

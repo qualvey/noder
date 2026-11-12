@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -326,6 +327,7 @@ func RevokeCredential(ctx context.Context, credentialID string) error {
 		return err
 	}
 	createdDeployment := false
+	rev := strconv.FormatInt(time.Now().UnixMilli(), 10)
 	for _, grant := range grants {
 		var bindings []*model.EndpointAgentBinding
 		if err := DB.NewSelect().Model(&bindings).Where("endpoint_id = ? AND status = ?", grant.EndpointID, "active").Scan(ctx); err != nil {
@@ -338,9 +340,12 @@ func RevokeCredential(ctx context.Context, credentialID string) error {
 				AgentNodeID:  binding.AgentNodeID,
 				DesiredState: model.CredentialStatusRevoked,
 				AppliedState: "unknown",
+				Revision:     rev,
 			}
 			if _, err := DB.NewInsert().Model(deployment).On("CONFLICT (credential_id, endpoint_id, agent_node_id) DO UPDATE").
-				Set("desired_state = ?", model.CredentialStatusRevoked).Exec(ctx); err != nil {
+				Set("desired_state = ?", model.CredentialStatusRevoked).
+				Set("revision = ?", rev).
+				Exec(ctx); err != nil {
 				return err
 			}
 			createdDeployment = true

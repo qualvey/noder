@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ type activateReq struct {
 	DurationSeconds   int64  `json:"duration_seconds"`
 	TrafficQuotaBytes int64  `json:"traffic_quota_bytes"`
 	OrderItemID       string `json:"order_item_id"`
+	TagOverride       string `json:"tag_override"`
 }
 
 type extendReq struct {
@@ -49,15 +51,49 @@ func subURLsForToken(r *http.Request, token string) map[string]string {
 	}
 }
 
-func grantReadiness(grant *model.AccessGrant, endpointActive bool) map[string]bool {
-	// Agent/probe not wired in this phase; report what is knowable.
+func grantReadiness(ctx context.Context, grant *model.AccessGrant, endpointActive bool) map[string]bool {
 	agentOnline := false
+	if grant != nil && grant.EndpointID > 0 {
+		agentOnline = isAgentOnlineForEndpoint(ctx, grant.EndpointID)
+	}
 	return map[string]bool{
 		"endpoint_active": endpointActive,
 		"agent_online":    agentOnline,
 		"route_ok":        endpointActive && grant != nil && (grant.Format == nil || *grant.Format != "landing"),
 		"egress_ip_match": endpointActive && grant != nil && (grant.Format == nil || *grant.Format != "landing"),
 	}
+}
+
+func isAgentOnlineForEndpoint(ctx context.Context, endpointID int64) bool {
+	cutoff := time.Now().UTC().Add(-90 * time.Second)
+	exists, err := db.DB.NewSelect().
+		TableExpr("endpoint_agent_bindings AS b").
+		Join("JOIN agent_nodes AS a ON a.id = b.agent_node_id").
+		Where("b.endpoint_id = ? AND b.status = ?", endpointID, "active").
+		Where("a.status != ?", "disabled").
+		Where("a.last_heartbeat_at > ?", cutoff).
+		Exists(ctx)
+	return err == nil && exists
+}
+
+func hasDeployment(ctx context.Context, credentialID string, endpointID int64) bool {
+	n, err := db.DB.NewSelect().Model((*model.CredentialDeployment)(nil)).
+		Where("credential_id = ? AND endpoint_id = ?", credentialID, endpointID).Count(ctx)
+	return err == nil && n > 0
+}
+
+func isDelivered(ctx context.Context, grant *model.AccessGrant, endpointActive bool) bool {
+	if grant == nil || grant.Status != model.AccessGrantStatusActive || !endpointActive {
+		return false
+	}
+	// socks 直连落地机，无 agent 部署链路
+	if grant.Format != nil && *grant.Format == "socks" {
+		return true
+	}
+	if !isAgentOnlineForEndpoint(ctx, grant.EndpointID) {
+		return false
+	}
+	return hasDeployment(ctx, grant.CredentialID, grant.EndpointID)
 }
 
 func effectiveGrantStatus(grant *model.AccessGrant, now time.Time) string {
@@ -81,7 +117,7 @@ func activateResponse(r *http.Request, grant *model.AccessGrant, user *model.Use
 		"user_id":         user.ID,
 		"credential_id":   grant.CredentialID,
 		"sub_urls":        subURLsForToken(r, user.Token),
-		"readiness":       grantReadiness(grant, endpointActive),
+		"readiness":       grantReadiness(r.Context(), grant, endpointActive),
 	}
 	if grant.DeliveredAt != nil {
 		resp["delivered_at"] = grant.DeliveredAt.UTC().Format(time.RFC3339)
@@ -126,15 +162,34 @@ func ActivateSubscription(w http.ResponseWriter, r *http.Request) {
 	req.Format = strings.ToLower(strings.TrimSpace(req.Format))
 	req.ExitRouteTag = strings.TrimSpace(req.ExitRouteTag)
 	req.OrderItemID = strings.TrimSpace(req.OrderItemID)
+	req.TagOverride = strings.TrimSpace(req.TagOverride)
 	if req.ExternalID == "" || req.OrderItemID == "" || req.EndpointID <= 0 || (req.Format != "socks" && req.Format != "landing") {
 		RespondServiceCodedError(w, http.StatusBadRequest, 40001, "INVALID_ARGUMENT", "external_id, order_item_id, endpoint_id, format(socks|landing) are required")
 		return
 	}
-	if req.Format == "socks" {
-		req.ExitRouteTag = ""
+	if len(req.TagOverride) > 64 {
+		RespondServiceCodedError(w, http.StatusBadRequest, 40001, "INVALID_ARGUMENT", "tag_override too long (max 64)")
+		return
 	}
-	if req.DurationSeconds < 0 {
-		req.DurationSeconds = 0
+	if req.Format == "socks" && req.ExitRouteTag != "" {
+		RespondServiceCodedError(w, http.StatusBadRequest, 40001, "INVALID_ARGUMENT", "exit_route_tag must be empty for socks")
+		return
+	}
+	if req.Format == "landing" && req.ExitRouteTag == "" {
+		RespondServiceCodedError(w, http.StatusBadRequest, 40001, "INVALID_ARGUMENT", "exit_route_tag is required for landing")
+		return
+	}
+	if req.DurationSeconds <= 0 {
+		RespondServiceCodedError(w, http.StatusBadRequest, 40001, "INVALID_ARGUMENT", "duration_seconds must be > 0")
+		return
+	}
+	if req.TrafficQuotaBytes < 0 {
+		RespondServiceCodedError(w, http.StatusBadRequest, 40001, "INVALID_ARGUMENT", "traffic_quota_bytes must be >= 0")
+		return
+	}
+	if req.Format == "socks" && req.TrafficQuotaBytes != 0 {
+		RespondServiceCodedError(w, http.StatusBadRequest, 40001, "INVALID_ARGUMENT", "traffic_quota_bytes must be 0 for socks (unlimited)")
+		return
 	}
 
 	// Idempotency: existing grant for this order_item_id.
@@ -150,7 +205,7 @@ func ActivateSubscription(w http.ResponseWriter, r *http.Request) {
 		var ep model.Node
 		endpointActive := db.DB.NewSelect().Model(&ep).Where("id = ?", existing.EndpointID).Scan(r.Context()) == nil &&
 			ep.IsActive && (ep.Status == "" || ep.Status == model.AccessGrantStatusActive)
-		RespondServiceSuccess(w, activateResponse(r, &existing, &user, existing.Status == model.AccessGrantStatusActive, endpointActive))
+		RespondServiceSuccess(w, activateResponse(r, &existing, &user, isDelivered(r.Context(), &existing, endpointActive), endpointActive))
 		return
 	}
 
@@ -216,7 +271,7 @@ func ActivateSubscription(w http.ResponseWriter, r *http.Request) {
 		EndpointID:        req.EndpointID,
 		CredentialID:      credID,
 		ExternalRef:       &req.OrderItemID,
-		DisplayName:       &email,
+		DisplayName:       nil,
 		Status:            model.AccessGrantStatusPendingActivation, // no auto-release; manual /release required
 		Format:            &req.Format,
 		ExitRouteTag:      &req.ExitRouteTag,
@@ -225,6 +280,20 @@ func ActivateSubscription(w http.ResponseWriter, r *http.Request) {
 		DeliveredAt:       &deliveredAt,
 		ExpiresAt:         expiresAt,
 		TrafficQuotaBytes: req.TrafficQuotaBytes,
+	}
+	if req.TagOverride != "" {
+		tag := req.TagOverride
+		grant.TagOverride = &tag
+	} else {
+		// 方案 A（D10 定稿）：同出口多份订阅自动生成 tag_override
+		// #N = 该用户该 (endpoint_id, exit_route_tag) 下历史 grant 数 + 1，首份无后缀，永不重用
+		histCount, err := db.DB.NewSelect().Model((*model.AccessGrant)(nil)).
+			Where("user_id = ? AND endpoint_id = ? AND exit_route_tag = ?", user.ID, req.EndpointID, req.ExitRouteTag).
+			Count(r.Context())
+		if err == nil && histCount > 0 {
+			tag := fmt.Sprintf("%s #%d", endpoint.Tag, histCount+1)
+			grant.TagOverride = &tag
+		}
 	}
 	if _, err := db.DB.NewInsert().Model(grant).Exec(r.Context()); err != nil {
 		// Idempotency race: DB unique on external_ref.
@@ -236,7 +305,9 @@ func ActivateSubscription(w http.ResponseWriter, r *http.Request) {
 			} else {
 				_ = db.DB.NewSelect().Model(&u).Where("id = ?", existing.UserID).Scan(r.Context())
 			}
-			RespondServiceSuccess(w, activateResponse(r, &existing, &u, existing.Status == model.AccessGrantStatusActive, endpointActive))
+			var ep2 model.Node
+			epActive2 := db.DB.NewSelect().Model(&ep2).Where("id = ?", existing.EndpointID).Scan(r.Context()) == nil && ep2.IsActive && (ep2.Status == "" || ep2.Status == model.AccessGrantStatusActive)
+			RespondServiceSuccess(w, activateResponse(r, &existing, &u, isDelivered(r.Context(), &existing, epActive2), epActive2))
 			return
 		}
 		log.Printf("activate: create grant failed order_item_id=%s error=%v", req.OrderItemID, err)
@@ -248,21 +319,30 @@ func ActivateSubscription(w http.ResponseWriter, r *http.Request) {
 	RespondServiceSuccess(w, activateResponse(r, grant, user, false, endpointActive))
 }
 
-func createDesiredDeployments(ctx context.Context, credentialID string, endpointID int64, desired string) {
+func createDesiredDeployments(ctx context.Context, credentialID string, endpointID int64, desired string) int {
 	var bindings []*model.EndpointAgentBinding
 	if err := db.DB.NewSelect().Model(&bindings).
 		Where("endpoint_id = ? AND status = ?", endpointID, "active").Scan(ctx); err != nil {
-		return
+		log.Printf("WARN createDesiredDeployments: query bindings failed endpoint_id=%d error=%v", endpointID, err)
+		return 0
 	}
+	if len(bindings) == 0 {
+		log.Printf("WARN createDesiredDeployments: no active bindings endpoint_id=%d desired=%s credential_id=%s", endpointID, desired, credentialID)
+		return 0
+	}
+	rev := strconv.FormatInt(time.Now().UnixMilli(), 10)
 	for _, b := range bindings {
 		dep := &model.CredentialDeployment{
 			CredentialID: credentialID, EndpointID: endpointID, AgentNodeID: b.AgentNodeID,
-			DesiredState: desired, AppliedState: "unknown",
+			DesiredState: desired, AppliedState: "unknown", Revision: rev,
 		}
 		_, _ = db.DB.NewInsert().Model(dep).
 			On("CONFLICT (credential_id, endpoint_id, agent_node_id) DO UPDATE").
-			Set("desired_state = ?", desired).Exec(ctx)
+			Set("desired_state = ?", desired).
+			Set("revision = ?", rev).
+			Exec(ctx)
 	}
+	return len(bindings)
 }
 
 func GetSubscription(w http.ResponseWriter, r *http.Request) {
@@ -289,7 +369,7 @@ func GetSubscription(w http.ResponseWriter, r *http.Request) {
 	status := effectiveGrantStatus(&grant, now)
 	data := map[string]interface{}{
 		"status":    status,
-		"readiness": grantReadiness(&grant, endpointActive),
+		"readiness": grantReadiness(r.Context(), &grant, endpointActive),
 		"sub_urls":  subURLsForToken(r, user.Token),
 		"traffic": map[string]interface{}{
 			"quota_bytes": grant.TrafficQuotaBytes,
@@ -299,8 +379,6 @@ func GetSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 	if grant.ExpiresAt != nil {
 		data["expires_at"] = grant.ExpiresAt.UTC().Format(time.RFC3339)
-	} else {
-		data["expires_at"] = nil
 	}
 	if grant.TrafficUpdatedAt != nil {
 		data["traffic"].(map[string]interface{})["updated_at"] = grant.TrafficUpdatedAt.UTC().Format(time.RFC3339)
@@ -354,13 +432,21 @@ func ExtendSubscription(w http.ResponseWriter, r *http.Request) {
 		_ = db.DB.NewSelect().Model(&user).Where("id = ?", grant.UserID).Scan(r.Context())
 		var ep model.Node
 		endpointActive := db.DB.NewSelect().Model(&ep).Where("id = ?", grant.EndpointID).Scan(r.Context()) == nil && ep.IsActive && (ep.Status == "" || ep.Status == model.AccessGrantStatusActive)
-		RespondServiceSuccess(w, map[string]interface{}{
+		replay := map[string]interface{}{
 			"subscription_id": grant.ID,
-			"expires_at":      timePtrFormat(grant.ExpiresAt),
 			"status":          effectiveGrantStatus(&grant, now),
 			"sub_urls":        subURLsForToken(r, user.Token),
-			"readiness":       grantReadiness(&grant, endpointActive),
-		})
+			"readiness":       grantReadiness(r.Context(), &grant, endpointActive),
+			"traffic": map[string]interface{}{
+				"quota_bytes": grant.TrafficQuotaBytes,
+				"used_bytes":  grant.TrafficUsedBytes,
+				"updated_at":  timePtrFormat(grant.TrafficUpdatedAt),
+			},
+		}
+		if grant.ExpiresAt != nil {
+			replay["expires_at"] = grant.ExpiresAt.UTC().Format(time.RFC3339)
+		}
+		RespondServiceSuccess(w, replay)
 		return
 	}
 
@@ -395,7 +481,12 @@ func ExtendSubscription(w http.ResponseWriter, r *http.Request) {
 		"expires_at":      newExp.UTC().Format(time.RFC3339),
 		"status":          grant.Status,
 		"sub_urls":        subURLsForToken(r, user.Token),
-		"readiness":       grantReadiness(&grant, endpointActive),
+		"readiness":       grantReadiness(r.Context(), &grant, endpointActive),
+		"traffic": map[string]interface{}{
+			"quota_bytes": grant.TrafficQuotaBytes,
+			"used_bytes":  grant.TrafficUsedBytes,
+			"updated_at":  timePtrFormat(grant.TrafficUpdatedAt),
+		},
 	})
 }
 
@@ -443,8 +534,8 @@ func QuotaSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		RespondServiceSuccess(w, map[string]interface{}{
-			"subscription_id":    grant.ID,
-			"status":             effectiveGrantStatus(&grant, now),
+			"subscription_id":     grant.ID,
+			"status":              effectiveGrantStatus(&grant, now),
 			"traffic_quota_bytes": grant.TrafficQuotaBytes,
 			"traffic_used_bytes":  grant.TrafficUsedBytes,
 		})
@@ -471,8 +562,8 @@ func QuotaSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 
 	RespondServiceSuccess(w, map[string]interface{}{
-		"subscription_id":    grant.ID,
-		"status":             grant.Status,
+		"subscription_id":     grant.ID,
+		"status":              grant.Status,
 		"traffic_quota_bytes": grant.TrafficQuotaBytes,
 		"traffic_used_bytes":  grant.TrafficUsedBytes,
 	})
@@ -502,8 +593,26 @@ func ReleaseSubscription(w http.ResponseWriter, r *http.Request) {
 	endpointActive := db.DB.NewSelect().Model(&ep).Where("id = ?", grant.EndpointID).Scan(r.Context()) == nil &&
 		ep.IsActive && (ep.Status == "" || ep.Status == model.AccessGrantStatusActive)
 
+	// Binding check: landing 必须有 agent 绑定，否则无法下发 (spec §7.1.1 BINDING_MISSING)
+	// socks 直连落地机，无需 agent
+	isSocks := grant.Format != nil && *grant.Format == "socks"
+	if !isSocks {
+		bindingCount, _ := db.DB.NewSelect().Model((*model.EndpointAgentBinding)(nil)).Where("endpoint_id = ? AND status = ?", grant.EndpointID, "active").Count(r.Context())
+		if bindingCount == 0 {
+			log.Printf("WARN release: no active binding endpoint_id=%d subscription_id=%s", grant.EndpointID, grant.ID)
+			RespondServiceCodedError(w, http.StatusConflict, 40902, "BINDING_MISSING", fmt.Sprintf("endpoint %d has no active agent binding", grant.EndpointID))
+			return
+		}
+	}
+
 	if grant.Status == model.AccessGrantStatusActive {
-		RespondServiceSuccess(w, activateResponse(r, &grant, &user, true, endpointActive))
+		if isSocks {
+			RespondServiceSuccess(w, activateResponse(r, &grant, &user, endpointActive, endpointActive))
+			return
+		}
+		n := createDesiredDeployments(r.Context(), grant.CredentialID, grant.EndpointID, model.CredentialStatusActive)
+		delivered := n > 0 && isAgentOnlineForEndpoint(r.Context(), grant.EndpointID) && endpointActive
+		RespondServiceSuccess(w, activateResponse(r, &grant, &user, delivered, endpointActive))
 		return
 	}
 	if grant.Status != model.AccessGrantStatusPendingActivation && grant.Status != model.AccessGrantStatusActivationFailed {
@@ -527,10 +636,21 @@ func ReleaseSubscription(w http.ResponseWriter, r *http.Request) {
 		RespondServiceError(w, http.StatusInternalServerError, "failed to activate credential")
 		return
 	}
-	createDesiredDeployments(r.Context(), grant.CredentialID, grant.EndpointID, model.CredentialStatusActive)
-	log.Printf("release: subscription released subscription_id=%s endpoint_id=%d order_item_ref=%v", grant.ID, grant.EndpointID, grant.ExternalRef)
-
-	RespondServiceSuccess(w, activateResponse(r, &grant, &user, true, endpointActive))
+	var delivered bool
+	var n int
+	if isSocks {
+		n = 0
+		delivered = endpointActive
+	} else {
+		n = createDesiredDeployments(r.Context(), grant.CredentialID, grant.EndpointID, model.CredentialStatusActive)
+		delivered = n > 0 && isAgentOnlineForEndpoint(r.Context(), grant.EndpointID) && endpointActive
+	}
+	orderRef := ""
+	if grant.ExternalRef != nil {
+		orderRef = *grant.ExternalRef
+	}
+	log.Printf("release: subscription released subscription_id=%s endpoint_id=%d order_item_ref=%s deployments=%d delivered=%v", grant.ID, grant.EndpointID, orderRef, n, delivered)
+	RespondServiceSuccess(w, activateResponse(r, &grant, &user, delivered, endpointActive))
 }
 
 func RevokeSubscription(w http.ResponseWriter, r *http.Request) {
@@ -572,7 +692,11 @@ func RevokeSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	createDesiredDeployments(r.Context(), grant.CredentialID, grant.EndpointID, model.CredentialStatusRevoked)
-	log.Printf("revoke: subscription revoked subscription_id=%s endpoint_id=%d order_item_ref=%v reason=%s", grant.ID, grant.EndpointID, grant.ExternalRef, strings.TrimSpace(req.Reason))
+	orderRef2 := ""
+	if grant.ExternalRef != nil {
+		orderRef2 = *grant.ExternalRef
+	}
+	log.Printf("revoke: subscription revoked subscription_id=%s endpoint_id=%d order_item_ref=%s reason=%s", grant.ID, grant.EndpointID, orderRef2, strings.TrimSpace(req.Reason))
 
 	RespondServiceSuccess(w, map[string]interface{}{"subscription_id": grant.ID, "status": model.AccessGrantStatusRevoked})
 }
