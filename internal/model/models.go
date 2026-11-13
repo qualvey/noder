@@ -142,6 +142,9 @@ type AccessGrant struct {
 	Remark           *string     `bun:"remark" json:"remark,omitempty"`
 	DeliveredAt      *time.Time  `bun:"delivered_at" json:"delivered_at,omitempty"`
 	ExpiresAt        *time.Time  `bun:"expires_at" json:"expires_at,omitempty"`
+	TrafficResetAt   *time.Time  `bun:"traffic_reset_at" json:"traffic_reset_at,omitempty"` // 当前流量周期的到期/重置时间点 (方案B)
+	CycleSeconds     int64       `bun:"cycle_seconds,notnull,default:0" json:"cycle_seconds"` // 计费周期秒数 (如 30 天)
+	CycleQuotaBytes  int64       `bun:"cycle_quota_bytes,notnull,default:0" json:"cycle_quota_bytes"` // 每个周期的标准流量配额
 	TrafficQuotaBytes int64      `bun:"traffic_quota_bytes,notnull,default:0" json:"traffic_quota_bytes"` // 0 = 不限
 	TrafficUsedBytes  int64      `bun:"traffic_used_bytes,notnull,default:0" json:"traffic_used_bytes"`
 	TrafficUpdatedAt  *time.Time `bun:"traffic_updated_at" json:"traffic_updated_at,omitempty"`

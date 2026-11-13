@@ -273,6 +273,7 @@ func buildDeploymentItem(r *http.Request, agent *model.AgentNode, d *model.Crede
 		"traffic_used_bytes":  int64(0),
 	}
 	if grant != nil {
+		CheckAndResetTrafficCycle(r.Context(), grant, now)
 		grantPayload["grant_id"] = grant.ID
 		grantPayload["status"] = effectiveGrantStatus(grant, now)
 		if grant.Format != nil {

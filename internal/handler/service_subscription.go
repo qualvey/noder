@@ -106,6 +106,9 @@ func effectiveGrantStatus(grant *model.AccessGrant, now time.Time) string {
 	if grant.ExpiresAt != nil && !grant.ExpiresAt.After(now) {
 		return model.AccessGrantStatusExpired
 	}
+	if grant.TrafficQuotaBytes > 0 && grant.TrafficUsedBytes >= grant.TrafficQuotaBytes {
+		return model.AccessGrantStatusTrafficExhausted
+	}
 	return grant.Status
 }
 
@@ -279,6 +282,9 @@ func ActivateSubscription(w http.ResponseWriter, r *http.Request) {
 		OverrideConfig:    "{}",
 		DeliveredAt:       &deliveredAt,
 		ExpiresAt:         expiresAt,
+		TrafficResetAt:    expiresAt,
+		CycleSeconds:      req.DurationSeconds,
+		CycleQuotaBytes:   req.TrafficQuotaBytes,
 		TrafficQuotaBytes: req.TrafficQuotaBytes,
 	}
 	if req.TagOverride != "" {
@@ -366,6 +372,7 @@ func GetSubscription(w http.ResponseWriter, r *http.Request) {
 		ep.IsActive && (ep.Status == "" || ep.Status == model.AccessGrantStatusActive)
 
 	now := time.Now().UTC()
+	CheckAndResetTrafficCycle(r.Context(), &grant, now)
 	status := effectiveGrantStatus(&grant, now)
 	data := map[string]interface{}{
 		"status":    status,
@@ -375,6 +382,7 @@ func GetSubscription(w http.ResponseWriter, r *http.Request) {
 			"quota_bytes": grant.TrafficQuotaBytes,
 			"used_bytes":  grant.TrafficUsedBytes,
 			"updated_at":  nil,
+			"reset_at":    timePtrFormat(grant.TrafficResetAt),
 		},
 	}
 	if grant.ExpiresAt != nil {
@@ -408,6 +416,7 @@ func ExtendSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
+	CheckAndResetTrafficCycle(r.Context(), &grant, now)
 	status := effectiveGrantStatus(&grant, now)
 	if grant.Status == model.AccessGrantStatusRevoked {
 		RespondServiceCodedError(w, http.StatusConflict, 40901, "SUBSCRIPTION_REVOKED", "subscription is revoked")
@@ -441,6 +450,7 @@ func ExtendSubscription(w http.ResponseWriter, r *http.Request) {
 				"quota_bytes": grant.TrafficQuotaBytes,
 				"used_bytes":  grant.TrafficUsedBytes,
 				"updated_at":  timePtrFormat(grant.TrafficUpdatedAt),
+				"reset_at":    timePtrFormat(grant.TrafficResetAt),
 			},
 		}
 		if grant.ExpiresAt != nil {
@@ -451,25 +461,51 @@ func ExtendSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 
 	base := now
+	isEarlyRenewal := false
 	if grant.ExpiresAt != nil && grant.ExpiresAt.After(base) {
 		base = *grant.ExpiresAt
+		isEarlyRenewal = true
 	}
 	newExp := base.Add(time.Duration(req.DurationSeconds) * time.Second)
 	grant.ExpiresAt = &newExp
+	grant.CycleSeconds = req.DurationSeconds
 	if req.TrafficQuotaBytes > 0 {
-		grant.TrafficQuotaBytes += req.TrafficQuotaBytes
+		grant.CycleQuotaBytes = req.TrafficQuotaBytes
 	}
-	// Preserve pending_activation (manual release still required); otherwise reactivate.
-	if grant.Status != model.AccessGrantStatusRevoked && grant.Status != model.AccessGrantStatusPendingActivation {
-		grant.Status = model.AccessGrantStatusActive
+
+	reactivated := false
+	if isEarlyRenewal {
+		// 方案 B：提前续费
+		// 顺延服务总到期时间，记录新周期的标准配额；
+		// 当前周期的流量额度与已用量保持原样不变（不累加，不提前刷新），直到当前周期 reset_at 到来时才清零重置
+		if grant.TrafficResetAt == nil {
+			grant.TrafficResetAt = &base
+		}
+	} else {
+		// 已过期（或全新周期）：立即起算新周期，重置配额，已用流量清零！
+		grant.TrafficResetAt = &newExp
+		if req.TrafficQuotaBytes > 0 {
+			grant.TrafficQuotaBytes = req.TrafficQuotaBytes
+		}
+		grant.TrafficUsedBytes = 0
+		if grant.Status != model.AccessGrantStatusRevoked && grant.Status != model.AccessGrantStatusPendingActivation {
+			if grant.Status == model.AccessGrantStatusTrafficExhausted || grant.Status == model.AccessGrantStatusExpired {
+				reactivated = true
+			}
+			grant.Status = model.AccessGrantStatusActive
+		}
 	}
 	grant.UpdatedAt = now
 	if _, err := db.DB.NewUpdate().Model(&grant).
-		Column("expires_at", "traffic_quota_bytes", "status", "updated_at").
+		Column("expires_at", "traffic_reset_at", "cycle_seconds", "cycle_quota_bytes", "traffic_quota_bytes", "traffic_used_bytes", "status", "updated_at").
 		WherePK().Exec(r.Context()); err != nil {
 		log.Printf("extend: update grant failed order_item_id=%s endpoint_id=%d error=%v", req.OrderItemID, grant.EndpointID, err)
 		RespondServiceError(w, http.StatusInternalServerError, "failed to extend subscription")
 		return
+	}
+
+	if reactivated {
+		createDesiredDeployments(r.Context(), grant.CredentialID, grant.EndpointID, model.CredentialStatusActive)
 	}
 
 	var user model.User
@@ -486,6 +522,7 @@ func ExtendSubscription(w http.ResponseWriter, r *http.Request) {
 			"quota_bytes": grant.TrafficQuotaBytes,
 			"used_bytes":  grant.TrafficUsedBytes,
 			"updated_at":  timePtrFormat(grant.TrafficUpdatedAt),
+			"reset_at":    timePtrFormat(grant.TrafficResetAt),
 		},
 	})
 }

@@ -114,6 +114,8 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
+	go handler.StartTrafficCycleWorker(context.Background())
+
 	go func() {
 		logger.Info("HTTP server started listening", "addr", "http://0.0.0.0:"+port, "version", Version)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

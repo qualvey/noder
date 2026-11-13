@@ -193,8 +193,13 @@ func CreateDBAndTables(ctx context.Context) error {
 	_, _ = DB.ExecContext(ctx, "ALTER TABLE access_grants ADD COLUMN traffic_quota_bytes BIGINT DEFAULT 0")
 	_, _ = DB.ExecContext(ctx, "ALTER TABLE access_grants ADD COLUMN traffic_used_bytes BIGINT DEFAULT 0")
 	_, _ = DB.ExecContext(ctx, "ALTER TABLE access_grants ADD COLUMN traffic_updated_at TIMESTAMP")
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE access_grants ADD COLUMN traffic_reset_at TIMESTAMP")
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE access_grants ADD COLUMN cycle_seconds BIGINT DEFAULT 0")
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE access_grants ADD COLUMN cycle_quota_bytes BIGINT DEFAULT 0")
 	_, _ = DB.ExecContext(ctx, "UPDATE access_grants SET traffic_quota_bytes = 0 WHERE traffic_quota_bytes IS NULL")
 	_, _ = DB.ExecContext(ctx, "UPDATE access_grants SET traffic_used_bytes = 0 WHERE traffic_used_bytes IS NULL")
+	_, _ = DB.ExecContext(ctx, "UPDATE access_grants SET cycle_quota_bytes = traffic_quota_bytes WHERE cycle_quota_bytes = 0 OR cycle_quota_bytes IS NULL")
+	_, _ = DB.ExecContext(ctx, "UPDATE access_grants SET traffic_reset_at = expires_at WHERE traffic_reset_at IS NULL AND expires_at IS NOT NULL")
 
 	// Xray Agent alignment (noder-alignment.md): deployment revision/conflict + agent traffic dedup.
 	_, _ = DB.ExecContext(ctx, "ALTER TABLE credential_deployments ADD COLUMN revision VARCHAR DEFAULT '0'")

@@ -225,9 +225,45 @@ func TestServiceSubscriptionLifecycle(t *testing.T) {
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(extW.Body.Bytes(), &extResp)
-	expectedTotalQuota := float64(107374182400 + 53687091200)
-	if extResp.Data.Traffic["quota_bytes"].(float64) != expectedTotalQuota {
-		t.Fatalf("expected quota %f, got %v", expectedTotalQuota, extResp.Data.Traffic["quota_bytes"])
+	// 方案 B：提前续费，顺延到期日，但当前周期的配额与已用量保持不变（不累加，不提前刷新）
+	if extResp.Data.Traffic["quota_bytes"].(float64) != 107374182400 {
+		t.Fatalf("expected current cycle quota 107374182400 (not accumulated), got %v", extResp.Data.Traffic["quota_bytes"])
+	}
+	if extResp.Data.Traffic["used_bytes"].(float64) != 0 {
+		t.Fatalf("expected used_bytes 0, got %v", extResp.Data.Traffic["used_bytes"])
+	}
+
+	// 模拟当前周期到达重置时刻：模拟当期使用了流量，时间到达 traffic_reset_at
+	pastTime := time.Now().UTC().Add(-1 * time.Hour)
+	if _, err := db.DB.NewUpdate().Model((*model.AccessGrant)(nil)).
+		Set("traffic_reset_at = ?", pastTime).
+		Set("traffic_used_bytes = ?", 2048000).
+		Where("id = ?", subID1).Exec(context.Background()); err != nil {
+		t.Fatalf("failed to update grant for reset test: %v", err)
+	}
+
+	// 查询订阅快照，触发懒重置 CheckAndResetTrafficCycle
+	reqResetCheck := httptest.NewRequest("GET", fmt.Sprintf("/api/service/subscriptions/%s", subID1), nil)
+	reqResetCheck.Header.Set("X-Service-Token", "test-service-token")
+	wResetCheck := httptest.NewRecorder()
+	r.ServeHTTP(wResetCheck, reqResetCheck)
+	if wResetCheck.Code != http.StatusOK {
+		t.Fatalf("get subscription after reset time failed: %d %s", wResetCheck.Code, wResetCheck.Body.String())
+	}
+	var resetResp struct {
+		Code int `json:"code"`
+		Data struct {
+			Status  string                 `json:"status"`
+			Traffic map[string]interface{} `json:"traffic"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(wResetCheck.Body.Bytes(), &resetResp)
+	// 到期清零：用量清零为 0，配额重置为新周期的 53687091200
+	if resetResp.Data.Traffic["quota_bytes"].(float64) != 53687091200 {
+		t.Fatalf("expected new cycle quota 53687091200, got %v", resetResp.Data.Traffic["quota_bytes"])
+	}
+	if resetResp.Data.Traffic["used_bytes"].(float64) != 0 {
+		t.Fatalf("expected cleared used_bytes 0, got %v", resetResp.Data.Traffic["used_bytes"])
 	}
 
 	// Extend idempotency on order_item_id
@@ -264,8 +300,9 @@ func TestServiceSubscriptionLifecycle(t *testing.T) {
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(quotaW.Body.Bytes(), &quotaResp)
-	if quotaResp.Data.TrafficQuotaBytes != int64(expectedTotalQuota)+10737418240 {
-		t.Fatalf("expected quota %d, got %d", int64(expectedTotalQuota)+10737418240, quotaResp.Data.TrafficQuotaBytes)
+	expectedTopupQuota := int64(53687091200 + 10737418240)
+	if quotaResp.Data.TrafficQuotaBytes != expectedTopupQuota {
+		t.Fatalf("expected quota %d, got %d", expectedTopupQuota, quotaResp.Data.TrafficQuotaBytes)
 	}
 
 	// 8. Test RevokeSubscription
