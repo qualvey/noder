@@ -480,6 +480,7 @@ func RegisterServiceRoutes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(ServiceAuth)
 
+			r.Get("/endpoints", ListServiceEndpoints)
 			r.Post("/users/register", RegisterServiceUser)
 			r.Post("/users", RegisterServiceUser) // Mall noder_client compatibility
 			r.Post("/users/{token}/credentials", AddUserServiceCredential)

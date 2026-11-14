@@ -147,9 +147,9 @@ if exists {
    - LANDING：`email = "c_<credential_id>@<exit_route_tag>"`（不可变；Xray 统计键）；
    - SOCKS：`email = "c_<credential_id>@socks"`；
 3. 创建 `AccessGrant`（`external_ref = order_item_id`）；已有同 `external_ref` → 直接返回该 grant（HTTP 200），不新建；
-4. 就绪校验（见 §4.6）→ `Delivered=true` 或 `delivered=false`；
+4. 就绪校验（见 §4.7）→ `Delivered=true` 或 `delivered=false`；
 5. `delivered_at/expires_at` 由 **Noder 自己的时钟**计算：`delivered_at = now`，`expires_at = now + duration_seconds`（**不是 Mall 传的**）；
-6. 绑定凭证到 endpoint（落 `credential_deployments` desired_state，**由线路机 Agent 真正写入 Xray**；本阶段只发 desired_state，Agent 还没上线——**交付的就绪校验必须反映这一点，见 §4.6 接口行为说明**）。
+6. 绑定凭证到 endpoint（落 `credential_deployments` desired_state，**由线路机 Agent 真正写入 Xray**；本阶段只发 desired_state，Agent 还没上线——**交付的就绪校验必须反映这一点，见 §4.7 接口行为说明**）。
 
 成功响应（`code:0`）：
 
@@ -210,7 +210,27 @@ if exists {
 - **已撤销再调必须返回 200**（退款流程会重试）；
 - **绝不先退款、后撤销**（Mall 侧铁律；Noder 侧必须保证 revoke 可靠返回 200）。
 
-### 4.6 就绪校验（landing vs socks，当前阶段怎么处理 Agent 未上线）
+### 4.6 `POST /api/service/subscriptions/{id}/release`（放行/激活）
+
+无请求体，建议携带 `Idempotency-Key: <order_item_id>:release`。
+
+| 前置状态 | 结果 |
+|---|---|
+| `pending_activation\|activation_failed` | `200`，将 grant 与 credential 状态置 `active`，返回完整订阅数据 |
+| `active` | `200` 幂等，**不重算 `expires_at`**（有效期仍从 `activate` 时起算） |
+| `revoked` | `40901 SUBSCRIPTION_REVOKED` |
+| `expired/traffic_exhausted` | `40902 INVALID_SUBSCRIPTION_STATE` |
+| grant 不存在 | `40402 SUBSCRIPTION_NOT_FOUND` |
+
+#### `format=socks` 的特殊行为（重要）
+
+1. **不部署、不下发配置**：socks 是直连落地机，`release` **不调用** `createDesiredDeployments`，不写 `credential_deployments`，不检查 Agent 在线。
+2. **节点存在性校验**：`release` 会校验 `grant.EndpointID` 对应的 `node` 记录是否存在、协议是否为 `socks5`、是否 `is_active`。若节点缺失、协议不匹配或未激活，应返回对应错误，让 Mall 知晓底层 socks 节点不可用。
+3. **`delivered` 语义**：socks 下仅取决于落地机节点本身是否 `is_active`，**不代表用户已收到可用的 socks 配置**。
+4. **配置获取路径**：Mall 不应期望 `release` 响应体里包含 `host:port:user:pass`。用户/商城需通过独立接口 `GET /api/service/users/{token}/socks5-list` 自行拉取 socks 节点列表，输出格式为 `host:port:username:password` 或 `socks5://user:pass@host:port#tag`。
+5. **流量/期限**：socks 强制 `traffic_quota_bytes=0`（不限流），`expires_at` 由 `activate` 的 `duration_seconds` 一次性确定，`release` 不重算。
+
+### 4.7 就绪校验（landing vs socks，当前阶段怎么处理 Agent 未上线）
 
 | format | 就绪条件 |
 | --- | --- |
@@ -224,7 +244,7 @@ if exists {
 - 文档里把“就绪=端到端探针”作为 Agent A4 的验收目标，本阶段允许 `endpoint_active=true` 且 Agent 缺位时 `delivered=true` + `readiness.agent_online=false`；
 - 同一原则：Agent 未上线时 desired_state 先落库不下发；Agent 上线后即生效。
 
-### 4.7 幂等落点
+### 4.8 幂等落点
 
 - `access_grants.external_ref text UNIQUE`（已建），存 `order_item_id`；
 - 应用层“先查再插”在并发下必漏——靠 DB 约束收口；
@@ -342,7 +362,7 @@ git commit -m "..."                # 每个任务恰好一个 commit
 1. 生产到底是 SQLite 还是 Docker+PG（决定 §7 哪条路径生效）；
 2. `nokder` 镜像 / systemd 的部署方式是否按 README（Docker Compose + GHCR）走；
 3. 交付的验收标准是否包含“真实支付端到端走一遍”（Mall 侧在开发中；本次交付**不要求**联调，只要求接口契约自洽）；
-4. `probe_result` 探测 URL 与判定标准（若有人要改 §4.6 的“先放行”为“阻塞开通”，需负责人确认）；
+4. `probe_result` 探测 URL 与判定标准（若有人要改 §4.7 的“先放行”为“阻塞开通”，需负责人确认）；
 5. 任何一次需要 `docker compose down -v` 或删 `-wal` 的操作 —— 停。
 
 ---

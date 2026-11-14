@@ -442,6 +442,21 @@ endpoint.node_id = ? AND endpoint.is_active = true AND endpoint.status = 'active
 
 **前缀** ` /api/service/*` **鉴权** `X-Service-Token: <service_token>`（`ServiceAuth`） **外壳** ` { code:0, message:"success", data:{...}} `，`code!=0` 仍 `HTTP 200`， `HTTP status` 仅用于网关重试分类。
 
+### 7.0 Endpoint 列表与 Agent 绑定状态
+
+接口字段及方案 B 的完整规范见：[Noder Endpoint 与 Agent 绑定查询契约](../docs/dev/noder-endpoint-binding-spec.md)。
+
+```http
+GET /api/service/endpoints
+X-Service-Token: <service_token>
+```
+
+该接口用于读取 Endpoint 的启用状态，以及 active binding 对应的 Agent 列表和状态。**Noder 已注册并实现此路由**。规范响应含 `id`、`tag`、`node_name`、`protocol`、`is_active`、`status`、`binding_count` 和 `bound_agents`；详见 [Endpoint 查询契约](../docs/dev/noder-endpoint-binding-spec.md)。
+
+**当前排查项：Endpoint 1 缺少 active Agent binding。** 对该 Endpoint 的 landing 订阅调用 release 会返回 HTTP `409`、业务码 `40902`、错误 `BINDING_MISSING`。修复并确认绑定/Agent 状态后，Mall 仍须对已有 pending 订阅显式重试 release；恢复 binding 不会自动放行。
+
+**方案 B（尚未实现）**：未来 `activate` 接受 `endpoint_id=0` 时，Noder 可按请求的 `region`、`tag_override` 从具备健康 Agent active binding 的候选池中调度最佳 Endpoint。须将真实选中的 Endpoint 固化到订阅，幂等重放不得重新选线；候选规则、健康判定、评分及无健康候选错误见上述规范。当前 activate 仍要求 `endpoint_id > 0`。
+
 ### 7.1 开通 POST /api/service/subscriptions/activate
 
 **语义**：幂等创建 `pending` 权益，不可用。`Noder` 为唯一时钟。
@@ -509,6 +524,14 @@ endpoint.node_id = ? AND endpoint.is_active = true AND endpoint.status = 'active
 | `expired/traffic_exhausted` | 拒绝 | `40902 INVALID_SUBSCRIPTION_STATE`，请走 `extend/quota` |
 
 **成功响应**同 `7.1` 但 `delivered=true` 且 `readiness` 全量；此后 `/sub` 渲染、`socks auth-list` 生效。`expires_at` **不重算**。
+
+#### `format=socks` 的特殊行为（重要）
+
+1. **不部署、不下发配置**：socks 是直连落地机，`release` **不调用** `createDesiredDeployments`，不写 `credential_deployments`，不检查 Agent 在线。
+2. **节点存在性校验**：`release` 会校验 `grant.EndpointID` 对应的 `node` 记录是否存在、协议是否为 `socks5`、是否 `is_active`。若节点缺失、协议不匹配或未激活，应返回对应错误，让 Mall 知晓底层 socks 节点不可用。
+3. **`delivered` 语义**：socks 下仅取决于落地机节点本身是否 `is_active`，**不代表用户已收到可用的 socks 配置**。
+4. **配置获取路径**：Mall 不应期望 `release` 响应体里包含 `host:port:user:pass`。用户/商城需通过独立接口 `GET /api/service/users/{token}/socks5-list` 自行拉取 socks 节点列表，输出格式为 `host:port:username:password` 或 `socks5://user:pass@host:port#tag`。
+5. **流量/期限**：socks 强制 `traffic_quota_bytes=0`（不限流），`expires_at` 由 `activate` 的 `duration_seconds` 一次性确定，`release` 不重算。
 
 **调用方**：`Mall FulfillmentDispatcher` 自动秒级调 + `admin` 补调，失败按 `1m/5m/30m/2h` 退避重试；`readiness.agent_online=false` 时重试，`BINDING_MISSING` 时告警而非盲重试。
 

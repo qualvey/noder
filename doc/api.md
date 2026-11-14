@@ -224,6 +224,55 @@ GET /dl/{id}?token={user_token}
 
 统一前缀 ` /api/service/*`，鉴权 `X-Service-Token`（`ServiceAuth`），外壳 `{code,message,data}`，`code!=0` 仍 `HTTP 200`。
 
+### 5.0 查询 Endpoint 与 Agent 绑定 `GET /api/service/endpoints`
+
+读取全部 Endpoint（包括停用项）及其 active Agent binding。需要 `X-Service-Token`。
+
+```http
+GET /api/service/endpoints
+X-Service-Token: <service_token>
+```
+
+**成功响应（HTTP 200）**
+
+```json
+{
+  "code": 200,
+  "data": [
+    {
+      "id": 1,
+      "tag": "tuic-01",
+      "node_name": "TUIC 高速专线 01",
+      "protocol": "tuic",
+      "is_active": true,
+      "status": "active",
+      "binding_count": 0,
+      "bound_agents": []
+    },
+    {
+      "id": 2,
+      "tag": "vless-02",
+      "node_name": "VLESS REALITY 专线 02",
+      "protocol": "vless",
+      "is_active": true,
+      "status": "active",
+      "binding_count": 1,
+      "bound_agents": [
+        {
+          "id": "ag_hk_01",
+          "name": "香港线路机 01",
+          "status": "online"
+        }
+      ]
+    }
+  ]
+}
+```
+
+字段对应 `node.id/tag/node_name/protocol/is_active/status`。`binding_count` 只统计 `endpoint_agent_bindings.status=active` 的绑定；`bound_agents` 列出这些绑定对应的 Agent。Agent 的 `status` 独立反映在线状态，因此离线 Agent 仍可能出现在列表中并计入绑定数。Endpoint 按 `sort_order`、`id` 升序；没有 Endpoint 时 `data` 是空数组。此接口按契约返回 JSON `code: 200`（不同于其他服务接口常用的 JSON `code: 0`）。
+
+鉴权失败返回 HTTP `401`；查询失败返回 HTTP `500`。详细约定见 [Endpoint 与 Agent 绑定查询契约](../docs/dev/noder-endpoint-binding-spec.md)。
+
 ### 5.1 开通 POST /api/service/subscriptions/activate
 
 只建 `pending_activation`，不下发。
@@ -274,15 +323,44 @@ GET /dl/{id}?token={user_token}
 
 `{id}=grant.id`，无body。建议携带 `Idempotency-Key: <order_item_id>:release`。
 
+#### 通用行为
+
 | 前置状态 | 结果 |
 |---|---|
-| `pending_activation\|activation_failed` 且 `bindingCount>0` | `200 delivered=true status=active`，写 `credential_deployments(desired=active)` |
-| `pending_activation\|activation_failed` 且 `bindingCount==0`（仅 landing） | `40902 BINDING_MISSING` |
-| `active` | `200` 幂等 |
+| `pending_activation\|activation_failed` | `200`，将 grant 与 credential 状态置 `active`，返回完整订阅数据（同 activate 响应结构） |
+| `active` | `200` 幂等，直接返回现有订阅数据，**不重算 `expires_at`**（有效期仍从 `activate` 时起算） |
 | `revoked` | `40901 SUBSCRIPTION_REVOKED` |
 | `expired/traffic_exhausted` | `40902 INVALID_SUBSCRIPTION_STATE` |
+| grant 不存在 | `40402 SUBSCRIPTION_NOT_FOUND` |
 
-成功后 `/sub` 渲染、`socks auth-list` 生效。错误 `40402 SUBSCRIPTION_NOT_FOUND`。
+成功后 `/sub` 渲染、`socks auth-list` 生效。
+
+#### `format=socks` 的特殊行为（重要备注）
+
+1. **不部署、不下发配置**：socks 是直连落地机，`release` **不调用** `createDesiredDeployments`，不会写 `credential_deployments`，也不会检查 Agent 是否在线。
+2. **节点校验**：`release` 会校验 `grant.EndpointID` 对应的 `node` 记录是否存在、协议是否为 `socks5`、是否 `is_active`。若节点缺失、协议不匹配或未激活，应返回对应错误（Mall 据此知晓底层 socks 节点不可用）。
+3. **`delivered` 语义**：socks 下仅取决于落地机节点本身是否 `is_active`（`delivered = endpointActive`），**不代表用户已收到可用的 socks 配置**。
+4. **配置获取路径**：Mall 不应期望 `release` 响应体里包含 `host:port:user:pass`。用户/商城需通过独立接口 `GET /api/service/users/{token}/socks5-list`（需 `X-Service-Token` 或用户 token 鉴权）自行拉取 socks 节点列表，输出格式为 `host:port:username:password` 或 `socks5://user:pass@host:port#tag`。
+5. **流量/期限**：socks 强制 `traffic_quota_bytes=0`（不限流），`expires_at` 由 `activate` 的 `duration_seconds` 一次性确定，`release` 不重算。
+
+#### 错误示例（HTTP status + `{code, error, message}`）
+
+```json
+// 404 grant 不存在
+{"code":40402,"error":"SUBSCRIPTION_NOT_FOUND","message":"subscription not found"}
+// 409 socks 节点不存在
+{"code":40401,"error":"ENDPOINT_NOT_FOUND","message":"endpoint 7 not found"}
+// 409 socks 节点协议不匹配
+{"code":40902,"error":"ENDPOINT_PROTOCOL_MISMATCH","message":"endpoint 7 protocol is vless, expected socks5"}
+// 409 socks 节点未激活
+{"code":40902,"error":"ENDPOINT_INACTIVE","message":"endpoint 7 is inactive or status=disabled"}
+// 409 已撤销
+{"code":40901,"error":"SUBSCRIPTION_REVOKED","message":"subscription is revoked"}
+// 409 非法状态（expired/traffic_exhausted）
+{"code":40902,"error":"INVALID_SUBSCRIPTION_STATE","message":"cannot release subscription in state expired"}
+```
+
+`RespondServiceCodedError` 外壳见 `internal/handler/service_auth.go:84`，`RespondServiceError` 为裸 `{code:HTTP, message}`（如 `Invalid JSON body`）。
 
 ### 5.3 查询/续费/加油包/撤销
 

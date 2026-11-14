@@ -48,6 +48,7 @@ type Node struct {
 	// with existing SQLite installations and are not used for credentials.
 	Status string  `bun:"status,notnull,default:'active'" json:"status"`
 	Config *string `bun:"config" json:"config,omitempty"`
+	IsAgentless bool `bun:"is_agentless,notnull,default:false" json:"is_agentless"`
 
 	Users []*User `bun:"m2m:usernodelink,join:Node=User" json:"-"`
 }

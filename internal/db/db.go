@@ -227,6 +227,9 @@ func CreateDBAndTables(ctx context.Context) error {
 		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE distfile ADD COLUMN %s VARCHAR", col))
 	}
 
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE node ADD COLUMN is_agentless BOOLEAN NOT NULL DEFAULT false")
+	_, _ = DB.ExecContext(ctx, "UPDATE node SET is_agentless = false WHERE is_agentless IS NULL")
+
 	return nil
 }
 

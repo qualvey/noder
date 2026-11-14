@@ -54,7 +54,17 @@ func subURLsForToken(r *http.Request, token string) map[string]string {
 func grantReadiness(ctx context.Context, grant *model.AccessGrant, endpointActive bool) map[string]bool {
 	agentOnline := false
 	if grant != nil && grant.EndpointID > 0 {
-		agentOnline = isAgentOnlineForEndpoint(ctx, grant.EndpointID)
+		// Agentless or socks endpoints are considered online if endpoint itself is active.
+		if grant.Format != nil && *grant.Format == "socks" {
+			agentOnline = endpointActive
+		} else {
+			var ep model.Node
+			if err := db.DB.NewSelect().Model(&ep).Where("id = ?", grant.EndpointID).Scan(ctx); err == nil && ep.IsAgentless {
+				agentOnline = endpointActive
+			} else {
+				agentOnline = isAgentOnlineForEndpoint(ctx, grant.EndpointID)
+			}
+		}
 	}
 	return map[string]bool{
 		"endpoint_active": endpointActive,
@@ -88,6 +98,11 @@ func isDelivered(ctx context.Context, grant *model.AccessGrant, endpointActive b
 	}
 	// socks 直连落地机，无 agent 部署链路
 	if grant.Format != nil && *grant.Format == "socks" {
+		return true
+	}
+	// 免 Agent 节点：只要端点激活即视为已交付（无需 agent 心跳或 deployment）
+	var ep model.Node
+	if err := db.DB.NewSelect().Model(&ep).Where("id = ?", grant.EndpointID).Scan(ctx); err == nil && ep.IsAgentless {
 		return true
 	}
 	if !isAgentOnlineForEndpoint(ctx, grant.EndpointID) {
@@ -626,14 +641,38 @@ func ReleaseSubscription(w http.ResponseWriter, r *http.Request) {
 		RespondServiceError(w, http.StatusInternalServerError, "failed to load user")
 		return
 	}
-	var ep model.Node
-	endpointActive := db.DB.NewSelect().Model(&ep).Where("id = ?", grant.EndpointID).Scan(r.Context()) == nil &&
-		ep.IsActive && (ep.Status == "" || ep.Status == model.AccessGrantStatusActive)
-
 	// Binding check: landing 必须有 agent 绑定，否则无法下发 (spec §7.1.1 BINDING_MISSING)
-	// socks 直连落地机，无需 agent
+	// socks / is_agentless 直连/手工运维，无需 agent
 	isSocks := grant.Format != nil && *grant.Format == "socks"
-	if !isSocks {
+
+	var ep model.Node
+	endpointActive := false
+	if isSocks {
+		if err := db.DB.NewSelect().Model(&ep).Where("id = ?", grant.EndpointID).Scan(r.Context()); err != nil {
+			RespondServiceCodedError(w, http.StatusNotFound, 40401, "ENDPOINT_NOT_FOUND",
+				fmt.Sprintf("endpoint %d not found", grant.EndpointID))
+			return
+		}
+		if ep.Protocol != "socks5" {
+			RespondServiceCodedError(w, http.StatusConflict, 40902, "ENDPOINT_PROTOCOL_MISMATCH",
+				fmt.Sprintf("endpoint %d protocol is %s, expected socks5", grant.EndpointID, ep.Protocol))
+			return
+		}
+		if !ep.IsActive || (ep.Status != "" && ep.Status != model.AccessGrantStatusActive) {
+			RespondServiceCodedError(w, http.StatusConflict, 40902, "ENDPOINT_INACTIVE",
+				fmt.Sprintf("endpoint %d is inactive or status=%s", grant.EndpointID, ep.Status))
+			return
+		}
+		endpointActive = true
+	} else {
+		if err := db.DB.NewSelect().Model(&ep).Where("id = ?", grant.EndpointID).Scan(r.Context()); err != nil {
+			endpointActive = false
+		} else {
+			endpointActive = ep.IsActive && (ep.Status == "" || ep.Status == model.AccessGrantStatusActive)
+		}
+	}
+	isAgentless := isSocks || ep.IsAgentless
+	if !isAgentless {
 		bindingCount, _ := db.DB.NewSelect().Model((*model.EndpointAgentBinding)(nil)).Where("endpoint_id = ? AND status = ?", grant.EndpointID, "active").Count(r.Context())
 		if bindingCount == 0 {
 			log.Printf("WARN release: no active binding endpoint_id=%d subscription_id=%s", grant.EndpointID, grant.ID)
@@ -643,12 +682,13 @@ func ReleaseSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if grant.Status == model.AccessGrantStatusActive {
-		if isSocks {
-			RespondServiceSuccess(w, activateResponse(r, &grant, &user, endpointActive, endpointActive))
-			return
+		var delivered bool
+		if isAgentless {
+			delivered = endpointActive
+		} else {
+			n := createDesiredDeployments(r.Context(), grant.CredentialID, grant.EndpointID, model.CredentialStatusActive)
+			delivered = n > 0 && isAgentOnlineForEndpoint(r.Context(), grant.EndpointID) && endpointActive
 		}
-		n := createDesiredDeployments(r.Context(), grant.CredentialID, grant.EndpointID, model.CredentialStatusActive)
-		delivered := n > 0 && isAgentOnlineForEndpoint(r.Context(), grant.EndpointID) && endpointActive
 		RespondServiceSuccess(w, activateResponse(r, &grant, &user, delivered, endpointActive))
 		return
 	}
@@ -675,7 +715,8 @@ func ReleaseSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 	var delivered bool
 	var n int
-	if isSocks {
+	isAgentless2 := isSocks || ep.IsAgentless
+	if isAgentless2 {
 		n = 0
 		delivered = endpointActive
 	} else {
