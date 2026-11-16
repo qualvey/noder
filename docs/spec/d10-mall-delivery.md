@@ -25,7 +25,7 @@
 ```
 你在 /home/ryu/code/noder（分支 dev-refactor）上开发。
 先执行并核对：git status && git log --oneline -5 && go build ./cmd/server && go test ./...
-你的任务全部写在 doc/d10-mall-delivery.md，先完整读完再动手。
+你的任务全部写在 docs/d10-mall-delivery.md，先完整读完再动手。
 铁律：
   1. 只改 noder 仓库；不修改 Mall 仓库任何文件；
   2. 不提交 data.db* / .env / 任何备份件（git status 里未跟踪的 data.db.bak-*、
@@ -73,7 +73,7 @@ git log --oneline -5
 
 ### A1. socks5 到期根本没有被强制（收入漏洞）
 
-**现象**：`GetGostNodeAuthList`（`internal/handler/service_socks5.go:281`）当前只过滤 `node_id/is_active/status`，**完全不看任何到期时间**，而 GOST 每 15 秒热加载一次名单（见 `doc/micro-service/design.md`）。结果是 `format=socks` 的订阅到期后账密永远有效。
+**现象**：`GetGostNodeAuthList`（`internal/handler/service_socks5.go:281`）当前只过滤 `node_id/is_active/status`，**完全不看任何到期时间**，而 GOST 每 15 秒热加载一次名单（见 `docs/micro-service/design.md`）。结果是 `format=socks` 的订阅到期后账密永远有效。
 
 **修复**：auth-list 查询 join `access_grants` + `credentials`，套用与 `/sub` 完全相同的判定（`grant.IsUsable(now) && credential.IsUsable(now)`；可参考 `internal/db/domain.go:251` 的 `GetActiveDomainEndpoints`）：
 

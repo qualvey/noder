@@ -408,7 +408,7 @@ ON CONFLICT (key) DO NOTHING;
 endpoint.node_id = ? AND endpoint.is_active = true AND endpoint.status = 'active'
 ```
 
-**完全不看 `expires_at`**，也不 join `access_grants` / `credentials`。而 GOST 每 15 秒热加载一次名单（`doc/micro-service/design.md`）。结果是：`format=socks` 的订阅到期后，账密永远有效。
+**完全不看 `expires_at`**，也不 join `access_grants` / `credentials`。而 GOST 每 15 秒热加载一次名单（`docs/micro-service/design.md`）。结果是：`format=socks` 的订阅到期后，账密永远有效。
 
 **修复**：auth-list 查询 join `access_grants` + `credentials`，套用与 `/sub` 相同的判定（`grant.IsUsable && credential.IsUsable`）。修好后，“到期 + GOST 15 秒重载 = 15 秒内断服”。
 

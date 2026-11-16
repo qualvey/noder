@@ -75,7 +75,7 @@ anytls 节点导出到 mihomo 时被守卫明确拒绝（保留未来扩展，mi
 **Mihomo 导出**：`app/exporters/mihomo.py` 生成 mihomo 风格 proxies 条目（YAML），
 覆盖主要使用组合 vless+reality+vision 与 tuic v5：
 - 用户侧端点 `GET /mihomo?token=...` 返回 proxies 列表 YAML（text/yaml）
-- 模板占位符 `{{mihomo_proxies_yaml}}`（见 doc/file_distribution.md）
+- 模板占位符 `{{mihomo_proxies_yaml}}`（见 docs/file_distribution.md）
 
 ## 4. 接入新核心的流程（未来）
 

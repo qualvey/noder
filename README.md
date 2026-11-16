@@ -66,8 +66,8 @@ SQLite。
 - `web/`：Vue 3 + TypeScript 管理面板源码
 - `templates/`、`static/`：默认配置模板与前端构建产物
 
-完整 API 字段、鉴权方式、请求示例和状态码见 **[API 参考](doc/api.md)**。
-测试规范、策略与测试用例见 **[测试工程文档中心](doc/testing/README.md)**。
+完整 API 字段、鉴权方式、请求示例和状态码见 **[API 参考](docs/api.md)**。
+测试规范、策略与测试用例见 **[测试工程文档中心](docs/testing/README.md)**。
 
 ---
 
@@ -151,7 +151,7 @@ make deb-all        # 构建 amd64 与 arm64 架构 deb 包
 
 ## 📡 核心 API 端点说明
 
-> 本节为快速索引；完整接口以 **[doc/api.md](doc/api.md)** 为准。
+> 本节为快速索引；完整接口以 **[docs/api.md](docs/api.md)** 为准。
 
 ### 1. 客户端订阅导出 API (公开 / 用户侧)
 - **请求方法**：`GET /sub?token={USER_TOKEN}`

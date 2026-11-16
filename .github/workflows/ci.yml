@@ -52,9 +52,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: check spec files are in sync
         run: |
-          test -f doc/spec/mall-attach-noder.md
-          test -f doc/spec/noder-alignment.md
-          test -f doc/spec/domain_model_er.md
+          test -f docs/spec/mall-attach-noder.md
+          test -f docs/spec/noder-alignment.md
+          test -f docs/spec/domain_model_er.md
           echo "spec exists"
 
   # 4. 构建产物验证（保留原有 build-deb 逻辑的前置门禁）

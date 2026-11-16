@@ -1,6 +1,6 @@
 # Noder 商城微服务与配置生成引擎设计方案
 
-> 领域模型规范以 `doc/micro-service/refactor/` 和 `doc/domain_model_er.md` 为准。本文件中的旧 `Node` / `Endpoint` 表结构描述仅作为迁移前业务背景，不作为新模型定义。
+> 领域模型规范以 `docs/micro-service/refactor/` 和 `docs/domain_model_er.md` 为准。本文件中的旧 `Node` / `Endpoint` 表结构描述仅作为迁移前业务背景，不作为新模型定义。
 
 ## 部署标准
 

@@ -390,7 +390,7 @@ X-Service-Token: <service_token>
 | `POST` | `/api/service/subscriptions/{id}/quota` | `{"delta_bytes":..,"order_item_id":".."} ` 加油包，`delta>0` |
 | `POST` | `/api/service/subscriptions/{id}/revoke` | `{"reason":"refund"} ` 撤销，幂等 200 |
 
-详见 `doc/attach-mall.md#7` 与 `doc/spec/mall-attach-noder.md#7`。
+详见 `docs/attach-mall.md#7` 与 `docs/spec/mall-attach-noder.md#7`。
 
 ## 6. Agent 控制面 API（xray-agent）
 

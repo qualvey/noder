@@ -65,7 +65,7 @@ flowchart TD
 
 ### 2.4 端到端验收测试 (E2E Tests)
 - **范围**：跨进程与跨网络真实交互。
-- **参考规范**：`doc/e2e/xray-agent-integration.md` 与 `doc/e2e/README.md`。
+- **参考规范**：`docs/e2e/xray-agent-integration.md` 与 `docs/e2e/README.md`。
 - **重点场景**：
   - Noder Server 与真实 Xray Agent 启动联调；
   - 动态下发凭证后，真实代理客户端成功发起 TLS / Reality 握手并代理请求；

@@ -2,7 +2,7 @@
 
 > **文档版本**：v1.0  
 > **适用范围**：Noder (`/home/ryu/code/noder`) 控制面与 Xray Agent (`/home/ryu/code/xray-agent`) 数据面的全流程集成验证与联调验收。  
-> **生效契约**：基于 `doc/spec/noder-alignment.md` 与 `doc/spec/observability.md`。
+> **生效契约**：基于 `docs/spec/noder-alignment.md` 与 `docs/spec/observability.md`。
 
 ---
 
