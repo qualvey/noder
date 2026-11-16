@@ -441,7 +441,7 @@ export default {
     item4bDesc: 'Old token is immediately invalidated upon reset (Header: X-Admin-Token)',
     item5Title: '5. Admin API (Header: X-Admin-Token)',
     swaggerDoc: 'Swagger Docs',
-    vlessNote: 'Fully compliant with VLESS REALITY spec in doc/vless.md: supports <code>public_key</code>, <code>short_id</code>, <code>flow: xtls-rprx-vision</code> and <code>uTLS: chrome</code> fingerprints!',
+    vlessNote: 'Fully compliant with VLESS REALITY spec in docs/vless.md: supports <code>public_key</code>, <code>short_id</code>, <code>flow: xtls-rprx-vision</code> and <code>uTLS: chrome</code> fingerprints!',
   },
   releaseLogs: {
     title: 'Release Logs',

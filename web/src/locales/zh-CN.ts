@@ -444,7 +444,7 @@ export default {
     item4bDesc: '重置后旧 token 立即失效（Header: X-Admin-Token）',
     item5Title: '5. 管理员 API (Header: X-Admin-Token)',
     swaggerDoc: 'Swagger 文档',
-    vlessNote: '系统已全面兼容 doc/vless.md 定义的 VLESS REALITY 规格：支持 <code>public_key</code>、<code>short_id</code>、<code>flow: xtls-rprx-vision</code> 与 <code>uTLS: chrome</code> 指纹！',
+    vlessNote: '系统已全面兼容 docs/vless.md 定义的 VLESS REALITY 规格：支持 <code>public_key</code>、<code>short_id</code>、<code>flow: xtls-rprx-vision</code> 与 <code>uTLS: chrome</code> 指纹！',
   },
   releaseLogs: {
     title: '放行日志',
