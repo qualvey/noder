@@ -5,10 +5,11 @@ import { inject, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { TemplateBranch, Template } from '../types'
-import { ToastType } from '@/App.vue'
+import { ToastKey, PopoverKey } from '../injectionKeys'
 
 const { t } = useI18n()
-const toast = inject('toast') as (msg: string, type?: ToastType) => void
+const toast = inject(ToastKey)
+const popover = inject(PopoverKey)
 
 const props = defineProps<{
   open: boolean
@@ -47,7 +48,7 @@ async function fetchBranches() {
   try {
     branches.value = await api.templateBranches.list()
   } catch (e) {
-    toast((e as Error).message, 'error')
+    toast?.((e as Error).message, 'error')
   } finally {
     loading.value = false
   }
@@ -56,12 +57,7 @@ async function fetchBranches() {
 async function fetchTemplates() {
   templates.value = []
   try {
-    const res = await fetch('/api/templates', {
-      headers: { 'X-Admin-Token': sessionStorage.getItem('noder_admin_token') || '' },
-    })
-    if (res.ok) {
-      templates.value = await res.json()
-    }
+    templates.value = await api.templates.list()
   } catch {
     // ignore
   }
@@ -92,11 +88,11 @@ function closeEdit() {
 
 async function handleCreate() {
   if (!createForm.name.trim()) {
-    toast('分支名称不能为空', 'error')
+    toast?.(t('templateBranch.nameRequired'), 'error')
     return
   }
   if (!createForm.target) {
-    toast('目标类型不能为空', 'error')
+    toast?.(t('templateBranch.targetRequired'), 'error')
     return
   }
 
@@ -118,18 +114,18 @@ async function handleCreate() {
       content: content || (createForm.content_format === 'json' ? '{}' : '# empty'),
       remark: createForm.remark || undefined,
     })
-    toast('分支创建成功', 'info')
+    toast?.(t('templateBranch.created'), 'info')
     closeEdit()
     await fetchBranches()
   } catch (e) {
-    toast((e as Error).message, 'error')
+    toast?.((e as Error).message, 'error')
   }
 }
 
 async function handleUpdate() {
   if (!selectedBranch.value) return
   if (!editForm.name.trim()) {
-    toast('分支名称不能为空', 'error')
+    toast?.(t('templateBranch.nameRequired'), 'error')
     return
   }
 
@@ -141,50 +137,58 @@ async function handleUpdate() {
       remark: editForm.remark || undefined,
       is_active: editForm.is_active,
     })
-    toast('分支更新成功', 'info')
+    toast?.(t('templateBranch.updated'), 'info')
     closeEdit()
     await fetchBranches()
   } catch (e) {
-    toast((e as Error).message, 'error')
+    toast?.((e as Error).message, 'error')
   }
 }
 
-async function handleDelete(branch: TemplateBranch) {
-  if (!confirm(`确定删除分支 "${branch.name}" 吗？`)) return
-  try {
-    await api.templateBranches.remove(branch.id)
-    toast('分支已删除', 'info')
-    if (selectedBranch.value?.id === branch.id) {
-      closeEdit()
+async function handleDelete(branch: TemplateBranch, el: Element) {
+  popover?.show(el, t('templateBranch.deleteConfirm', { name: branch.name }), async () => {
+    try {
+      await api.templateBranches.remove(branch.id)
+      toast?.(t('templateBranch.deleted'), 'info')
+      if (selectedBranch.value?.id === branch.id) {
+        closeEdit()
+      }
+      await fetchBranches()
+    } catch (e) {
+      toast?.((e as Error).message, 'error')
     }
-    await fetchBranches()
-  } catch (e) {
-    toast((e as Error).message, 'error')
-  }
+  })
 }
 
 async function handleCreateFromTemplate(templateId: string) {
   if (!templateId) return
-  const tpl = templates.value.find(t => String(t.id) === String(templateId))
+  const tpl = templates.value.find((item) => String(item.id) === String(templateId))
   if (!tpl) return
 
-  const name = `${(tpl as any).name || '模板'} 的副本`
-  const content = (tpl as any).content || ''
+  const name = `${tpl.name || t('templateBranch.defaultTemplateName')} ${t('templateBranch.copySuffix')}`
+  const content = tpl.content || ''
 
   try {
     await api.templateBranches.create({
       name,
       base_template_id: Number(templateId),
-      target: (tpl as any).target || 'sing-box',
-      content_format: (tpl as any).content_format || 'json',
+      target: tpl.target || 'sing-box',
+      content_format: tpl.content_format || 'json',
       content,
-      remark: '从模板创建',
+      remark: t('templateBranch.createdFromTemplate'),
     })
-    toast('分支创建成功', 'info')
+    toast?.(t('templateBranch.created'), 'info')
     await fetchBranches()
   } catch (e) {
-    toast((e as Error).message, 'error')
+    toast?.((e as Error).message, 'error')
   }
+}
+
+function handleQuickCreateChange(e: Event) {
+  const select = e.target as HTMLSelectElement
+  const v = select.value
+  if (v) handleCreateFromTemplate(v)
+  select.value = ''
 }
 
 function onOverlayMouseDown(e: MouseEvent) {
@@ -211,23 +215,23 @@ watch(() => props.open, (val) => {
 
 <template>
   <div v-if="open" class="modal-overlay active" @mousedown="onOverlayMouseDown">
-    <div class="modal" style="max-width: 900px; width: 90vw;">
+    <div class="modal modal-wide">
       <div class="modal-header">
-        <div class="modal-title">{{ t('templateBranch.title') || '模板分支管理' }}</div>
+        <div class="modal-title">{{ t('templateBranch.title') }}</div>
         <button class="modal-close" @click="$emit('close')">&times;</button>
       </div>
 
       <div v-if="isEditing" class="modal-body">
         <!-- 创建新分支 -->
         <template v-if="!selectedBranch">
-          <h3 style="margin: 0 0 16px; font-size: 1rem;">{{ t('templateBranch.create') || '创建新分支' }}</h3>
+          <h3 class="branch-section-title">{{ t('templateBranch.create') }}</h3>
           <div class="form-grid">
             <div class="form-group">
-              <label>{{ t('templateBranch.name') || '分支名称' }}</label>
-              <input v-model="createForm.name" type="text" :placeholder="t('templateBranch.namePlaceholder') || '输入分支名称'" />
+              <label>{{ t('templateBranch.name') }}</label>
+              <input v-model="createForm.name" type="text" :placeholder="t('templateBranch.namePlaceholder')" />
             </div>
             <div class="form-group">
-              <label>{{ t('templateBranch.target') || '目标类型' }}</label>
+              <label>{{ t('templateBranch.target') }}</label>
               <select v-model="createForm.target">
                 <option value="sing-box">Sing-Box</option>
                 <option value="mihomo">Mihomo</option>
@@ -235,131 +239,130 @@ watch(() => props.open, (val) => {
               </select>
             </div>
             <div class="form-group">
-              <label>{{ t('templateBranch.contentFormat') || '内容格式' }}</label>
+              <label>{{ t('templateBranch.contentFormat') }}</label>
               <select v-model="createForm.content_format">
                 <option value="json">JSON</option>
                 <option value="yaml">YAML</option>
               </select>
             </div>
             <div class="form-group">
-              <label>{{ t('templateBranch.baseTemplate') || '基础模板（可选）' }}</label>
+              <label>{{ t('templateBranch.baseTemplate') }}</label>
               <select v-model="createForm.base_template_id">
-                <option value="">-- 不使用模板 --</option>
-                <optgroup :label="t('templateBranch.fromTemplate') || '从模板创建'">
+                <option value="">-- {{ t('templateBranch.noTemplate') }} --</option>
+                <optgroup :label="t('templateBranch.fromTemplate')">
                   <option v-for="tpl in templates" :key="tpl.id" :value="String(tpl.id)">
                     {{ tpl.name }} ({{ tpl.target }})
                   </option>
                 </optgroup>
               </select>
             </div>
-            <div class="form-group" style="grid-column: 1 / -1;">
-              <label>{{ t('templateBranch.remark') || '备注' }}</label>
-              <input v-model="createForm.remark" type="text" :placeholder="t('templateBranch.remarkPlaceholder') || '可选备注'" />
+            <div class="form-group form-span-full">
+              <label>{{ t('templateBranch.remark') }}</label>
+              <input v-model="createForm.remark" type="text" :placeholder="t('templateBranch.remarkPlaceholder')" />
             </div>
           </div>
-          <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">
-            <button class="btn btn-secondary" @click="closeEdit">{{ t('common.cancel') || '取消' }}</button>
-            <button class="btn btn-primary" @click="handleCreate">{{ t('common.create') || '创建' }}</button>
+          <div class="branch-form-actions">
+            <button class="btn btn-secondary" @click="closeEdit">{{ t('common.cancel') }}</button>
+            <button class="btn btn-primary" @click="handleCreate">{{ t('common.create') }}</button>
           </div>
         </template>
 
         <!-- 编辑分支 -->
         <template v-else>
-          <h3 style="margin: 0 0 16px; font-size: 1rem;">{{ t('templateBranch.edit') || '编辑分支' }}</h3>
+          <h3 class="branch-section-title">{{ t('templateBranch.edit') }}</h3>
           <div class="form-grid">
             <div class="form-group">
-              <label>{{ t('templateBranch.name') || '分支名称' }}</label>
+              <label>{{ t('templateBranch.name') }}</label>
               <input v-model="editForm.name" type="text" />
             </div>
             <div class="form-group">
-              <label>{{ t('templateBranch.contentFormat') || '内容格式' }}</label>
+              <label>{{ t('templateBranch.contentFormat') }}</label>
               <select v-model="editForm.content_format">
                 <option value="json">JSON</option>
                 <option value="yaml">YAML</option>
               </select>
             </div>
-            <div class="form-group" style="grid-column: 1 / -1;">
-              <label>{{ t('templateBranch.remark') || '备注' }}</label>
+            <div class="form-group form-span-full">
+              <label>{{ t('templateBranch.remark') }}</label>
               <input v-model="editForm.remark" type="text" />
             </div>
-            <div class="form-group" style="grid-column: 1 / -1; display: flex; align-items: center; gap: 8px;">
+            <div class="form-group form-span-full checkbox-row">
               <input type="checkbox" id="branch-active" v-model="editForm.is_active" />
-              <label for="branch-active" style="margin: 0;">{{ t('common.enabled') || '启用' }}</label>
+              <label for="branch-active" class="checkbox-label">{{ t('common.enabled') }}</label>
             </div>
-            <div class="form-group" style="grid-column: 1 / -1;">
-              <label>{{ t('templateBranch.content') || '模板内容' }}</label>
+            <div class="form-group form-span-full">
+              <label>{{ t('templateBranch.content') }}</label>
               <textarea
                 v-model="editForm.content"
                 class="code-textarea"
-                :placeholder="t('templateBranch.contentPlaceholder') || '输入模板内容，使用 {{uuid}} {{password}} {{token}} 等占位符'"
-                style="min-height: 300px; font-family: var(--font-mono); font-size: 0.85rem;"
+                :placeholder="t('templateBranch.contentPlaceholder')"
               ></textarea>
             </div>
           </div>
-          <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">
-            <button class="btn btn-secondary" @click="closeEdit">{{ t('common.cancel') || '取消' }}</button>
-            <button class="btn btn-primary" @click="handleUpdate">{{ t('common.save') || '保存' }}</button>
+          <div class="branch-form-actions">
+            <button class="btn btn-secondary" @click="closeEdit">{{ t('common.cancel') }}</button>
+            <button class="btn btn-primary" @click="handleUpdate">{{ t('common.save') }}</button>
           </div>
         </template>
       </div>
 
       <!-- 分支列表 -->
       <div v-else class="modal-body">
-        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+        <div class="branch-toolbar">
           <button class="btn btn-primary" @click="openCreate">
-            + {{ t('templateBranch.create') || '创建分支' }}
+            + {{ t('templateBranch.create') }}
           </button>
           <select
-            style="padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-glass); background: var(--bg-elevated); color: var(--text-main);"
-            @change="(e) => { const v = (e.target as HTMLSelectElement).value; if (v) handleCreateFromTemplate(v); (e.target as HTMLSelectElement).value = ''; }"
+            class="branch-quick-create"
+            @change="handleQuickCreateChange"
           >
-            <option value="">-- {{ t('templateBranch.quickCreate') || '快速从模板创建' }} --</option>
+            <option value="">-- {{ t('templateBranch.quickCreate') }} --</option>
             <option v-for="tpl in templates" :key="tpl.id" :value="String(tpl.id)">
               {{ tpl.name }}
             </option>
           </select>
         </div>
 
-        <div v-if="loading" style="text-align: center; padding: 40px; color: var(--text-muted);">
-          {{ t('common.loading') || '加载中...' }}
+        <div v-if="loading" class="branch-state-message">
+          {{ t('common.loading') }}
         </div>
 
-        <div v-else-if="!branches.length" style="text-align: center; padding: 40px; color: var(--text-muted);">
-          {{ t('templateBranch.empty') || '暂无模板分支' }}
+        <div v-else-if="!branches.length" class="branch-state-message">
+          {{ t('templateBranch.empty') }}
         </div>
 
         <table v-else class="data-table">
           <thead>
             <tr>
-              <th>{{ t('templateBranch.name') || '名称' }}</th>
-              <th>{{ t('templateBranch.target') || '目标' }}</th>
-              <th>{{ t('templateBranch.format') || '格式' }}</th>
-              <th>{{ t('common.status') || '状态' }}</th>
-              <th>{{ t('common.actions') || '操作' }}</th>
+              <th>{{ t('templateBranch.name') }}</th>
+              <th>{{ t('templateBranch.target') }}</th>
+              <th>{{ t('templateBranch.format') }}</th>
+              <th>{{ t('common.status') }}</th>
+              <th>{{ t('common.actions') }}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="branch in branches" :key="branch.id">
               <td>
-                <div style="font-weight: 600;">{{ branch.name }}</div>
-                <div v-if="branch.remark" style="font-size: 0.75rem; color: var(--text-muted);">{{ branch.remark }}</div>
+                <div class="branch-name">{{ branch.name }}</div>
+                <div v-if="branch.remark" class="branch-remark">{{ branch.remark }}</div>
               </td>
               <td>
                 <span class="badge-protocol">{{ branch.target.toUpperCase() }}</span>
               </td>
               <td>
-                <span style="font-family: var(--font-mono); font-size: 0.8rem;">{{ branch.content_format.toUpperCase() }}</span>
+                <span class="mono-text">{{ branch.content_format.toUpperCase() }}</span>
               </td>
               <td>
                 <span class="status-badge" :class="branch.is_active ? 'active' : 'inactive'">
                   <span class="status-dot"></span>
-                  {{ branch.is_active ? (t('common.enabled') || '启用') : (t('common.disabled') || '停用') }}
+                  {{ branch.is_active ? t('common.enabled') : t('common.disabled') }}
                 </span>
               </td>
               <td>
-                <div style="display: flex; gap: 8px;">
-                  <button class="btn btn-secondary btn-sm" @click="openEdit(branch)">{{ t('common.edit') || '编辑' }}</button>
-                  <button class="btn btn-danger btn-sm" @click="handleDelete(branch)">{{ t('common.delete') || '删除' }}</button>
+                <div class="row-actions">
+                  <button class="btn btn-secondary btn-sm" @click="openEdit(branch)">{{ t('common.edit') }}</button>
+                  <button class="btn btn-danger btn-sm" @click="handleDelete(branch, $event.currentTarget as Element)">{{ t('common.delete') }}</button>
                 </div>
               </td>
             </tr>
@@ -371,10 +374,67 @@ watch(() => props.open, (val) => {
 </template>
 
 <style scoped>
+.modal-wide {
+  max-width: 900px;
+  width: 90vw;
+}
+.branch-section-title {
+  margin: 0 0 16px;
+  font-size: 1rem;
+}
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 16px;
+}
+.form-span-full {
+  grid-column: 1 / -1;
+}
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.checkbox-label {
+  margin: 0;
+}
+.branch-form-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+.branch-toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.branch-quick-create {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-elevated);
+  color: var(--text-main);
+}
+.branch-state-message {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-muted);
+}
+.branch-name {
+  font-weight: 600;
+}
+.branch-remark {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.mono-text {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+.row-actions {
+  display: flex;
+  gap: 8px;
 }
 .form-group {
   display: flex;

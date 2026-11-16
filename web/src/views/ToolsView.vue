@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { RouterLink } from 'vue-router'
+
 const tools = [
   { key: "watermark", to: "/tools/watermark", icon: "✦", label: "图片水印" },
   { key: "transfer", to: "/tools/transfer", icon: "⇄", label: "节点转换" },

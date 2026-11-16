@@ -42,81 +42,77 @@
 </template>
 
 <script setup lang="ts">
-// The original scanner is intentionally kept as a small browser-only utility.
-// @ts-nocheck
 import { ref, onMounted, onUnmounted, inject } from 'vue'
 import QrcodeVue from 'qrcode.vue'
 import jsQR from 'jsqr'
-const toast = inject('toast')
-const ElMessage = {
-  success: (message) => toast?.(message, 'success'),
-  error: (message) => toast?.(message, 'error'),
-}
+import { ToastKey, type ToastType } from '../injectionKeys'
 
-const props = defineProps({
-  size: { type: Number, default: 220 },
-})
+const toast = inject<ToastType extends never ? never : (msg: string, type?: ToastType) => void>(ToastKey)
 
-const mode = ref('generate') // 'generate' | 'scan'
+withDefaults(
+  defineProps<{
+    size?: number
+  }>(),
+  { size: 220 },
+)
 
-// --- 二维码生成数据 ---
+const mode = ref<'generate' | 'scan'>('generate')
+
 const inputText = ref('')
 const qrText = ref('')
 
-const handleGenerate = () => {
+function handleGenerate() {
   if (!inputText.value.trim()) return
   qrText.value = inputText.value
 }
 
-const handleClear = () => {
+function handleClear() {
   inputText.value = ''
   qrText.value = ''
 }
 
-// --- 二维码扫描数据 ---
-const fileInput = ref(null)
+const fileInput = ref<HTMLInputElement | null>(null)
 const isDragging = ref(false)
 const scanImageSrc = ref('')
 const scanResult = ref('')
 const scanError = ref('')
 
-const handleModeChange = (targetMode) => {
+function handleModeChange(targetMode: 'generate' | 'scan') {
   mode.value = targetMode
 }
 
-const triggerFileInput = () => {
-  if (fileInput.value) {
-    fileInput.value.click()
-  }
+function triggerFileInput() {
+  fileInput.value?.click()
 }
 
-const handleFileChange = (e) => {
-  const files = e.target.files
+function handleFileChange(e: Event) {
+  const target = e.target as HTMLInputElement
+  const files = target.files
   if (files && files.length > 0) {
     processFile(files[0])
   }
 }
 
-const handleDragOver = (e) => {
+function handleDragOver(e: DragEvent) {
   e.preventDefault()
   isDragging.value = true
 }
 
-const handleDragLeave = () => {
+function handleDragLeave(e: DragEvent) {
+  e.preventDefault()
   isDragging.value = false
 }
 
-const handleDrop = (e) => {
+function handleDrop(e: DragEvent) {
   e.preventDefault()
   isDragging.value = false
-  const files = e.dataTransfer.files
+  const files = e.dataTransfer?.files
   if (files && files.length > 0) {
     processFile(files[0])
   }
 }
 
-// 处理全局粘贴事件
-const handleGlobalPaste = (e) => {
+function handleGlobalPaste(e: ClipboardEvent) {
   if (mode.value !== 'scan') return
   const items = e.clipboardData?.items
   if (!items) return
@@ -131,9 +127,9 @@ const handleGlobalPaste = (e) => {
   }
 }
 
-const processFile = (file) => {
+function processFile(file: File) {
   if (!file.type.startsWith('image/')) {
-    ElMessage.error('请上传有效的图片文件')
+    toast?.(file ? '请上传有效的图片文件' : '', 'error')
     return
   }
 
@@ -142,7 +138,7 @@ const processFile = (file) => {
 
   const reader = new FileReader()
   reader.onload = (e) => {
-    const dataUrl = e.target.result
+    const dataUrl = e.target?.result as string
     scanImageSrc.value = dataUrl
 
     const img = new Image()
@@ -163,12 +159,12 @@ const processFile = (file) => {
 
         if (code) {
           scanResult.value = code.data
-          ElMessage.success('解析成功！')
+          toast?.(code ? '解析成功！' : '', 'success')
         } else {
           scanError.value = '未在图片中检测到有效的二维码，请确保二维码清晰且无遮挡'
         }
       } catch (err) {
-        scanError.value = `解析错误: ${err.message}`
+        scanError.value = `解析错误: ${(err as Error).message}`
       }
     }
     img.onerror = () => {
@@ -179,7 +175,7 @@ const processFile = (file) => {
   reader.readAsDataURL(file)
 }
 
-const handleClearScan = () => {
+function handleClearScan() {
   scanImageSrc.value = ''
   scanResult.value = ''
   scanError.value = ''
@@ -188,20 +184,19 @@ const handleClearScan = () => {
   }
 }
 
-const copyToClipboard = (text) => {
+function copyToClipboard(text: string) {
   if (!text) return
   navigator.clipboard.writeText(text).then(
-    () => ElMessage.success('已复制到剪贴板'),
-    () => ElMessage.error('复制失败，请手动选择复制'),
+    () => toast?.(text ? '已复制到剪贴板' : '', 'success'),
+    () => toast?.('复制失败，请手动选择复制', 'error'),
   )
 }
 
-const isLink = (text) => {
+function isLink(text: string): boolean {
   if (!text) return false
   return text.startsWith('http://') || text.startsWith('https://')
 }
 
-// 绑定与解绑全局粘贴监听
 onMounted(() => {
   window.addEventListener('paste', handleGlobalPaste)
 })
@@ -241,7 +236,12 @@ onUnmounted(() => {
 .drop-zone { position: relative; display: grid; min-height: 260px; place-items: center; align-content: center; gap: 7px; overflow: hidden; border: 1px dashed var(--border-glass); border-radius: 11px; background: var(--bg-input); text-align: center; cursor: pointer; }
 .drop-zone.dragging { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--bg-input)); }.drop-zone.filled { display: flex; }.drop-zone img { max-width: 100%; max-height: 300px; object-fit: contain; }.drop-overlay { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(2,8,23,.58); color: white; opacity: 0; transition: .2s; }.drop-zone:hover .drop-overlay { opacity: 1; }
 .upload-icon { color: var(--primary); font-size: 2rem; }.drop-zone strong { font-size: .8rem; }.drop-zone p { margin: 0; color: var(--text-muted); font-size: .7rem; }
-.result-panel { display: grid; gap: 12px; }.result-heading { display: flex; justify-content: space-between; color: var(--accent-emerald); font-size: .8rem; }.result-heading.error { color: var(--accent-rose); }.result-heading button, .result-panel a { border: 0; background: none; color: var(--primary); cursor: pointer; font: inherit; font-size: .7rem; font-weight: 700; }.error-text { margin: 0; color: var(--accent-rose); font-size: .74rem; line-height: 1.6; }.full-button { width: 100%; }
+.result-panel { display: grid; gap: 12px; }
+.result-heading { display: flex; justify-content: space-between; color: var(--accent-emerald); font-size: .8rem; }
+.result-heading.error { color: var(--accent-rose); }
+.result-heading button, .result-panel a { border: 0; background: none; color: var(--primary); cursor: pointer; font: inherit; font-size: .7rem; font-weight: 700; }
+.error-text { margin: 0; color: var(--accent-rose); font-size: .74rem; line-height: 1.6; }
+.full-button { width: 100%; }
 @media (max-width: 720px) { .qr-layout, .qr-scan-layout { grid-template-columns: 1fr; } .qr-panel { padding: 15px; } .qr-preview-panel { min-height: 240px; } }
-@media (max-width: 420px) { .field-footer { align-items: stretch; flex-direction: column; }.field-footer > div { justify-content: stretch; }.field-footer .button { flex: 1; } }
+@media (max-width: 420px) { .field-footer { align-items: stretch; flex-direction: column; } .field-footer > div { justify-content: stretch; } .field-footer .button { flex: 1; } }
 </style>

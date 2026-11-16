@@ -1,26 +1,12 @@
 <script setup lang="ts">
-import { provide, ref } from 'vue'
+import { provide } from 'vue'
 import ToolsView from './views/ToolsView.vue'
+import { ToastKey } from './injectionKeys'
+import { useToast } from './composables/useToast'
 
-type ToastType = 'info' | 'error' | 'success' | 'warning'
-interface ToastItem {
-  id: number
-  message: string
-  type: ToastType
-}
+const { toasts, showToast } = useToast()
 
-const toasts = ref<ToastItem[]>([])
-let nextToastId = 0
-
-function showToast(message: string, type: ToastType = 'info') {
-  const id = ++nextToastId
-  toasts.value.push({ id, message, type })
-  window.setTimeout(() => {
-    toasts.value = toasts.value.filter((toast) => toast.id !== id)
-  }, 3000)
-}
-
-provide('toast', showToast)
+provide(ToastKey, showToast)
 </script>
 
 <template>

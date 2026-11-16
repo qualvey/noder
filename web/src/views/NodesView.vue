@@ -6,11 +6,12 @@ import { api } from '../api'
 import type { Node } from '../types'
 import NodeFormModal from '../components/NodeFormModal.vue'
 import { useFuzzySearch } from '../composables'
+import { ToastKey, PopoverKey, MetricsKey } from '../injectionKeys'
 
 const { t } = useI18n()
-const toast = inject('toast') as (msg: string, type?: 'info' | 'error') => void
-const popover = inject('popover') as { show: (el: Element, title: string, cb: () => void) => void }
-const updateMetrics = inject('metrics') as (nodes: number, users: number) => void
+const toast = inject(ToastKey)
+const popover = inject(PopoverKey)
+const updateMetrics = inject(MetricsKey)
 
 const nodes = ref<Node[]>([])
 const selected = ref<Set<number>>(new Set())
@@ -43,9 +44,9 @@ async function fetchNodes(silent = false) {
   }
   try {
     nodes.value = await api.nodes.list()
-    updateMetrics(nodes.value.length, nodes.value.length) // users 由 UsersView 覆盖
+    updateMetrics?.(nodes.value.length, nodes.value.length) // users 由 UsersView 覆盖
   } catch (e) {
-    toast((e as Error).message, 'error')
+    toast?.((e as Error).message, 'error')
   } finally {
     loading.value = false
   }
@@ -70,18 +71,18 @@ async function removeNode(id: number) {
     s.delete(id)
     selected.value = s
   }
-  updateMetrics(nodes.value.length, nodes.value.length)
+  updateMetrics?.(nodes.value.length, nodes.value.length)
 
   try {
     await api.nodes.remove(id)
-    toast(t('nodes.deleted'))
+    toast?.(t('nodes.deleted'))
     // 静默对齐后端最新数据，不触发全屏加载与重绘跳动
     await fetchNodes(true)
   } catch (e) {
     // 异常时优雅回滚
     nodes.value = prevNodes
-    updateMetrics(prevNodes.length, prevNodes.length)
-    toast((e as Error).message, 'error')
+    updateMetrics?.(prevNodes.length, prevNodes.length)
+    toast?.((e as Error).message, 'error')
   }
 }
 
@@ -109,14 +110,14 @@ function toggleSelectAll() {
 function bulkDelete(e: MouseEvent) {
   const count = selected.value.size
   if (!count) return
-  popover.show(e.currentTarget as Element, t('nodes.bulkDeleteConfirm', { count }), async () => {
+  popover?.show(e.currentTarget as Element, t('nodes.bulkDeleteConfirm', { count }), async () => {
     const idsToDelete = Array.from(selected.value)
     const prevNodes = [...nodes.value]
 
     // 乐观更新：批量从视图移除
     nodes.value = nodes.value.filter((n) => !selected.value.has(n.id))
     selected.value = new Set()
-    updateMetrics(nodes.value.length, nodes.value.length)
+    updateMetrics?.(nodes.value.length, nodes.value.length)
 
     try {
       for (const id of idsToDelete) {
@@ -126,11 +127,11 @@ function bulkDelete(e: MouseEvent) {
           /* 继续删下一个 */
         }
       }
-      toast(t('nodes.bulkDeleteSuccess', { count }))
+      toast?.(t('nodes.bulkDeleteSuccess', { count }))
       await fetchNodes(true)
     } catch {
       nodes.value = prevNodes
-      updateMetrics(prevNodes.length, prevNodes.length)
+      updateMetrics?.(prevNodes.length, prevNodes.length)
     }
   })
 }
@@ -152,7 +153,7 @@ onMounted(() => fetchNodes())
 </script>
 
 <template>
-  <section class="tab-content" style="display: block">
+  <section class="tab-content nodes-tab">
     <div class="section-header">
       <div class="section-title">{{ t('nodes.headerTitle') }}</div>
       <div class="section-actions">
@@ -165,7 +166,7 @@ onMounted(() => fetchNodes())
         />
 
         <label
-          style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-muted); cursor: pointer; user-select: none">
+          class="select-all-label">
           <input type="checkbox" :checked="isAllFilteredSelected"
             @change="toggleSelectAll" /> {{ t('nodes.selectAll') }}
         </label>
@@ -173,7 +174,7 @@ onMounted(() => fetchNodes())
           🗑️ {{ t('nodes.bulkDelete', { count: selected.size }) }}
         </button>
         <button class="btn btn-primary" @click="openCreate">
-          <span style="font-size: 1.1rem; line-height: 1">+</span> {{ t('nodes.addNode') }}
+          <span class="plus-mark">+</span> {{ t('nodes.addNode') }}
         </button>
       </div>
     </div>
@@ -187,13 +188,13 @@ onMounted(() => fetchNodes())
       <span class="loading-text">{{ t('nodes.loadingData') }}</span>
     </div>
     <div v-else-if="!nodes.length"
-      style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-muted)">
+      class="empty-cell-full">
       {{ t('nodes.emptyText') }}
     </div>
     <div v-else-if="!filteredNodes.length"
-      style="text-align: center; padding: 48px 20px; color: var(--text-muted)">
-      <div style="font-size: 1.8rem; margin-bottom: 8px">🔍</div>
-      <div style="font-size: 0.95rem; margin-bottom: 12px">{{ t('nodes.noMatchingNodes') }}</div>
+      class="no-match-cell">
+      <div class="empty-icon">🔍</div>
+      <div class="empty-text">{{ t('nodes.noMatchingNodes') }}</div>
       <button class="btn btn-secondary btn-sm" @click="clearSearch">
         {{ t('common.clearFilter') }}
       </button>
@@ -207,14 +208,18 @@ onMounted(() => fetchNodes())
     >
       <div v-for="node in filteredNodes" :key="node.id" class="node-card" :class="{ selected: selected.has(node.id) }">
         <div class="node-card-header">
-          <div style="display: flex; align-items: center; gap: 8px">
+          <div class="node-card-title-row">
             <input type="checkbox" :checked="selected.has(node.id)" @change="toggleSelect(node.id)"
-              style="cursor: pointer" />
+              class="node-select-checkbox" />
             <div class="node-title">{{ node.tag || node.node_name }}</div>
           </div>
           <span class="badge" :class="`badge-${node.protocol}`">{{ node.protocol?.toUpperCase() || '' }}</span>
         </div>
         <div class="node-details">
+          <div v-if="node.is_agentless" class="detail-row">
+            <span>模式</span>
+            <span class="value agentless-value">🛠️ 免 Agent / 手工</span>
+          </div>
           <div class="detail-row">
             <span>{{ t('nodes.form.serverAddress') }}</span>
             <span class="value">{{ node.server_address }}:{{ node.server_port }}</span>
@@ -239,7 +244,7 @@ onMounted(() => fetchNodes())
         <div class="node-card-actions">
           <IconButton icon="edit" :tip="t('common.edit')" variant="secondary" @click="openEdit(node)" />
           <IconButton icon="delete" :tip="t('common.delete')" variant="danger"
-            @click="popover.show($event.currentTarget as Element, t('nodes.deleteNodeConfirm'), () => removeNode(node.id))" />
+            @click="popover?.show($event.currentTarget as Element, t('nodes.deleteNodeConfirm'), () => removeNode(node.id))" />
         </div>
       </div>
     </TransitionGroup>
@@ -249,6 +254,52 @@ onMounted(() => fetchNodes())
 </template>
 
 <style scoped>
+.nodes-tab {
+  display: block;
+}
+.select-all-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.plus-mark {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.empty-cell-full {
+  grid-column: 1/-1;
+  text-align: center;
+  padding: 40px;
+  color: var(--text-muted);
+}
+.no-match-cell {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--text-muted);
+}
+.empty-icon {
+  font-size: 1.8rem;
+  margin-bottom: 8px;
+}
+.empty-text {
+  font-size: 0.95rem;
+  margin-bottom: 12px;
+}
+.node-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.node-select-checkbox {
+  cursor: pointer;
+}
+.agentless-value {
+  color: var(--accent-amber, #f59e0b);
+}
 .section-actions {
   display: flex;
   gap: 12px;

@@ -13,12 +13,47 @@ export interface Node {
   transport_type?: 'direct' | 'http' | 'ws' | 'quic' | 'grpc' | 'httpupgrade' | 'xhttp' | string | null
   path?: string | null
   is_active: boolean
+  is_agentless?: boolean
   public_key?: string | null
   short_id?: string | null
   fingerprint?: string | null
   flow?: string | null
   congestion_control?: string | null
   remark?: string | null
+}
+
+export interface Agent {
+  id: string
+  name: string
+  status: 'online' | 'offline' | 'disabled'
+  last_heartbeat_at?: string | null
+  is_online: boolean
+  metadata: string
+  binding_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentBinding {
+  endpoint_id: number
+  endpoint_tag: string
+  endpoint_name: string
+  protocol: string
+  is_active: boolean
+  status: string
+  last_sync_at?: string | null
+  last_error?: string | null
+}
+
+export interface EndpointBinding {
+  agent_id: string
+  agent_name: string
+  agent_status: string
+  is_online: boolean
+  last_heartbeat_at?: string | null
+  status: string
+  last_sync_at?: string | null
+  last_error?: string | null
 }
 
 export interface Endpoint {
@@ -96,6 +131,43 @@ export interface DistFile {
   source_url?: string | null
   cached_at?: string | null
   created_at: string
+}
+
+export interface ServiceReleaseLog {
+  id: number
+  subscription_id: string
+  credential_id?: string | null
+  endpoint_id: number
+  external_ref?: string | null
+  caller_ip: string
+  request_id?: string | null
+  http_status: number
+  business_code: number
+  error_code?: string | null
+  message?: string | null
+  delivered: boolean
+  deployment_count: number
+  agent_online: boolean
+  latency_ms: number
+  created_at: string
+}
+
+export interface ServiceReleaseLogPage {
+  items: ServiceReleaseLog[]
+  total: number
+  page: number
+  limit: number
+  page_size: number
+  total_pages: number
+}
+
+export interface ServiceReleaseLogStats {
+  total: number
+  success: number
+  binding_missing: number
+  not_found: number
+  delivered: number
+  agent_offline: number
 }
 
 export interface SubNodeItem {

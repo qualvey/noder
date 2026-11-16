@@ -1,7 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import AgentsView from './views/AgentsView.vue'
 import FilesView from './views/FilesView.vue'
 import HelpView from './views/HelpView.vue'
 import NodesView from './views/NodesView.vue'
+import ReleaseLogsView from './views/ReleaseLogsView.vue'
 import ToolsView from './views/ToolsView.vue'
 import UsersView from './views/UsersView.vue'
 import WatermarkTool from './tools/WatermarkTool.vue'
@@ -22,6 +24,12 @@ export const router = createRouter({
       meta: { navKey: 'nodes' },
     },
     {
+      path: '/agents',
+      name: 'agents',
+      component: AgentsView,
+      meta: { navKey: 'agents' },
+    },
+    {
       path: '/users',
       name: 'users',
       component: UsersView,
@@ -32,6 +40,12 @@ export const router = createRouter({
       name: 'files',
       component: FilesView,
       meta: { navKey: 'files' },
+    },
+    {
+      path: '/release-logs',
+      name: 'release-logs',
+      component: ReleaseLogsView,
+      meta: { navKey: 'release-logs' },
     },
     {
       path: '/help',

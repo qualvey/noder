@@ -1,109 +1,98 @@
 <script setup lang="ts">
-// 全局 UI 状态：toast 提示 + 鼠标位置删除确认弹窗
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
-export type ToastType = 'info' | 'error' | 'success' | 'warning'
-export interface ToastItem {
-  id: number
-  message: string
-  type: ToastType
+import { computed, onBeforeUnmount, onMounted, provide, ref } from 'vue'
+import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+
+import { useToast } from './composables/useToast'
+import { usePopover } from './composables/usePopover'
+import { useTheme } from './composables/useTheme'
+import { useAuth } from './composables/useAuth'
+import { ToastKey, PopoverKey, MetricsKey } from './injectionKeys'
+import { setLocale, type LocaleType } from './i18n'
+import { mainNavItems, type TabKey } from './navigation'
+import { useStorage } from './composables/useStorage'
+import { useTabStickyNav } from './composables/useTabStickyNav'
+import Sidebar from './components/Sidebar.vue'
+import UnlockScreen from './components/UnlockScreen.vue'
+import MobileTopbar from './components/MobileTopbar.vue'
+import MetricsCards from './components/MetricsCards.vue'
+import TabNavigation from './components/TabNavigation.vue'
+import MobileTokenModal from './components/MobileTokenModal.vue'
+import ToastHost from './components/ToastHost.vue'
+import ConfirmPopover from './components/ConfirmPopover.vue'
+
+const { t, locale } = useI18n()
+const route = useRoute()
+
+const { getBoolean } = useStorage('local')
+
+// ============== 全局 UI 状态（通过 composable 管理） ==============
+const { toasts, showToast, removeToast } = useToast()
+const popoverState = usePopover()
+const popover = popoverState.popover
+const showPopover = popoverState.showPopover
+const hidePopover = popoverState.hidePopover
+const confirmPopover = popoverState.confirmPopover
+const { theme, toggleTheme } = useTheme()
+const { isUnlocked, adminToken, unlock, saveToken, revalidate } = useAuth()
+
+const updateMetrics = ref<(nodes: number, users: number) => void>()
+
+// 向子视图提供类型安全的依赖
+provide(ToastKey, showToast)
+provide(PopoverKey, { show: showPopover, hide: hidePopover })
+provide(MetricsKey, (n: number, u: number) => {
+  updateMetrics.value?.(n, u)
+})
+
+// ============== 页面状态 ==============
+const activeTab = computed<TabKey>(() => {
+  const navKey = route.meta.navKey
+  return typeof navKey === 'string' ? (navKey as TabKey) : 'nodes'
+})
+
+const adminTokenInput = ref(adminToken.value || 'admin-secret')
+const showToken = ref(false)
+const unlockError = ref(false)
+const metrics = ref({ nodes: 0, users: 0 })
+
+const tabs = computed(() =>
+  mainNavItems.map((item) => ({ key: item.key, to: item.to, label: t(item.labelKey) })),
+)
+const { stickyAnchorRef, tabNavPinned, isHeightExpanded } = useTabStickyNav(activeTab)
+
+const isSidebarCollapsed = ref(getBoolean('noder_sidebar_collapsed'))
+
+// ============== 语言切换 ==============
+function toggleLocale() {
+  const next: LocaleType = locale.value === 'zh' ? 'en' : 'zh'
+  setLocale(next)
 }
 
-export interface PopoverState {
-  title: string
-  x: number
-  y: number
-  onConfirm: () => void
+function handleSidebarSaveToken(val: string) {
+  adminTokenInput.value = val
+  saveToken()
 }
 
-const toasts = ref<ToastItem[]>([])
-const popover = ref<PopoverState | null>(null)
-const popoverElRef = ref<HTMLElement | null>(null)
-const confirmBtnRef = ref<HTMLElement | null>(null)
-let toastId = 0
-
-function showToast(message: string, type: ToastType = 'info') {
-  const id = ++toastId
-  toasts.value.push({ id, message, type })
-  setTimeout(() => {
-    toasts.value = toasts.value.filter((t) => t.id !== id)
-  }, 3000)
+function handleUnlockSubmit() {
+  unlock(adminTokenInput.value)
 }
 
-function removeToast(id: number) {
-  toasts.value = toasts.value.filter((t) => t.id !== id)
-}
+// ============== 生命周期 ==============
+onMounted(async () => {
+  await revalidate()
 
-async function showPopover(targetEl: Element, title: string, onConfirm: () => void) {
-  const el = (targetEl as HTMLElement).closest?.('button, .btn, .icon-btn') || targetEl
-  const rect = el.getBoundingClientRect()
-  const targetCenterX = rect.left + rect.width / 2
+  window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('scroll', handleGlobalScrollOrResize, { passive: true })
+  window.addEventListener('resize', handleGlobalScrollOrResize, { passive: true })
 
-  const gap = 4
-  const estBtnOffset = 185
-  const estWidth = 230
-  const estHeight = 82
+})
 
-  let initLeft = Math.round(targetCenterX - estBtnOffset)
-  // 默认定位在原按钮上方，尽量贴近鼠标与原按钮
-  let initTop = Math.round(rect.top - estHeight - gap)
-  if (initTop < 10) {
-    initTop = Math.round(rect.bottom + gap)
-  }
-  if (initLeft < 10) initLeft = 10
-  if (initLeft + estWidth > window.innerWidth - 10) initLeft = window.innerWidth - estWidth - 10
-
-  popover.value = { title, x: initLeft, y: initTop, onConfirm }
-
-  await nextTick()
-  if (!popover.value || !popoverElRef.value || !confirmBtnRef.value) return
-
-  const pEl = popoverElRef.value
-  const bEl = confirmBtnRef.value
-
-  // 计算弹窗内确认/删除按钮中心点相对于弹窗左边缘的精确偏移
-  let offsetLeft = 0
-  let curr: HTMLElement | null = bEl
-  while (curr && curr !== pEl) {
-    offsetLeft += curr.offsetLeft
-    curr = curr.offsetParent as HTMLElement | null
-  }
-  const btnCenterInPopover = offsetLeft + bEl.offsetWidth / 2
-
-  // 水平精准对齐：使弹窗的删除按钮正好处在原触发按钮（鼠标点击处）的垂直线上
-  let preciseLeft = Math.round(targetCenterX - btnCenterInPopover)
-  const pWidth = pEl.offsetWidth
-  const pHeight = pEl.offsetHeight
-
-  // 垂直定位：优先紧贴显示在原按钮上方，离鼠标点击处最近
-  let preciseTop = Math.round(rect.top - pHeight - gap)
-  if (preciseTop < 10) {
-    // 若视口顶部空间不足，则降级翻转到原按钮下方
-    preciseTop = Math.round(rect.bottom + gap)
-  }
-  if (preciseTop + pHeight > window.innerHeight - 10) {
-    preciseTop = Math.max(10, window.innerHeight - pHeight - 10)
-  }
-
-  // 视口水平边缘防溢出处理
-  if (preciseLeft < 10) {
-    preciseLeft = 10
-  } else if (preciseLeft + pWidth > window.innerWidth - 10) {
-    preciseLeft = window.innerWidth - pWidth - 10
-  }
-
-  popover.value.x = preciseLeft
-  popover.value.y = preciseTop
-}
-
-function hidePopover() {
-  popover.value = null
-}
-
-function confirmPopover() {
-  const p = popover.value
-  hidePopover()
-  if (p) p.onConfirm()
-}
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('scroll', handleGlobalScrollOrResize)
+  window.removeEventListener('resize', handleGlobalScrollOrResize)
+})
 
 function handleGlobalKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && popover.value) {
@@ -117,182 +106,7 @@ function handleGlobalScrollOrResize() {
   }
 }
 
-onMounted(async () => {
-  window.addEventListener('keydown', handleGlobalKeydown)
-  window.addEventListener('scroll', handleGlobalScrollOrResize, { passive: true })
-  window.addEventListener('resize', handleGlobalScrollOrResize, { passive: true })
-
-  // Session storage is only a UI cache; revalidate the cached token after reload.
-  if (sessionStorage.getItem('noder_unlocked') === 'true' && getAdminToken()) {
-    if (await validateAdminToken(getAdminToken())) {
-      isUnlocked.value = true
-    } else {
-      sessionStorage.removeItem('noder_unlocked')
-      setAdminToken('')
-    }
-  }
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleGlobalKeydown)
-  window.removeEventListener('scroll', handleGlobalScrollOrResize)
-  window.removeEventListener('resize', handleGlobalScrollOrResize)
-})
-
-// 暴露给子视图
-provide('toast', showToast)
-provide('popover', { show: showPopover, hide: hidePopover })
-
-import { useI18n } from 'vue-i18n'
-import { setLocale, type LocaleType } from './i18n'
-import { useRoute } from 'vue-router'
-import { mainNavItems, type TabKey } from './navigation'
-
-const { t, locale } = useI18n()
-
-function toggleLocale() {
-  const next: LocaleType = locale.value === 'zh' ? 'en' : 'zh'
-  setLocale(next)
-}
-
-// 页面状态
-const route = useRoute()
-const activeTab = computed<TabKey>(() => {
-  const navKey = route.meta.navKey
-  return typeof navKey === 'string' ? navKey as TabKey : 'nodes'
-})
-const adminTokenInput = ref(getAdminToken() || 'admin-secret')
-const showToken = ref(false)
-const metrics = ref({ nodes: 0, users: 0 })
-
-// 明暗模式（初始值由 main.ts mount 前设置，此处读取实际生效值）
-const theme = ref<'light' | 'dark'>(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark')
-
-function toggleTheme() {
-  theme.value = theme.value === 'light' ? 'dark' : 'light'
-  document.documentElement.dataset.theme = theme.value
-  localStorage.setItem('noder_theme', theme.value)
-}
-
-// Tab 定义 + 滑块位移索引
-const tabs = computed(() => [
-  ...mainNavItems.map((item) => ({ key: item.key, to: item.to, label: t(item.labelKey) })),
-])
-const tabIndex = computed(() => tabs.value.findIndex((t) => t.key === activeTab.value))
-
-const stickyAnchorRef = ref<HTMLElement | null>(null)
-const tabNavPinned = ref(false)
-const isHeightExpanded = ref(false)
-
-function getNavNaturalScrollY(): number {
-  if (!stickyAnchorRef.value) return 0
-  const anchorRect = stickyAnchorRef.value.getBoundingClientRect()
-  return Math.max(0, window.scrollY + anchorRect.top)
-}
-
-function updateTabNavSticky() {
-  if (!stickyAnchorRef.value) return
-  const anchorRect = stickyAnchorRef.value.getBoundingClientRect()
-  const currentScrollY = window.scrollY
-
-  // 1. 吸顶视觉状态：当锚点触顶且未在页面绝对顶部时生效
-  const isStuck = anchorRect.top <= 1 && currentScrollY > 2
-  tabNavPinned.value = isStuck
-
-  // 2. 如果触顶，开启高度支撑，保证后续切 Tab 或向上滑动的平滑过渡
-  if (isStuck) {
-    isHeightExpanded.value = true
-  }
-
-  // 3. 只有当向上滑动直到 Header 完全显示在视口（scrollY <= 2）时，才释放支撑高度
-  if (currentScrollY <= 2) {
-    isHeightExpanded.value = false
-    tabNavPinned.value = false
-  }
-}
-
-const handleTabNavScroll = () => updateTabNavSticky()
-
-watch(activeTab, async () => {
-  const wasSticky = tabNavPinned.value || isHeightExpanded.value
-  const targetScrollY = getNavNaturalScrollY()
-
-  if (wasSticky) {
-    isHeightExpanded.value = true
-    window.scrollTo({ top: targetScrollY, behavior: 'instant' })
-  }
-
-  await nextTick()
-
-  if (wasSticky) {
-    window.scrollTo({ top: targetScrollY, behavior: 'instant' })
-    tabNavPinned.value = true
-    isHeightExpanded.value = true
-  } else {
-    updateTabNavSticky()
-  }
-})
-
-onMounted(() => {
-  updateTabNavSticky()
-  window.addEventListener('scroll', handleTabNavScroll, { passive: true })
-  window.addEventListener('resize', handleTabNavScroll, { passive: true })
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('scroll', handleTabNavScroll)
-  window.removeEventListener('resize', handleTabNavScroll)
-})
-
-import { getAdminToken, setAdminToken, validateAdminToken } from './api'
-
-const isUnlocked = ref(false)
-const unlockInput = ref('')
-const unlockError = ref(false)
-const showUnlockPassword = ref(false)
-
-async function unlock() {
-  const token = unlockInput.value.trim()
-  if (!token) {
-    unlockError.value = true
-    return
-  }
-
-  try {
-    if (await validateAdminToken(token)) {
-      setAdminToken(token)
-      sessionStorage.setItem('noder_unlocked', 'true')
-      isUnlocked.value = true
-      unlockInput.value = ''
-      unlockError.value = false
-      return
-    }
-  } catch {
-    // Keep the same message for invalid credentials and unavailable servers.
-  }
-
-  setAdminToken('')
-  sessionStorage.removeItem('noder_unlocked')
-  unlockError.value = true
-}
-
-function saveToken() {
-  const token = adminTokenInput.value.trim()
-  setAdminToken(token)
-  showToast(t('nav.adminTokenSaved'))
-  window.location.reload()
-}
-
-import Sidebar from './components/Sidebar.vue'
-
-const isSidebarCollapsed = ref(localStorage.getItem('noder_sidebar_collapsed') === 'true')
-
-function handleSidebarSaveToken(val: string) {
-  adminTokenInput.value = val
-  saveToken()
-}
-
-// 移动端专用 Token 弹窗
+// ============== 移动端 Token 弹窗 ==============
 const isMobileTokenModalOpen = ref(false)
 const mobileTokenInput = ref(adminTokenInput.value)
 
@@ -307,492 +121,57 @@ function saveMobileToken() {
   saveToken()
 }
 
-function updateMetrics(n: number, u: number) {
+function updateMetricsCallback(n: number, u: number) {
   metrics.value = { nodes: n, users: u }
 }
-provide('metrics', updateMetrics)
+updateMetrics.value = updateMetricsCallback
 </script>
 
 <template>
-  <section v-if="!isUnlocked" class="decoy-page">
-    <div class="decoy-window">
-      <header class="decoy-header">
-        <div class="decoy-brand">
-          <span class="decoy-brand-mark">☁</span>
-          <div>
-            <strong>今日天气</strong>
-            <span>本地生活助手</span>
-          </div>
-        </div>
-        <span class="decoy-date">每日小站</span>
-      </header>
+  <UnlockScreen v-if="!isUnlocked" :token="adminTokenInput" :show-password="showToken" :unlock-error="unlockError"
+    @update:token="(val) => (adminTokenInput = val)" @toggle-visibility="showToken = !showToken"
+    @clear-error="unlockError = false" @submit="handleUnlockSubmit" />
 
-      <main class="decoy-content">
-        <div class="decoy-location">当前位置 · 晴朗</div>
-        <div class="decoy-weather">
-          <span class="decoy-sun">☀</span>
-          <div>
-            <strong>24°</strong>
-            <span>舒适 · 微风</span>
-          </div>
-        </div>
-        <div class="decoy-details">
-          <div><span>空气质量</span><strong>良</strong></div>
-          <div><span>湿度</span><strong>48%</strong></div>
-          <div><span>风力</span><strong>2 级</strong></div>
-        </div>
-
-        <form class="unlock-form" @submit.prevent="unlock">
-          <label for="unlock-password">查看完整内容</label>
-          <div class="unlock-input-wrap">
-            <input
-              id="unlock-password"
-              v-model="unlockInput"
-              :type="showUnlockPassword ? 'text' : 'password'"
-              autocomplete="current-password"
-              placeholder="请输入访问口令"
-              autofocus
-              @input="unlockError = false"
-            />
-            <button
-              type="button"
-              class="unlock-visibility"
-              :aria-label="showUnlockPassword ? '隐藏口令' : '显示口令'"
-              @click="showUnlockPassword = !showUnlockPassword"
-            >
-              {{ showUnlockPassword ? '隐藏' : '显示' }}
-            </button>
-          </div>
-          <p v-if="unlockError" class="unlock-error">口令不正确，请重试</p>
-          <button type="submit" class="unlock-button">进入</button>
-        </form>
-      </main>
-
-      <footer class="decoy-footer">生活有序，心情自在</footer>
-    </div>
-  </section>
-
+  <!-- 已解锁的主布局 -->
   <template v-else>
-  <div class="app-layout" :class="{ 'sidebar-collapsed': isSidebarCollapsed }">
-    <!-- 桌面/中屏 (>= 768px) 现代化侧边栏 -->
-    <div class="desktop-sidebar-container">
-      <Sidebar
-        v-model:collapsed="isSidebarCollapsed"
-        :metrics="metrics"
-        :adminToken="adminTokenInput"
-        :theme="theme"
-        @toggleTheme="toggleTheme"
-        @toggleLocale="toggleLocale"
-        @saveToken="handleSidebarSaveToken"
-      />
-    </div>
-
-    <div class="app-viewport">
-      <!-- 移动端 (< 768px) 超轻量单行 Header (高度仅 48px，告别冗余) -->
-      <header class="mobile-topbar">
-        <div class="mobile-topbar-inner">
-          <div class="mobile-topbar-brand">
-            <div class="mobile-brand-icon">⚡</div>
-            <div class="mobile-brand-name">Sing-Box Sub</div>
-            <span class="mobile-status-dot" :title="t('nav.systemOnline')"></span>
-          </div>
-
-          <div class="mobile-topbar-actions">
-            <!-- 语言切换 -->
-            <button
-              type="button"
-              class="mobile-action-btn"
-              :title="t('nav.switchLang')"
-              @click="toggleLocale"
-            >
-              🌐
-            </button>
-            <!-- 主题切换 -->
-            <button
-              type="button"
-              class="mobile-action-btn"
-              :title="theme === 'light' ? t('nav.themeDark') : t('nav.themeLight')"
-              @click="toggleTheme"
-            >
-              {{ theme === 'light' ? '☀️' : '🌙' }}
-            </button>
-            <!-- Token 弹窗快捷设置 -->
-            <button
-              type="button"
-              class="mobile-action-btn"
-              :title="t('nav.adminToken')"
-              @click="openMobileTokenModal"
-            >
-              🔑
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main class="container app-content-container">
-        <!-- 桌面端 (>= 768px) 宽幅卡片 -->
-        <div v-if="activeTab !== 'tools'" class="metrics-grid desktop-metrics">
-          <div class="metric-card">
-            <div class="metric-info">
-              <h4>{{ t('nav.nodesOnline') }}</h4>
-              <div class="value">{{ metrics.nodes }}</div>
-            </div>
-            <div class="metric-icon icon-node">🌐</div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-info">
-              <h4>{{ t('nav.usersActive') }}</h4>
-              <div class="value">{{ metrics.users }}</div>
-            </div>
-            <div class="metric-icon icon-user">👤</div>
-          </div>
-        </div>
-
-        <!-- 移动端 (< 768px) 紧凑单行胶囊条 (超薄 34px，极省空间) -->
-        <div v-if="activeTab !== 'tools'" class="mobile-metrics-strip">
-          <div class="mobile-metric-pill">
-            <span class="pill-dot node-dot"></span>
-            <span class="pill-title">{{ t('nav.nodesOnline') }}</span>
-            <span class="pill-val">{{ metrics.nodes }}</span>
-          </div>
-          <div class="mobile-metric-pill">
-            <span class="pill-dot user-dot"></span>
-            <span class="pill-title">{{ t('nav.usersActive') }}</span>
-            <span class="pill-val">{{ metrics.users }}</span>
-          </div>
-        </div>
-
-        <!-- 移动端吸附 Tab 导航栏 (必须直接作为 main 的子元素以保证 sticky 正常生效！) -->
-        <div ref="stickyAnchorRef" class="tab-sticky-anchor mobile-nav-anchor"></div>
-
-        <div class="tab-navigation mobile-tab-nav" :class="{ pinned: tabNavPinned }">
-          <div
-            class="tab-slider"
-            :style="{
-               width: 'calc((100% - 12px) / 5)',
-              transform: `translateX(calc(${tabIndex} * 100%))`,
-            }"
-          >
-            <div
-              class="tab-slider-inner"
-              :style="{
-                 transform: `translateX(calc(-${tabIndex} * 20%))`,
-              }"
-            ></div>
-          </div>
-          <RouterLink
-            v-for="t in tabs"
-            :key="t.key"
-            :to="t.to"
-            class="tab-btn"
-            :class="{ active: activeTab === t.key }"
-          >
-            {{ t.label }}
-          </RouterLink>
-        </div>
-
-        <!-- 页面视图容器 -->
-        <div class="tab-view-container" :class="{ 'sticky-expanded': isHeightExpanded }">
-          <RouterView />
-        </div>
-      </main>
-    </div>
-  </div>
-
-  <!-- 移动端 Token 弹窗 -->
-  <div v-if="isMobileTokenModalOpen" class="mobile-token-modal-mask" @mousedown.self="isMobileTokenModalOpen = false">
-    <div class="mobile-token-modal-card">
-      <div class="mobile-token-modal-header">
-        <h4>{{ t('nav.adminTokenTitle') }}</h4>
-        <button type="button" class="btn-close" @click="isMobileTokenModalOpen = false">✕</button>
+    <div class="app-layout" :class="{ 'sidebar-collapsed': isSidebarCollapsed }">
+      <!-- 桌面/中屏 (>= 768px) 现代化侧边栏 -->
+      <div class="desktop-sidebar-container">
+        <Sidebar v-model:collapsed="isSidebarCollapsed" :metrics="metrics" :adminToken="adminTokenInput" :theme="theme"
+          @toggleTheme="toggleTheme" @toggleLocale="toggleLocale" @saveToken="handleSidebarSaveToken" />
       </div>
-      <p class="mobile-token-modal-tip">{{ t('nav.adminTokenTip') }}</p>
-      <div class="mobile-token-input-wrap">
-        <input
-          :type="showToken ? 'text' : 'password'"
-          v-model="mobileTokenInput"
-          class="form-control"
-          :placeholder="t('nav.adminTokenPlaceholder')"
-        />
-        <button
-          type="button"
-          class="eye-toggle"
-          @click="showToken = !showToken"
-        >
-          {{ showToken ? '👁️' : '🔒' }}
-        </button>
-      </div>
-      <div class="mobile-token-modal-footer">
-        <button type="button" class="btn btn-secondary btn-sm" @click="isMobileTokenModalOpen = false">{{ t('common.cancel') }}</button>
-        <button type="button" class="btn btn-primary btn-sm" @click="saveMobileToken">{{ t('common.save') }}</button>
+
+      <div class="app-viewport">
+        <MobileTopbar :theme="theme" @toggle-locale="toggleLocale" @toggle-theme="toggleTheme"
+          @open-token="openMobileTokenModal" />
+
+        <main class="container app-content-container">
+          <MetricsCards v-if="activeTab !== 'tools'" :nodes="metrics.nodes" :users="metrics.users" />
+
+          <!-- 移动端吸附 Tab 导航栏 -->
+          <div ref="stickyAnchorRef" class="tab-sticky-anchor mobile-nav-anchor"></div>
+
+          <TabNavigation :tabs="tabs" :active-tab="activeTab" :pinned="tabNavPinned" />
+
+          <!-- 页面视图容器 -->
+          <div class="tab-view-container" :class="{ 'sticky-expanded': isHeightExpanded }">
+            <RouterView />
+          </div>
+        </main>
       </div>
     </div>
-  </div>
 
-  <!-- Toast 容器 -->
-  <div class="toast-container">
-    <TransitionGroup name="toast">
-      <div
-        v-for="item in toasts"
-        :key="item.id"
-        class="toast"
-        :style="{ borderColor: item.type === 'error' ? 'var(--accent-rose)' : 'var(--primary)' }"
-        :title="t('common.close') || '点击关闭'"
-        @click="removeToast(item.id)"
-      >
-        <span>{{ item.type === 'error' ? '⚠️' : '✨' }}</span><span>{{ item.message }}</span>
-      </div>
-    </TransitionGroup>
-  </div>
+    <MobileTokenModal :open="isMobileTokenModalOpen" :token="mobileTokenInput" :show-password="showToken"
+      @update:open="(val) => (isMobileTokenModalOpen = val)" @update:token="(val) => (mobileTokenInput = val)"
+      @toggle-visibility="showToken = !showToken" @save="saveMobileToken" />
 
-  <!-- 鼠标位置删除确认弹窗 -->
-  <div v-if="popover" class="delete-confirm-mask" @click="hidePopover" />
-  <div
-    v-if="popover"
-    ref="popoverElRef"
-    class="delete-confirm-popover active"
-    :style="{ left: popover.x + 'px', top: popover.y + 'px' }"
-  >
-    <div class="delete-confirm-title">{{ popover.title }}</div>
-    <div class="delete-confirm-actions">
-      <button type="button" class="btn btn-secondary btn-sm" @click="hidePopover">{{ t('common.cancel') }}</button>
-      <button ref="confirmBtnRef" type="button" class="btn btn-danger btn-sm" @click="confirmPopover">{{ t('common.confirm') }}</button>
-    </div>
-  </div>
+    <ToastHost :toasts="toasts" @dismiss="removeToast" />
+
+    <ConfirmPopover :popover="popover" @hide="hidePopover" @confirm="confirmPopover" />
   </template>
 </template>
 
 <style scoped>
-.decoy-page {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: #eef3f5;
-  color: #24333b;
-  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-}
-
-.decoy-window {
-  width: min(100%, 460px);
-  overflow: hidden;
-  border: 1px solid #dbe4e7;
-  border-radius: 18px;
-  background: #fbfcfc;
-  box-shadow: 0 18px 50px rgba(49, 72, 82, 0.12);
-}
-
-.decoy-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 22px 26px;
-  border-bottom: 1px solid #e9eff0;
-  background: #f7faf9;
-}
-
-.decoy-brand,
-.decoy-weather,
-.decoy-details,
-.unlock-input-wrap {
-  display: flex;
-  align-items: center;
-}
-
-.decoy-brand {
-  gap: 11px;
-}
-
-.decoy-brand-mark {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border-radius: 11px;
-  background: #dcefeb;
-  color: #4b988c;
-  font-size: 1.35rem;
-}
-
-.decoy-brand strong,
-.decoy-brand span,
-.decoy-weather strong,
-.decoy-weather span {
-  display: block;
-}
-
-.decoy-brand strong {
-  font-size: 0.98rem;
-  font-weight: 650;
-}
-
-.decoy-brand div span,
-.decoy-date,
-.decoy-location,
-.decoy-weather span,
-.decoy-details span,
-.decoy-footer {
-  color: #829198;
-  font-size: 0.78rem;
-}
-
-.decoy-content {
-  padding: 30px 30px 28px;
-}
-
-.decoy-location {
-  margin-bottom: 18px;
-}
-
-.decoy-weather {
-  gap: 18px;
-  padding-bottom: 25px;
-}
-
-.decoy-sun {
-  color: #e9b54f;
-  font-size: 3.9rem;
-  line-height: 1;
-}
-
-.decoy-weather strong {
-  color: #30434c;
-  font-size: 2.6rem;
-  font-weight: 500;
-  line-height: 1;
-}
-
-.decoy-weather span {
-  margin-top: 8px;
-}
-
-.decoy-details {
-  gap: 10px;
-  padding: 15px 0 25px;
-  border-top: 1px solid #edf1f1;
-  border-bottom: 1px solid #edf1f1;
-}
-
-.decoy-details div {
-  flex: 1;
-  display: grid;
-  gap: 4px;
-}
-
-.decoy-details strong {
-  color: #48616a;
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-
-.unlock-form {
-  margin-top: 25px;
-}
-
-.unlock-form > label {
-  display: block;
-  margin-bottom: 9px;
-  color: #52666e;
-  font-size: 0.82rem;
-}
-
-.unlock-input-wrap {
-  gap: 8px;
-  padding: 4px 5px 4px 13px;
-  border: 1px solid #d4e0e1;
-  border-radius: 10px;
-  background: #fff;
-}
-
-.unlock-input-wrap:focus-within {
-  border-color: #70aaa0;
-  box-shadow: 0 0 0 3px rgba(112, 170, 160, 0.13);
-}
-
-.unlock-input-wrap input {
-  min-width: 0;
-  flex: 1;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: #30434c;
-  font: inherit;
-  font-size: 0.9rem;
-}
-
-.unlock-visibility {
-  border: 0;
-  background: transparent;
-  color: #6c9992;
-  cursor: pointer;
-  font-size: 0.76rem;
-}
-
-.unlock-button {
-  width: 100%;
-  margin-top: 12px;
-  padding: 11px 16px;
-  border: 0;
-  border-radius: 10px;
-  background: #5d9d92;
-  color: #fff;
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.9rem;
-  font-weight: 600;
-  transition: background 0.2s ease, transform 0.2s ease;
-}
-
-.unlock-button:hover {
-  background: #4d8d82;
-  transform: translateY(-1px);
-}
-
-.unlock-error {
-  margin: 8px 0 -2px;
-  color: #c06464;
-  font-size: 0.76rem;
-}
-
-.decoy-footer {
-  padding: 17px 26px;
-  border-top: 1px solid #e9eff0;
-  text-align: center;
-}
-
-@media (max-width: 520px) {
-  .decoy-page {
-    padding: 14px;
-  }
-
-  .decoy-content {
-    padding: 25px 22px 24px;
-  }
-
-  .decoy-header {
-    padding: 18px 20px;
-  }
-}
-
-.toast-container {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  bottom: auto;
-  left: auto;
-  z-index: 9999;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  pointer-events: none;
-  max-width: calc(100vw - 40px);
-}
-.toast {
-  pointer-events: auto;
-  cursor: pointer;
-  user-select: none;
-}
-
 /* 响应式骨架 */
 .app-layout {
   min-height: 100vh;
@@ -803,163 +182,40 @@ provide('metrics', updateMetrics)
   display: none;
 }
 
-/* 移动端 (< 768px) 超薄顶栏 */
-.mobile-topbar {
-  display: flex;
-  align-items: center;
-  height: 50px;
-  background: var(--bg-header);
-  border-bottom: 1px solid var(--border-glass);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  padding: 0 14px;
-}
-
-.mobile-topbar-inner {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.mobile-topbar-brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.mobile-brand-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.85rem;
-  box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
-}
-
-.mobile-brand-name {
-  font-weight: 700;
-  font-size: 0.95rem;
-  letter-spacing: -0.01em;
-  color: var(--text-main);
-}
-
-.mobile-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent-emerald);
-  box-shadow: 0 0 6px var(--accent-emerald);
-}
-
-.mobile-topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.mobile-action-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  background: var(--bg-soft);
-  border: 1px solid var(--border-glass);
-  color: var(--text-main);
-  font-size: 0.85rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.mobile-action-btn:hover {
-  background: var(--bg-hover);
-  border-color: var(--primary);
-}
-
-/* 移动端紧凑指标胶囊条 */
-.mobile-metrics-strip {
-  display: flex;
-  gap: 8px;
-  margin: 10px 0 6px;
-}
-
-.mobile-metric-pill {
-  flex: 1;
-  height: 36px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-glass);
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  font-size: 0.8rem;
-  backdrop-filter: blur(8px);
-}
-
-.pill-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.node-dot {
-  background: var(--primary);
-  box-shadow: 0 0 6px var(--primary);
-}
-
-.user-dot {
-  background: #818cf8;
-  box-shadow: 0 0 6px #818cf8;
-}
-
-.pill-title {
-  color: var(--text-muted);
-  margin-left: 6px;
-  margin-right: auto;
-  font-size: 0.78rem;
-}
-
-.pill-val {
-  font-weight: 700;
-  font-family: var(--font-mono);
-  color: var(--text-main);
-  font-size: 0.92rem;
-}
-
 /* 桌面端断点与隐藏 */
 @media (max-width: 767px) {
   .desktop-metrics {
     display: none !important;
   }
+
   .app-content-container {
     padding: 0 12px;
   }
 }
 
 @media (min-width: 768px) {
+
   .mobile-topbar,
   .mobile-metrics-strip,
   .mobile-tab-nav,
   .mobile-nav-anchor {
     display: none !important;
   }
+
   .desktop-sidebar-container {
     display: block;
   }
+
   .desktop-metrics {
     display: grid !important;
   }
+
   .app-viewport {
-    margin-left: 68px; /* 中屏 Rail 紧凑窄条宽度 */
+    margin-left: 68px;
     min-height: 100vh;
     transition: margin-left 0.24s cubic-bezier(0.4, 0, 0.2, 1);
   }
+
   .app-content-container {
     padding-top: 24px;
     padding-bottom: 48px;
@@ -967,75 +223,19 @@ provide('metrics', updateMetrics)
 }
 
 @media (min-width: 1200px) {
-  /* 宽屏未折叠时 */
   .app-layout:not(.sidebar-collapsed) .app-viewport {
     margin-left: 240px;
   }
+
   .app-layout.sidebar-collapsed .app-viewport {
     margin-left: 68px;
   }
+
   .app-content-container {
     max-width: 1440px;
     padding-left: 32px;
     padding-right: 32px;
   }
-}
-
-/* 移动端 Token 弹窗 */
-.mobile-token-modal-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(6px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-}
-
-.mobile-token-modal-card {
-  width: min(92vw, 360px);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-glass);
-  border-radius: 14px;
-  padding: 20px;
-  box-shadow: var(--shadow-lg);
-  animation: popIn 0.18s ease-out;
-}
-
-.mobile-token-modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.mobile-token-modal-header h4 {
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.mobile-token-modal-tip {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  margin-bottom: 14px;
-  line-height: 1.4;
-}
-
-.mobile-token-input-wrap {
-  position: relative;
-  margin-bottom: 16px;
-}
-
-.mobile-token-input-wrap input {
-  padding-right: 36px;
-}
-
-.mobile-token-modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
 }
 
 .tab-sticky-anchor {
@@ -1051,108 +251,6 @@ provide('metrics', updateMetrics)
 }
 
 .tab-view-container.sticky-expanded {
-  min-height: calc(100vh + 200px);
-}
-
-.tab-navigation {
-  position: sticky;
-  top: 0;
-  z-index: 110;
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  margin: 18px 0 20px;
-  padding: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.025);
-  backdrop-filter: blur(12px);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
-  isolation: isolate;
-  transition:
-    box-shadow 0.24s ease,
-    border-color 0.24s ease,
-    background 0.24s ease;
-}
-
-.tab-navigation.pinned {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  border-color: rgba(99, 102, 241, 0.3);
-  background: rgba(15, 23, 42, 0.92);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-}
-
-:global([data-theme='light']) .tab-navigation {
-  background: rgba(0, 0, 0, 0.03);
-  border-color: rgba(0, 0, 0, 0.06);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
-}
-
-:global([data-theme='light']) .tab-navigation.pinned {
-  background: rgba(255, 255, 255, 0.85);
-  border-color: rgba(37, 99, 235, 0.2);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-}
-
-.tab-slider {
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  left: 6px;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.3),
-    0 4px 16px rgba(79, 70, 229, 0.35);
-  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
-  pointer-events: none;
-  z-index: 0;
-}
-
-.tab-slider-inner {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-   width: 500%;
-  height: 100%;
-  background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 30%, #38bdf8 70%, #06b6d4 100%);
-  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
-}
-
-.tab-btn {
-  position: relative;
-  z-index: 1;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  font-weight: 600;
-  font-size: 0.93rem;
-  letter-spacing: 0.01em;
-  padding: 10px 14px;
-  border-radius: 12px;
-  text-align: center;
-  cursor: pointer;
-  text-decoration: none;
-  transition: color 0.2s ease;
-}
-
-.tab-btn:hover {
-  color: var(--text-main);
-}
-
-.tab-btn.active {
-  color: #fff;
-}
-
-.toast-enter-active,
-.toast-leave-active {
-  transition: all 0.3s ease;
-}
-.toast-enter-from,
-.toast-leave-to {
-  opacity: 0;
-  transform: translateX(100%);
+  min-height: calc(100dvh + 200px);
 }
 </style>

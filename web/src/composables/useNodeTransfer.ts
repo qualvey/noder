@@ -90,24 +90,25 @@ export function useNodeTransfer(options: UseNodeTransferOptions = {}) {
     return parsedConfigs.value.map((cfg, idx) => {
       const meta = toNodeMeta(cfg)
 
-      let singBoxConfig: BaseOutboundConfig = cfg
+      let singBoxConfig: BaseOutboundConfig
       let singBoxError = ''
       try {
         singBoxConfig = toSingBoxConfig(meta)
-      } catch (e: any) {
-        singBoxError = e.message || '无法生成 sing-box 配置'
+      } catch (e: unknown) {
+        singBoxError = (e instanceof Error ? e.message : '') || '无法生成 sing-box 配置'
         singBoxConfig = cfg
       }
 
-      let xrayJson = ''
+      let xrayJson: string
       let xrayError = ''
       try {
         xrayJson = JSON.stringify(toXrayConfig(meta), null, 2)
-      } catch (e: any) {
-        xrayError = e.message || '无法生成 Xray 配置'
+      } catch (e: unknown) {
+        xrayError = (e instanceof Error ? e.message : '') || '无法生成 Xray 配置'
+        xrayJson = ''
       }
 
-      let shareLink = ''
+      let shareLink: string
       try {
         shareLink = buildShareLink(singBoxConfig)
       } catch {
@@ -225,8 +226,8 @@ export function useNodeTransfer(options: UseNodeTransferOptions = {}) {
       if (!text) return
       const parsed = tryParseJsonWithArrayFallback(text)
       inputText.value = JSON.stringify(parsed, null, 2)
-    } catch (e: any) {
-      onError?.(`格式化失败: ${e.message}`)
+    } catch (e: unknown) {
+      onError?.(`格式化失败: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 

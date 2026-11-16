@@ -1,4 +1,4 @@
-export type TabKey = 'nodes' | 'users' | 'files' | 'help' | 'tools'
+export type TabKey = 'nodes' | 'agents' | 'users' | 'files' | 'release-logs' | 'help' | 'tools'
 
 export const mainNavItems = [
   {
@@ -6,6 +6,12 @@ export const mainNavItems = [
     to: '/nodes',
     labelKey: 'nav.nodes',
     icon: 'nodes',
+  },
+  {
+    key: 'agents',
+    to: '/agents',
+    labelKey: 'nav.agents',
+    icon: 'agents',
   },
   {
     key: 'users',
@@ -18,6 +24,12 @@ export const mainNavItems = [
     to: '/files',
     labelKey: 'nav.files',
     icon: 'files',
+  },
+  {
+    key: 'release-logs',
+    to: '/release-logs',
+    labelKey: 'nav.releaseLogs',
+    icon: 'release-logs',
   },
   {
     key: 'help',

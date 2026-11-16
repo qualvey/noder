@@ -3,6 +3,8 @@ import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath, URL } from 'node:url'
 
+const APIPort = 8080
+
 // 构建产物输出到后端 static/（后端挂载 /static 与 "/" 兜底）
 export default defineConfig({
   plugins: [
@@ -25,19 +27,19 @@ export default defineConfig({
     port: 5273,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: `http://127.0.0.1:${APIPort}`,
         changeOrigin: true,
       },
       '/sub': {
-        target: 'http://127.0.0.1:8000',
+        target: `http://127.0.0.1:${APIPort}`,
         changeOrigin: true,
       },
       '/node/': {
-        target: 'http://127.0.0.1:8000',
+        target: `http://127.0.0.1:${APIPort}`,
         changeOrigin: true,
       },
       '/dl': {
-        target: 'http://127.0.0.1:8000',
+        target: `http://127.0.0.1:${APIPort}`,
         changeOrigin: true,
       },
     },

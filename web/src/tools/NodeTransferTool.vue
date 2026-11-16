@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { inject, ref } from 'vue'
-import QrcodeVue from 'qrcode.vue'
 import { useNodeTransfer } from '../composables/useNodeTransfer'
+import TransferNodeCard from './TransferNodeCard.vue'
+import TransferInputCard from './TransferInputCard.vue'
+import TransferDetailsCard from './TransferDetailsCard.vue'
+import { ToastKey } from '../injectionKeys'
 
-const toast =
-  inject<(message: string, type?: 'info' | 'error' | 'success' | 'warning') => void>('toast')
+const toast = inject(ToastKey)
 
 const {
   inputText,
@@ -89,60 +91,15 @@ function downloadSingBox() {
     </div>
 
     <div class="transfer-grid">
-      <!-- 输入区域 -->
-      <section class="transfer-card input-card">
-        <div class="card-heading">
-          <div>
-            <h3>
-              {{
-                conversionDirection === 'json2link'
-                  ? 'Sing-box 配置 JSON'
-                  : 'VLESS / TUIC 分享链接'
-              }}
-            </h3>
-          </div>
-          <div class="card-actions">
-            <button
-              v-for="handler in supportedHandlers"
-              :key="handler.protocol"
-              @click="handlePasteSample(handler.protocol)"
-            >
-              {{
-                conversionDirection === 'json2link'
-                  ? `${handler.displayName} 示例`
-                  : `${handler.displayName} 链接`
-              }}
-            </button>
-            <button
-              v-if="conversionDirection === 'json2link'"
-              :disabled="!inputText"
-              @click="handleFormat"
-            >
-              格式化
-            </button>
-            <button :disabled="!inputText" @click="handleClear">清空</button>
-          </div>
-        </div>
-
-        <div class="editor-wrap">
-          <textarea
-            v-model="inputText"
-            :placeholder="
-              conversionDirection === 'json2link'
-                ? '粘贴 sing-box 出站配置 JSON（支持单个对象、数组或逗号分隔的多节点）…'
-                : '粘贴分享链接（支持单行或多行 vless://、tuic://）…'
-            "
-          ></textarea>
-        </div>
-        <footer>
-          <span>{{ inputText.length }} 个字符</span>
-          <span>{{
-            conversionDirection === 'json2link'
-              ? '支持 sing-box 1.18+ / 多节点数组'
-              : '支持 vless:// / tuic:// (可多行)'
-          }}</span>
-        </footer>
-      </section>
+      <TransferInputCard
+        :direction="conversionDirection"
+        :input-text="inputText"
+        :supported-handlers="supportedHandlers"
+        @update:input-text="(val) => (inputText = val)"
+        @paste-sample="handlePasteSample"
+        @format="handleFormat"
+        @clear="handleClear"
+      />
 
       <!-- 输出区域 (每个节点分开展示：独立文本 + 独立二维码) -->
       <section class="transfer-card output-card">
@@ -204,82 +161,16 @@ function downloadSingBox() {
 
         <!-- 多节点结果列表 (每个节点：文本 + 二维码分开) -->
         <div v-if="nodeCount > 0 && !parseError" class="node-results-list">
-          <article
+          <TransferNodeCard
             v-for="(item, idx) in nodeResults"
             :key="item.index"
-            class="node-result-item"
-            :class="{ active: activeNodeIndex === idx }"
-            @click="activeNodeIndex = idx"
-          >
-            <!-- 节点头部 -->
-            <header class="node-item-header">
-              <div class="node-item-title">
-                <span class="node-badge">#{{ item.index }}</span>
-                <span class="node-tag">{{ item.config.tag || '未命名节点' }}</span>
-                <span class="proto-tag">{{ (item.config.type as string).toUpperCase() }}</span>
-              </div>
-              <div class="node-item-server">
-                {{ item.config.server }}:{{ item.config.server_port }}
-              </div>
-            </header>
-
-            <!-- 节点主体：文本 + 二维码并排分开 -->
-            <div class="node-item-body">
-              <!-- 文本框 -->
-              <div class="node-text-col">
-                <textarea
-                  readonly
-                  :value="
-                    activeOutputTab === 'xray'
-                      ? item.xrayJson || item.xrayError
-                      : activeOutputTab === 'dae'
-                        ? item.daeNode
-                        : conversionDirection === 'json2link'
-                          ? item.shareLink
-                          : item.shareJson
-                  "
-                ></textarea>
-                <button
-                  class="node-copy-btn"
-                  title="复制此节点"
-                  v-if="
-                    activeOutputTab === 'xray'
-                      ? !!item.xrayJson
-                      : activeOutputTab === 'dae'
-                        ? !!item.daeNode
-                        : !!(conversionDirection === 'json2link' ? item.shareLink : item.shareJson)
-                  "
-                  @click.stop="
-                    handleCopy(
-                      activeOutputTab === 'xray'
-                        ? item.xrayJson
-                        : activeOutputTab === 'dae'
-                          ? item.daeNode
-                          : conversionDirection === 'json2link'
-                            ? item.shareLink
-                            : item.shareJson,
-                      `已复制节点 #${item.index}`,
-                    )
-                  "
-                >
-                  复制
-                </button>
-              </div>
-
-              <!-- 二维码 -->
-              <div class="node-qr-col">
-                <div class="node-qr-inner">
-                  <qrcode-vue
-                    :value="item.shareLink"
-                    :size="104"
-                    level="L"
-                    render-as="svg"
-                  />
-                  <small>{{ activeOutputTab === 'xray' ? '分享链接二维码' : '扫码导入' }}</small>
-                </div>
-              </div>
-            </div>
-          </article>
+            :item="item"
+            :active="activeNodeIndex === idx"
+            :output-tab="activeOutputTab"
+            :direction="conversionDirection"
+            @select="activeNodeIndex = idx"
+            @copy="handleCopy"
+          />
         </div>
 
         <div v-else class="empty-output">
@@ -289,32 +180,15 @@ function downloadSingBox() {
       </section>
     </div>
 
-    <!-- 详细参数列表 (展示当前选中的节点) -->
-    <section v-if="activeConfig && !parseError" class="transfer-card details-card">
-      <div class="card-heading">
-        <div>
-          <span class="card-kicker">DETAILS</span>
-          <h3>
-            配置参数
-            <span v-if="nodeCount > 1" class="details-subtitle">
-              — #{{ activeNodeIndex + 1 }} {{ activeConfig?.tag || activeConfig?.server }}
-            </span>
-          </h3>
-        </div>
-      </div>
-      <div class="details-list">
-        <div v-for="(detail, i) in configDetails" :key="i">
-          <span>{{ detail.label }}</span>
-          <strong :class="{ accent: detail.highlight }">{{ detail.value }}</strong>
-          <button
-            v-if="detail.copyable && detail.value !== '-'"
-            @click="handleCopy(String(detail.value))"
-          >
-            复制
-          </button>
-        </div>
-      </div>
-    </section>
+    <TransferDetailsCard
+      v-if="activeConfig && !parseError"
+      :node-count="nodeCount"
+      :active-node-index="activeNodeIndex"
+      :active-tag="activeConfig?.tag || ''"
+      :active-server="activeConfig?.server || ''"
+      :details="configDetails"
+      @copy="handleCopy"
+    />
   </section>
 </template>
 
@@ -332,19 +206,6 @@ function downloadSingBox() {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-}
-
-.card-kicker {
-  color: var(--primary);
-  font-size: 0.62rem;
-  font-weight: 800;
-  letter-spacing: 0.13em;
-}
-
-.details-subtitle {
-  font-size: 0.76rem;
-  font-weight: 500;
-  color: var(--text-muted);
 }
 
 .tool-intro h2 {
@@ -425,7 +286,6 @@ function downloadSingBox() {
   background: var(--bg-panel);
 }
 
-.input-card,
 .output-card {
   min-height: 460px;
 }
@@ -438,12 +298,10 @@ function downloadSingBox() {
   gap: 10px;
   margin-bottom: 15px;
 }
-
 .card-heading h3 {
   margin: 0;
   font-size: 0.9rem;
 }
-
 .card-actions {
   display: flex;
   flex-wrap: wrap;
@@ -508,34 +366,6 @@ function downloadSingBox() {
   box-shadow: 0 1px 4px rgba(2, 8, 23, 0.12);
 }
 
-.editor-wrap {
-  position: relative;
-}
-
-.editor-wrap textarea {
-  display: block;
-  width: 100%;
-  height: 340px;
-  box-sizing: border-box;
-  resize: none;
-  border: 1px solid var(--border-glass);
-  border-radius: 9px;
-  padding: 12px;
-  outline: none;
-  background: var(--bg-input);
-  color: var(--text-main);
-  font: 0.72rem/1.7 var(--font-mono);
-}
-
-.editor-wrap textarea:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent);
-}
-
-.editor-wrap textarea::placeholder {
-  color: var(--text-dim);
-}
-
 .parse-error {
   display: flex;
   align-items: flex-start;
@@ -573,14 +403,6 @@ function downloadSingBox() {
   line-height: 1.4;
 }
 
-.transfer-card footer {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 10px;
-  color: var(--text-dim);
-  font-size: 0.64rem;
-}
-
 /* 独立节点结果列表 */
 .node-results-list {
   display: flex;
@@ -589,155 +411,6 @@ function downloadSingBox() {
   max-height: 640px;
   overflow-y: auto;
   padding-right: 4px;
-}
-
-.node-result-item {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--border-glass);
-  border-radius: 10px;
-  background: var(--bg-soft);
-  transition: border-color 0.2s, box-shadow 0.2s;
-  cursor: pointer;
-}
-
-.node-result-item:hover {
-  border-color: color-mix(in srgb, var(--primary) 40%, var(--border-glass));
-}
-
-.node-result-item.active {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
-}
-
-.node-item-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 0.72rem;
-}
-
-.node-item-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  overflow: hidden;
-}
-
-.node-badge {
-  flex-shrink: 0;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--bg-panel);
-  color: var(--text-dim);
-  font: 0.62rem var(--font-mono);
-  font-weight: 700;
-}
-
-.node-tag {
-  font-weight: 700;
-  color: var(--text-main);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.proto-tag {
-  flex-shrink: 0;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
-  color: var(--primary);
-  font-size: 0.6rem;
-  font-weight: 800;
-}
-
-.node-item-server {
-  font: 0.65rem var(--font-mono);
-  color: var(--text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 节点主体：文本 + 二维码并排分开 */
-.node-item-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 130px;
-  gap: 12px;
-}
-
-.node-text-col {
-  position: relative;
-  display: flex;
-}
-
-.node-text-col textarea {
-  display: block;
-  width: 100%;
-  height: 140px;
-  box-sizing: border-box;
-  resize: none;
-  border: 1px solid var(--border-glass);
-  border-radius: 8px;
-  padding: 10px 58px 10px 10px;
-  outline: none;
-  background: var(--bg-input);
-  color: var(--text-main);
-  font: 0.68rem/1.6 var(--font-mono);
-}
-
-.node-copy-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  border: 0;
-  border-radius: 6px;
-  padding: 5px 8px;
-  background: var(--primary);
-  color: white;
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.62rem;
-  font-weight: 700;
-}
-
-.node-qr-col {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.node-qr-inner {
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 5px;
-  width: 100%;
-  height: 100%;
-  padding: 8px;
-  border: 1px solid var(--border-glass);
-  border-radius: 8px;
-  background: var(--bg-input);
-}
-
-.node-qr-inner svg {
-  max-width: 100%;
-  padding: 5px;
-  background: white;
-  border-radius: 4px;
-}
-
-.node-qr-inner small {
-  color: var(--text-dim);
-  font-size: 0.6rem;
-}
-
-.accent {
-  color: var(--primary) !important;
 }
 
 .empty-output {
@@ -761,63 +434,13 @@ function downloadSingBox() {
   font-size: 0.7rem;
 }
 
-.details-card {
-  display: grid;
-  gap: 3px;
-}
-
-.details-list {
-  overflow: hidden;
-  border: 1px solid var(--border-glass);
-  border-radius: 9px;
-}
-
-.details-list > div {
-  display: grid;
-  grid-template-columns: minmax(130px, 0.7fr) minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 11px;
-  border-bottom: 1px solid var(--border-glass);
-  font-size: 0.68rem;
-}
-
-.details-list > div:last-child {
-  border-bottom: 0;
-}
-
-.details-list span {
-  color: var(--text-muted);
-}
-
-.details-list strong {
-  overflow: hidden;
-  font: 0.68rem var(--font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.details-list button {
-  border: 0;
-  background: none;
-  color: var(--primary);
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.62rem;
-}
-
 @media (max-width: 820px) {
   .transfer-grid {
     grid-template-columns: 1fr;
   }
 
-  .input-card,
   .output-card {
     min-height: 0;
-  }
-
-  .editor-wrap textarea {
-    height: 280px;
   }
 }
 
@@ -843,15 +466,6 @@ function downloadSingBox() {
 
   .card-actions {
     justify-content: flex-start;
-  }
-
-  .node-item-body {
-    grid-template-columns: 1fr;
-  }
-
-  .details-list > div {
-    grid-template-columns: 1fr;
-    gap: 4px;
   }
 }
 </style>

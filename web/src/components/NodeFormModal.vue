@@ -8,8 +8,12 @@ import { api } from '../api'
 import type { Node } from '../types'
 import { parseNodeJson, parseVlessUrl } from '../utils'
 import { TUIC_CONGESTION_CONTROLS, UTLS_FINGERPRINTS, VLESS_FLOWS, isEnumValue, normalizeTransportType } from '../constants'
+import { ToastKey, type ToastType } from '../injectionKeys'
+import { useStorage } from '../composables/useStorage'
 
 const { t } = useI18n()
+
+const { set: storageSet, get: storageGet, remove: storageRemove } = useStorage('local')
 
 const props = defineProps<{
   open: boolean
@@ -21,7 +25,7 @@ const emit = defineEmits<{
   saved: []
 }>()
 
-const toast = inject('toast') as (msg: string, type?: 'info' | 'error') => void
+const toast = inject<ToastType extends never ? never : (msg: string, type?: ToastType) => void>(ToastKey)
 
 const showJsonImport = ref(false)
 const jsonInput = ref('')
@@ -44,6 +48,7 @@ const form = reactive<{
   flow: string
   congestion_control: string
   remark: string
+  is_agentless: boolean
 }>({
   tag: '',
   node_name: '',
@@ -60,6 +65,7 @@ const form = reactive<{
   flow: 'xtls-rprx-vision',
   congestion_control: 'bbr',
   remark: '',
+  is_agentless: false,
 })
 
 const securityOptions: Record<string, string[]> = {
@@ -73,14 +79,14 @@ function resetForm() {
     tag: '', node_name: '', protocol: 'vless', server_address: '', server_port: 8443,
     security: 'reality', sni: '', transport_type: 'direct', path: '',
     public_key: '', short_id: '', fingerprint: 'chrome', flow: 'xtls-rprx-vision',
-    congestion_control: 'bbr', remark: '',
+    congestion_control: 'bbr', remark: '', is_agentless: false,
   })
   showJsonImport.value = false
   jsonInput.value = ''
 }
 
 function closeModal(clearDraft = false) {
-  if (clearDraft) localStorage.removeItem(draftKey())
+  if (clearDraft) storageRemove(draftKey())
   emit('close')
 }
 
@@ -95,6 +101,7 @@ function loadForm(n: Node) {
     flow: isEnumValue(VLESS_FLOWS, n.flow) ? n.flow : 'xtls-rprx-vision',
     congestion_control: isEnumValue(TUIC_CONGESTION_CONTROLS, n.congestion_control) ? n.congestion_control : 'bbr',
     remark: n.remark || '',
+    is_agentless: !!n.is_agentless,
   })
   showJsonImport.value = false
   jsonInput.value = ''
@@ -105,14 +112,14 @@ watch(
   () => props.open,
   (open) => {
     if (!open) return
-    const draft = localStorage.getItem(draftKey())
+    const draft = storageGet(draftKey())
     if (draft) {
       try {
         Object.assign(form, JSON.parse(draft))
         showJsonImport.value = false
         jsonInput.value = ''
       } catch {
-        localStorage.removeItem(draftKey())
+        storageRemove(draftKey())
         if (props.editing) loadForm(props.editing)
         else resetForm()
       }
@@ -123,7 +130,7 @@ watch(
 )
 
 watch(form, (value) => {
-  if (props.open && formInitialized.value) localStorage.setItem(draftKey(), JSON.stringify(value))
+  if (props.open && formInitialized.value) storageSet(draftKey(), JSON.stringify(value))
 }, { deep: true })
 
 // 协议联动：锁定 security 选项
@@ -168,20 +175,21 @@ async function saveNode() {
     congestion_control: isTuic ? (form.congestion_control || 'bbr') : null,
     remark: form.remark.trim() || null,
     is_active: true,
+    is_agentless: !!form.is_agentless,
   }
   try {
     if (props.editing) {
       await api.nodes.update(props.editing.id, payload)
-      toast(t('nodes.updated'))
+      toast?.(t('nodes.updated'))
     } else {
       await api.nodes.create(payload)
-      toast(t('nodes.created'))
+      toast?.(t('nodes.created'))
     }
-    localStorage.removeItem(draftKey())
+    storageRemove(draftKey())
     emit('close')
     emit('saved')
   } catch (e) {
-    toast((e as Error).message, 'error')
+    toast?.((e as Error).message, 'error')
   }
 }
 
@@ -192,7 +200,7 @@ function applyJsonImport() {
   // 再尝试解析 JSON
   if (!obj) obj = parseNodeJson(jsonInput.value)
   if (!obj) {
-    toast(t('nodes.jsonError'), 'error')
+    toast?.(t('nodes.jsonError'), 'error')
     return
   }
   // 同时支持 Sing-box outbound 和 Xray VLESS outbound。
@@ -243,7 +251,7 @@ function applyJsonImport() {
   form.path = String(transport.path || '')
   onProtocolChange()
   onTransportChange()
-  toast(t('nodes.jsonSuccess'))
+  toast?.(t('nodes.jsonSuccess'))
 }
 
 // 全局 Ctrl+V 快捷提取（弹窗打开且无输入框聚焦时）
@@ -272,20 +280,20 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
         <button class="modal-close" @click="closeModal(true)">&times;</button>
       </div>
       <form @submit.prevent="saveNode" class="modal-form">
-        <div class="form-span" style="margin-bottom: 14px; background: rgba(59,130,246,0.1); padding: 10px; border-radius: 8px; border: 1px dashed rgba(59,130,246,0.4)">
-          <div style="display: flex; justify-content: space-between; align-items: center">
-            <span style="font-size: 0.8rem; color: var(--primary); font-weight: 600">{{ t('nodes.jsonImport') }} <span style="font-weight: normal; font-size: 0.75rem; color: var(--text-muted)">{{ t('nodes.jsonShortcut') }}</span></span>
+        <div class="form-span json-import-panel">
+          <div class="json-import-header">
+            <span class="json-import-title">{{ t('nodes.jsonImport') }} <span class="json-import-shortcut">{{ t('nodes.jsonShortcut') }}</span></span>
             <button type="button" class="btn btn-secondary btn-sm" @click="showJsonImport = !showJsonImport">{{ t('nodes.toggleJson') }}</button>
           </div>
-          <div v-if="showJsonImport" style="margin-top: 10px">
-            <textarea v-model="jsonInput" class="form-control" rows="4" style="font-family: var(--font-mono); font-size: 0.78rem"
+          <div v-if="showJsonImport" class="json-import-body">
+            <textarea v-model="jsonInput" class="form-control code-textarea" rows="4"
               :placeholder="t('nodes.jsonPlaceholder')"></textarea>
-            <button type="button" class="btn btn-primary btn-sm" style="margin-top: 8px; width: 100%" @click="applyJsonImport">{{ t('nodes.jsonApply') }}</button>
+            <button type="button" class="btn btn-primary btn-sm json-apply-btn" @click="applyJsonImport">{{ t('nodes.jsonApply') }}</button>
           </div>
         </div>
 
         <div class="form-group">
-          <label>{{ t('nodes.form.tag') }} <span style="color: var(--accent-rose)">*</span></label>
+          <label>{{ t('nodes.form.tag') }} <span class="required-mark">*</span></label>
           <input v-model="form.tag" class="form-control" :placeholder="t('nodes.form.tagPlaceholder')" required />
         </div>
         <div class="form-group">
@@ -334,11 +342,11 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
 
         <div v-if="form.security === 'reality' && form.transport_type !== 'xhttp'" class="form-span reality-panel">
           <div class="form-group">
-            <label>{{ t('nodes.form.publicKey') }} <span style="color: var(--accent-rose)">*</span></label>
+            <label>{{ t('nodes.form.publicKey') }} <span class="required-mark">*</span></label>
             <input v-model="form.public_key" class="form-control" placeholder="如 99BZ0JCnaSB55YEQYOCV66GhKTiK2ZGMPR3b6D_Q3wo" />
           </div>
           <div class="form-group">
-            <label>{{ t('nodes.form.shortId') }} <span style="color: var(--accent-rose)">*</span></label>
+            <label>{{ t('nodes.form.shortId') }} <span class="required-mark">*</span></label>
             <input v-model="form.short_id" class="form-control" placeholder="如 1a91" />
           </div>
           <div class="form-group">
@@ -372,6 +380,14 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
           <input v-model="form.path" class="form-control" placeholder="/path" />
         </div>
 
+        <div class="form-group form-span agentless-panel">
+          <label class="agentless-label">
+            <input v-model="form.is_agentless" type="checkbox" />
+            <span>免 Agent / 手工运维（离线也放行，跳过 Agent 心跳与绑定校验）</span>
+          </label>
+          <div class="agentless-hint">开启后 Mall 下单即使 Agent 离线也能 <code>release</code> 成功（<code>delivered=true</code>），需自行保证落地机 Xray 配置与此节点一致</div>
+        </div>
+
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" @click="closeModal()">{{ t('common.cancel') }}</button>
           <button type="submit" class="btn btn-primary">{{ t('nodes.form.saveNode') }}</button>
@@ -380,3 +396,60 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
     </div>
   </div>
 </template>
+
+<style scoped>
+.json-import-panel {
+  margin-bottom: 14px;
+  background: rgba(59, 130, 246, 0.1);
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px dashed rgba(59, 130, 246, 0.4);
+}
+.json-import-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.json-import-title {
+  font-size: 0.8rem;
+  color: var(--primary);
+  font-weight: 600;
+}
+.json-import-shortcut {
+  font-weight: normal;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.json-import-body {
+  margin-top: 10px;
+}
+.code-textarea {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+.json-apply-btn {
+  margin-top: 8px;
+  width: 100%;
+}
+.required-mark {
+  color: var(--accent-rose);
+}
+.agentless-panel {
+  background: rgba(251, 191, 36, 0.08);
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px dashed rgba(251, 191, 36, 0.4);
+}
+.agentless-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  margin: 0;
+}
+.agentless-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+</style>

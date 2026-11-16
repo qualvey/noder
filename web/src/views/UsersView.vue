@@ -4,17 +4,19 @@ import { computed, inject, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import type { DistFile, Node, User, UserDownload } from '../types'
-import { buildDownloadLink, buildMihomoLink, buildSubLink, buildXrayLink, copyText } from '../utils'
 import UserFormModal from '../components/UserFormModal.vue'
 import TemplateBranchModal from '../components/TemplateBranchModal.vue'
-import ContextMenu, { type ContextMenuItem } from '../components/ContextMenu.vue'
-import { ToastType } from '@/App.vue'
+import ContextMenu from '../components/ContextMenu.vue'
+import UserDownloadHistoryModal from '../components/UserDownloadHistoryModal.vue'
+import UserTable from '../components/UserTable.vue'
+import { ToastKey, PopoverKey, MetricsKey } from '../injectionKeys'
 import { useFuzzySearch } from '../composables'
+import { useUserCopyActions } from '../composables/useUserCopyActions'
 
 const { t, locale } = useI18n()
-const toast = inject('toast') as (msg: string, type?: ToastType) => void
-const popover = inject('popover') as { show: (el: Element, title: string, cb: () => void) => void }
-const updateMetrics = inject('metrics') as (nodes: number, users: number) => void
+const toast = inject(ToastKey)
+const popover = inject(PopoverKey)
+const updateMetrics = inject(MetricsKey)
 
 const users = ref<User[]>([])
 const nodes = ref<Node[]>([])
@@ -41,102 +43,15 @@ function closeCtxMenu() {
   ctxMenu.value = null
 }
 
-function copySubLink() {
-  const user = ctxMenu.value?.user
-  if (!user) return
-  copyText(buildSubLink(user.token)).then((ok) => {
-    toast(ok ? t('users.subLinkCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
-  })
-  closeCtxMenu()
-}
+const { copyValue, ctxMenuItems } = useUserCopyActions(
+  ctxMenu,
+  zipFiles,
+  closeCtxMenu,
+  openTemplateBranchModal,
+)
 
-function copyMihomoLink() {
-  const user = ctxMenu.value?.user
-  if (!user) return
-  copyText(buildMihomoLink(user.token)).then((ok) => {
-    toast(ok ? t('users.mihomoLinkCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
-  })
-  closeCtxMenu()
-}
-
-function copyXrayLink() {
-  const user = ctxMenu.value?.user
-  if (!user) return
-  copyText(buildXrayLink(user.token)).then((ok) => {
-    toast(ok ? t('users.xrayLinkCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
-  })
-  closeCtxMenu()
-}
-
-async function copyNodes() {
-  const user = ctxMenu.value?.user
-  if (!user) return
-  closeCtxMenu()
-  try {
-    const nodes = await api.userNodes(user.token)
-    const formattedText = nodes.map(node => JSON.stringify(node, null, 2)).join(',\n')
-    const ok = await copyText(formattedText)
-    toast(ok ? t('users.nodesJsonCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
-  } catch (e) {
-    toast((e as Error).message, 'error')
-  }
-}
-
-async function copyUser() {
-  const user = ctxMenu.value?.user
-  if (!user) return
-  closeCtxMenu()
-  try {
-    const payload = {
-      name: user.name,
-      uuid: user.uuid ?? "",
-      password: user.password ?? ""
-    }
-    const textToCopy = JSON.stringify(payload, null, 2)
-    await navigator.clipboard.writeText(textToCopy)
-    toast(t('users.userCopied'), "success")
-  } catch(e) {
-    toast((e as Error).message, "error")
-  }
-}
-
-// Copy the credential object accepted by Xray VLESS users/clients.
-async function copyXrayUser() {
-  const user = ctxMenu.value?.user
-  if (!user) return
-  closeCtxMenu()
-  const payload = {
-    id: user.uuid ?? '',
-    email: user.name,
-  }
-  const ok = await copyText(JSON.stringify(payload, null, 2))
-  toast(ok ? t('users.xrayUserCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
-}
-
-function copyValue(val: string | undefined | null, label: string) {
-  if (!val || val === '-') return
-  copyText(val).then((ok) => {
-    toast(ok ? t('users.copiedToClipboard', { label }) : t('common.copyFailed'), ok ? 'info' : 'error')
-  })
-}
-
-function copyToken() {
-  const user = ctxMenu.value?.user
-  if (!user) return
-  closeCtxMenu()
-  copyText(user.token).then((ok) => {
-    toast(ok ? t('users.tokenCopied') : t('common.copyFailed'), ok ? 'info' : 'error')
-  })
-}
-
-function getNodeName(id: number) {
-  const node = nodes.value.find((n) => n.id === id)
-  return node?.node_name || node?.tag || `#${id}`
-}
-
-function getNodeProtocol(id: number) {
-  const node = nodes.value.find((n) => n.id === id)
-  return node?.protocol || ''
+function requestDeleteUser(user: User, el: Element) {
+  popover?.show(el, t('users.deleteConfirm'), () => removeUser(user.id))
 }
 
 function formatDownloadTime(value?: string | null) {
@@ -151,41 +66,10 @@ async function showDownloadHistory(user: User) {
   try {
     downloadHistory.value = await api.users.downloads(user.id)
   } catch (e) {
-    toast((e as Error).message, 'error')
+    toast?.((e as Error).message, 'error')
   } finally {
     loadingDownloadHistory.value = false
   }
-}
-
-// 复制 ZIP 配置包下载链接
-function copyZipLink(f: DistFile) {
-  const user = ctxMenu.value?.user
-  if (!user) return
-  closeCtxMenu()
-  const url = buildDownloadLink(f.id, user.token)
-  copyText(url).then((ok) => {
-    toast(ok ? t('users.downloadLinkCopied', { name: f.name }) : t('common.copyFailed'), ok ? 'info' : 'error')
-  })
-}
-
-const ctxMenuItems = (): ContextMenuItem[] => {
-  const items: ContextMenuItem[] = [
-    { label: t('users.menu.copyToken'), icon: '🔑', onClick: copyToken },
-    { label: t('users.menu.copySingbox'), icon: '📋', onClick: copySubLink },
-    { label: t('users.menu.copyMihomo'), icon: '🔄', onClick: copyMihomoLink },
-    { label: t('users.menu.copyXray'), icon: '⚡', onClick: copyXrayLink },
-    { label: t('users.menu.copyNodes'), icon: '📄', onClick: copyNodes },
-    { label: t('users.menu.copyUser'), icon: '👤', onClick: copyUser },
-    { label: t('users.menu.copyXrayUser'), icon: '🛠️', onClick: copyXrayUser }
-  ]
-  if (zipFiles.value.length) {
-    items.push({ label: t('users.menu.configDlHeader'), icon: '📦', divider: true, onClick: () => { } })
-    for (const z of zipFiles.value) {
-      items.push({ label: t('users.menu.copyDl', { name: z.name }), icon: '🔗', onClick: () => copyZipLink(z) })
-    }
-  }
-  items.push({ label: t('users.menu.templateBranch') || '模板管理', icon: '📝', divider: true, onClick: openTemplateBranchModal })
-  return items
 }
 
 function openTemplateBranchModal() {
@@ -202,9 +86,9 @@ async function fetchData(silent = false) {
     users.value = u
     nodes.value = n
     zipFiles.value = f.filter((x) => x.file_type === 'zip' && x.is_active)
-    updateMetrics(n.length, u.length)
+    updateMetrics?.(n.length, u.length)
   } catch (e) {
-    toast((e as Error).message, 'error')
+    toast?.((e as Error).message, 'error')
   } finally {
     loading.value = false
   }
@@ -229,19 +113,24 @@ async function removeUser(id: number) {
     s.delete(id)
     selected.value = s
   }
-  updateMetrics(nodes.value.length, users.value.length)
+  updateMetrics?.(nodes.value.length, users.value.length)
 
   try {
     await api.users.remove(id)
-    toast(t('users.deleted'))
+    toast?.(t('users.deleted'))
     // 静默对齐后端最新数据，不触发全屏 loading 闪烁
     await fetchData(true)
   } catch (e) {
     // 异常时优雅回滚
     users.value = prevUsers
-    updateMetrics(nodes.value.length, prevUsers.length)
-    toast((e as Error).message, 'error')
+    updateMetrics?.(nodes.value.length, prevUsers.length)
+    toast?.((e as Error).message, 'error')
   }
+}
+
+function lookupNodeName(id: number) {
+  const node = nodes.value.find((n) => n.id === id)
+  return node?.node_name || node?.tag || `#${id}`
 }
 
 const { searchQuery, filteredItems: filteredUsers, clear: clearSearch } = useFuzzySearch(users, (u) => [
@@ -251,8 +140,8 @@ const { searchQuery, filteredItems: filteredUsers, clear: clearSearch } = useFuz
   u.uuid,
   u.password,
   u.is_active ? t('common.enabled') : t('common.disabled'),
-  ...(u.endpoints || []).map((ep) => ep.tag || ep.node?.node_name || getNodeName(ep.node_id)),
-  ...(u.node_ids || []).map((id) => getNodeName(id)),
+  ...(u.endpoints || []).map((ep) => ep.tag || ep.node?.node_name || lookupNodeName(ep.node_id)),
+  ...(u.node_ids || []).map((id) => lookupNodeName(id)),
 ])
 
 const isAllFilteredSelected = computed(() => {
@@ -284,14 +173,14 @@ function toggleSelectAll() {
 function bulkDelete(e: MouseEvent) {
   const count = selected.value.size
   if (!count) return
-  popover.show(e.currentTarget as Element, t('users.bulkDeleteConfirm', { count }), async () => {
+  popover?.show(e.currentTarget as Element, t('users.bulkDeleteConfirm', { count }), async () => {
     const idsToDelete = Array.from(selected.value)
     const prevUsers = [...users.value]
 
     // 乐观更新：批量从视图平滑移除
     users.value = users.value.filter((u) => !selected.value.has(u.id))
     selected.value = new Set()
-    updateMetrics(nodes.value.length, users.value.length)
+    updateMetrics?.(nodes.value.length, users.value.length)
 
     try {
       for (const id of idsToDelete) {
@@ -301,36 +190,23 @@ function bulkDelete(e: MouseEvent) {
           /* 继续 */
         }
       }
-      toast(t('users.bulkDeleteSuccess', { count }))
+      toast?.(t('users.bulkDeleteSuccess', { count }))
       await fetchData(true)
     } catch {
       users.value = prevUsers
-      updateMetrics(nodes.value.length, prevUsers.length)
+      updateMetrics?.(nodes.value.length, prevUsers.length)
     }
   })
-}
-
-// 离开动画钩子：记录元素离开瞬间的几何尺寸与相对容器位移，保证表格其余行平滑滑向新位置 (FLIP)
-function onBeforeLeave(el: Element) {
-  const htmlEl = el as HTMLElement
-  const rect = htmlEl.getBoundingClientRect()
-  const parentRect = htmlEl.parentElement?.getBoundingClientRect()
-  if (parentRect) {
-    htmlEl.style.left = `${rect.left - parentRect.left}px`
-    htmlEl.style.top = `${rect.top - parentRect.top}px`
-    htmlEl.style.width = `${rect.width}px`
-    htmlEl.style.height = `${rect.height}px`
-  }
 }
 
 onMounted(() => fetchData())
 </script>
 
 <template>
-  <section class="tab-content" style="display: block">
+  <section class="tab-content users-tab">
     <div class="section-header">
       <div class="section-title">{{ t('users.headerTitle') }}</div>
-      <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
+      <div class="section-actions">
         <SearchInput
           v-model="searchQuery"
           :placeholder="t('users.searchPlaceholder')"
@@ -342,158 +218,28 @@ onMounted(() => fetchData())
           🗑️ {{ t('users.bulkDelete', { count: selected.size }) }}
         </button>
         <button class="btn btn-primary" @click="openCreate">
-          <span style="font-size: 1.1rem; line-height: 1">+</span> {{ t('users.addUser') }}
+          <span class="plus-mark">+</span> {{ t('users.addUser') }}
         </button>
       </div>
     </div>
 
-    <div class="table-container">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th style="width: 44px; text-align: center">
-              <input type="checkbox" :checked="isAllFilteredSelected"
-                @change="toggleSelectAll" />
-            </th>
-            <th style="min-width: 140px">{{ t('users.colName') }}</th>
-            <th style="min-width: 260px">{{ t('users.colCredentials') }}</th>
-            <th style="width: 120px; text-align: center">{{ t('users.colBoundNodes') }}</th>
-            <th style="width: 100px; text-align: center">{{ t('users.colStatus') }}</th>
-            <th style="min-width: 190px; text-align: center">{{ t('users.colDownloads') }}</th>
-            <th style="width: 90px; text-align: center">{{ t('users.colActions') }}</th>
-          </tr>
-        </thead>
-        <tbody v-if="loading && !users.length">
-          <tr>
-            <td :colspan="7" style="text-align: center; padding: 40px 0;">
-              <div class="table-loading-container">
-                <!-- SVG 转圈 -->
-                <svg class="spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle class="spinner-track" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="spinner-head" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                </svg>
-                <span class="loading-text">{{ t('users.loadingData') }}</span>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-        <tbody v-else-if="!users.length">
-          <tr>
-            <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px">{{ t('users.emptyText') }}</td>
-          </tr>
-        </tbody>
-        <tbody v-else-if="!filteredUsers.length">
-          <tr>
-            <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 36px">
-              <div style="font-size: 1.8rem; margin-bottom: 8px">🔍</div>
-              <div style="margin-bottom: 12px">{{ t('users.noMatchingUsers') }}</div>
-              <button class="btn btn-secondary btn-sm" @click="clearSearch">{{ t('common.clearFilter') }}</button>
-            </td>
-          </tr>
-        </tbody>
-        <TransitionGroup
-          v-else
-          tag="tbody"
-          name="user-row"
-          @before-leave="onBeforeLeave"
-        >
-          <tr v-for="user in filteredUsers" :key="user.id" @contextmenu.prevent="onRowContextMenu($event, user)">
-            <td style="text-align: center">
-              <input type="checkbox" :checked="selected.has(user.id)" @change="toggleSelect(user.id)" />
-            </td>
-            <td>
-              <div style="font-weight: 600; color: var(--text-main)">{{ user.name }}</div>
-              <div v-if="user.remark" style="font-size: 0.75rem; color: var(--text-muted)">{{ user.remark }}</div>
-            </td>
-            <td>
-              <div
-                v-if="user.uuid"
-                class="copyable-cell"
-                :title="t('users.copyUuidTitle')"
-                @click.stop="copyValue(user.uuid, 'UUID')"
-              >
-                <span class="cred-label">UUID</span>
-                <code class="clickable-code">{{ user.uuid }}</code>
-              </div>
-              <div v-else class="copyable-cell" style="color: var(--text-dim)">
-                <span class="cred-label">UUID</span><code>-</code>
-              </div>
-
-              <div
-                v-if="user.password"
-                class="copyable-cell"
-                :title="t('users.copyPwdTitle')"
-                @click.stop="copyValue(user.password, 'PWD')"
-                style="margin-top: 4px;"
-              >
-                <span class="cred-label">PWD</span>
-                <code class="clickable-code">{{ user.password }}</code>
-              </div>
-              <div v-else class="copyable-cell" style="color: var(--text-dim); margin-top: 4px;">
-                <span class="cred-label">PWD</span><code>-</code>
-              </div>
-            </td>
-            <td style="text-align: center">
-              <div v-if="(user.endpoints && user.endpoints.length) || user.node_ids.length" class="nodes-hover-trigger">
-                <span class="badge badge-nodes">
-                  {{ t('users.boundNodesCount', { count: (user.endpoints && user.endpoints.length) || user.node_ids.length }) }} ▾
-                </span>
-                <!-- 悬浮弹出的节点列表 -->
-                <div class="nodes-popover-menu">
-                  <div class="nodes-popover-title">{{ t('users.colBoundNodes') }} ({{ (user.endpoints && user.endpoints.length) || user.node_ids.length }})</div>
-                  <div class="nodes-popover-list">
-                    <template v-if="user.endpoints && user.endpoints.length">
-                      <div
-                        v-for="(ep, eIdx) in user.endpoints"
-                        :key="ep.id || eIdx"
-                        class="nodes-popover-item"
-                      >
-                        <span v-if="eIdx === 0" class="primary-star" :title="t('users.form.primaryNodeBadge')">★</span>
-                        <span class="node-name-text">{{ ep.tag || ep.node?.node_name || getNodeName(ep.node_id) }}</span>
-                        <span v-if="ep.node?.protocol || getNodeProtocol(ep.node_id)" class="badge-protocol">
-                          {{ (ep.node?.protocol || getNodeProtocol(ep.node_id)).toUpperCase() }}
-                        </span>
-                      </div>
-                    </template>
-                    <template v-else>
-                      <div
-                        v-for="(nid, nIdx) in user.node_ids"
-                        :key="nid"
-                        class="nodes-popover-item"
-                      >
-                        <span v-if="nIdx === 0" class="primary-star" :title="t('users.form.primaryNodeBadge')">★</span>
-                        <span class="node-name-text">{{ getNodeName(nid) }}</span>
-                        <span v-if="getNodeProtocol(nid)" class="badge-protocol">{{ getNodeProtocol(nid).toUpperCase() }}</span>
-                      </div>
-                    </template>
-                  </div>
-                </div>
-              </div>
-              <span v-else style="color: var(--text-dim); font-size: 0.8rem">{{ t('users.unbound') }}</span>
-            </td>
-            <td style="text-align: center">
-              <span class="status-badge" :class="user.is_active ? 'active' : 'inactive'">
-                <span class="status-dot"></span>
-                {{ user.is_active ? (t('common.enabled') || '启用') : (t('common.disabled') || '停用') }}
-              </span>
-            </td>
-            <td style="text-align: center">
-              <button class="download-summary" :title="t('users.viewDownloadHistory')" @click.stop="showDownloadHistory(user)">
-                <span>{{ formatDownloadTime(user.last_download_at) }}</span>
-                <span class="download-count">{{ t('users.downloadCount', { count: user.download_count || 0 }) }}</span>
-              </button>
-            </td>
-            <td style="text-align: center">
-              <div style="display: flex; gap: 8px; justify-content: center; align-items: center; white-space: nowrap">
-                <IconButton icon="edit" :tip="t('common.edit')" variant="secondary" @click="openEdit(user)" />
-                <IconButton icon="delete" :tip="t('common.delete')" variant="danger"
-                  @click="popover.show($event.currentTarget as Element, t('users.deleteConfirm'), () => removeUser(user.id))" />
-              </div>
-            </td>
-          </tr>
-        </TransitionGroup>
-      </table>
-    </div>
+    <UserTable
+      :users="filteredUsers"
+      :total-count="users.length"
+      :loading="loading"
+      :all-selected="isAllFilteredSelected"
+      :selected-ids="selected"
+      :nodes="nodes"
+      :format-download-time="formatDownloadTime"
+      @toggle-select="toggleSelect"
+      @toggle-select-all="toggleSelectAll"
+      @copy-value="copyValue"
+      @show-downloads="showDownloadHistory"
+      @edit="openEdit"
+      @delete-request="requestDeleteUser"
+      @row-contextmenu="onRowContextMenu"
+      @clear-search="clearSearch"
+    />
   </section>
 
   <UserFormModal :open="showModal" :editing="editingUser" :nodes="nodes" @close="showModal = false"
@@ -504,186 +250,40 @@ onMounted(() => fetchData())
   <ContextMenu v-if="ctxMenu" :x="ctxMenu.x" :y="ctxMenu.y" :title="ctxMenu.user.name" :items="ctxMenuItems()"
     @close="closeCtxMenu" />
 
-  <div v-if="downloadHistoryUser" class="modal-overlay active" @mousedown.self="downloadHistoryUser = null">
-    <div class="modal download-history-modal">
-      <div class="modal-header">
-        <div class="modal-title">{{ t('users.downloadHistoryTitle', { name: downloadHistoryUser.name }) }}</div>
-        <button class="modal-close" @click="downloadHistoryUser = null">&times;</button>
-      </div>
-      <div class="download-history-content">
-        <div v-if="loadingDownloadHistory" class="download-history-empty">{{ t('common.loading') }}</div>
-        <div v-else-if="!downloadHistory.length" class="download-history-empty">{{ t('users.noDownloads') }}</div>
-        <div v-else class="download-history-list">
-          <div v-for="item in downloadHistory" :key="item.id" class="download-history-item">
-            <span class="download-history-name">{{ item.file_name }}</span>
-            <time>{{ formatDownloadTime(item.downloaded_at) }}</time>
-          </div>
-        </div>
-        <div v-if="downloadHistory.length === 100" class="download-history-hint">{{ t('users.historyLimit') }}</div>
-      </div>
-    </div>
-  </div>
+  <UserDownloadHistoryModal
+    :user="downloadHistoryUser"
+    :history="downloadHistory"
+    :loading="loadingDownloadHistory"
+    :format-time="formatDownloadTime"
+    @close="downloadHistoryUser = null"
+  />
 
   <!-- ZIP 生成等待页 -->
   <div v-if="downloading" class="download-waiting">
     <div class="waiting-box">
       <div class="waiting-spinner"></div>
       <div class="waiting-text">{{ downloading }}</div>
-      <div style="font-size: 0.75rem; color: var(--text-muted)">配置渲染需要一点时间，请稍候</div>
+      <div class="waiting-hint">配置渲染需要一点时间，请稍候</div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.copyable-cell {
-  cursor: pointer;
-  padding: 1px 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  user-select: none;
-  white-space: nowrap;
-}
-.download-summary {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 2px;
-  border: 0;
-  background: transparent;
-  color: var(--text-main);
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.78rem;
-}
-.download-summary:hover { color: var(--primary); }
-.download-count { color: var(--text-muted); font-size: 0.7rem; }
-.download-history-modal { max-width: 620px; }
-.download-history-content { padding: 16px 20px 20px; max-height: 65vh; overflow-y: auto; }
-.download-history-list { display: flex; flex-direction: column; gap: 8px; }
-.download-history-item { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 12px; border: 1px solid var(--border-glass); border-radius: var(--radius-sm); }
-.download-history-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.download-history-item time { flex-shrink: 0; color: var(--text-muted); font-size: 0.78rem; }
-.download-history-empty, .download-history-hint { color: var(--text-muted); text-align: center; padding: 18px; font-size: 0.85rem; }
-.download-history-hint { padding-bottom: 0; font-size: 0.75rem; }
-.cred-label {
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: var(--text-muted);
-  width: 32px;
-  flex-shrink: 0;
-}
-.clickable-code {
-  font-family: var(--font-mono);
-  font-size: 0.76rem;
-  word-break: keep-all;
-  white-space: nowrap;
-  padding: 2px 7px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: all 0.15s ease;
-  color: var(--text-main);
-}
-:global([data-theme='light']) .clickable-code {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.08);
-}
-.copyable-cell:hover .clickable-code {
-  color: var(--primary);
-  border-color: var(--primary);
-  background: var(--bg-hover);
-}
-
-/* 节点悬浮气泡 */
-.nodes-hover-trigger {
-  position: relative;
-  display: inline-block;
-}
-.badge-nodes {
-  background: rgba(99, 102, 241, 0.15);
-  color: #a5b4fc;
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  cursor: pointer;
-  padding: 3px 8px;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  transition: all 0.2s ease;
-  user-select: none;
-}
-.nodes-hover-trigger:hover .badge-nodes {
-  background: rgba(99, 102, 241, 0.25);
-  border-color: rgba(99, 102, 241, 0.5);
-  color: #fff;
-}
-.nodes-popover-menu {
-  display: none;
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-glass);
-  border-radius: var(--radius-md);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  padding: 10px;
-  min-width: 190px;
-  max-width: 280px;
-  z-index: 1000;
-  text-align: left;
-  backdrop-filter: blur(12px);
-}
-.nodes-hover-trigger:hover .nodes-popover-menu {
+.users-tab {
   display: block;
 }
-.nodes-popover-title {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  font-weight: 600;
-  margin-bottom: 6px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--border-glass);
-}
-.nodes-popover-list {
+.section-actions {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 180px;
-  overflow-y: auto;
-}
-.nodes-popover-item {
-  display: flex;
+  gap: 12px;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 0.75rem;
-  padding: 4px 6px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.03);
+  flex-wrap: wrap;
 }
-:global([data-theme='light']) .nodes-popover-item {
-  background: rgba(0, 0, 0, 0.03);
-}
-.node-name-text {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-main);
-}
-.primary-star {
-  color: #fbbf24;
-  font-size: 0.8rem;
+.plus-mark {
+  font-size: 1.1rem;
   line-height: 1;
 }
-.badge-protocol {
-  font-size: 0.65rem;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: rgba(59, 130, 246, 0.2);
-  color: #93c5fd;
-  font-family: var(--font-mono);
-  font-weight: 600;
-  flex-shrink: 0;
+.waiting-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
 }
 </style>

@@ -1,5 +1,5 @@
 // API 客户端：统一鉴权、错误处理、相对路径（兼容子路径反代）
-import type { DistFile, Endpoint, Node, TemplateBranch, User, UserDownload } from './types'
+import type { DistFile, Endpoint, Node, Template, TemplateBranch, User, UserDownload } from './types'
 
 const base = import.meta.env.BASE_URL
 // dev 下 BASE_URL 为 '/'，build 后为 './'
@@ -86,6 +86,30 @@ async function request<T>(path: string, options: Omit<RequestInit, 'body'> & { b
 }
 
 export const api = {
+  agents: {
+    list: (params?: { status?: string; q?: string; page?: number; limit?: number }) => {
+      const qs = new URLSearchParams()
+      if (params?.status) qs.set('status', params.status)
+      if (params?.q) qs.set('q', params.q)
+      if (params?.page) qs.set('page', String(params.page))
+      if (params?.limit) qs.set('limit', String(params.limit))
+      const suffix = qs.toString() ? `?${qs}` : ''
+      return request<{ total: number; items: import('./types').Agent[]; page: number; limit: number }>(`/api/agents${suffix}`).then(r => (r as unknown as { data: { total: number; items: import('./types').Agent[]; page: number; limit: number } }).data ?? r as unknown as { total: number; items: import('./types').Agent[]; page: number; limit: number })
+    },
+    create: (body: { id?: string; name: string }) => request<{ id: string; name: string; status: string; control_token: string }>(`/api/agents`, { method: 'POST', body }),
+    get: (id: string) => request<import('./types').Agent>(`/api/agents/${encodeURIComponent(id)}`).then(r => (r as unknown as { data: import('./types').Agent }).data ?? r as unknown as import('./types').Agent),
+    update: (id: string, body: { name?: string; status?: string }) => request<import('./types').Agent>(`/api/agents/${encodeURIComponent(id)}`, { method: 'PUT', body }),
+    remove: (id: string, force?: boolean) => request<{ message: string }>(`/api/agents/${encodeURIComponent(id)}${force ? '?force=true' : ''}`, { method: 'DELETE' }),
+    rotateToken: (id: string) => request<{ id: string; control_token: string }>(`/api/agents/${encodeURIComponent(id)}/token/rotate`, { method: 'POST' }).then(r => (r as unknown as { data: { id: string; control_token: string } }).data ?? r as unknown as { id: string; control_token: string }),
+    listBindings: (id: string) => request<import('./types').AgentBinding[]>(`/api/agents/${encodeURIComponent(id)}/bindings`).then(r => (r as unknown as { data: import('./types').AgentBinding[] }).data ?? r as unknown as import('./types').AgentBinding[]),
+    addBindings: (id: string, body: { endpoint_id?: number; endpoint_ids?: number[] }) => request<import('./types').AgentBinding[]>(`/api/agents/${encodeURIComponent(id)}/bindings`, { method: 'POST', body }).then(r => (r as unknown as { data: import('./types').AgentBinding[] }).data ?? r as unknown as import('./types').AgentBinding[]),
+    removeBinding: (id: string, endpointId: number) => request<{ message: string }>(`/api/agents/${encodeURIComponent(id)}/bindings/${endpointId}`, { method: 'DELETE' }),
+  },
+  endpointBindings: {
+    list: (endpointId: number) => request<import('./types').EndpointBinding[]>(`/api/endpoints/${endpointId}/bindings`).then(r => (r as unknown as { data: import('./types').EndpointBinding[] }).data ?? r as unknown as import('./types').EndpointBinding[]),
+    add: (endpointId: number, body: { agent_id?: string; agent_ids?: string[] }) => request<import('./types').EndpointBinding[]>(`/api/endpoints/${endpointId}/bindings`, { method: 'POST', body }).then(r => (r as unknown as { data: import('./types').EndpointBinding[] }).data ?? r as unknown as import('./types').EndpointBinding[]),
+    remove: (endpointId: number, agentId: string) => request<{ message: string }>(`/api/endpoints/${endpointId}/bindings/${encodeURIComponent(agentId)}`, { method: 'DELETE' }),
+  },
   nodes: {
     list: () => request<Node[]>('/api/nodes'),
     create: (body: Partial<Node>) => request<Node>('/api/nodes', { method: 'POST', body }),
@@ -181,6 +205,9 @@ export const api = {
     }) => request<TemplateBranch>(`/api/template-branches/${id}`, { method: 'PUT', body }),
     remove: (id: number) => request<{ message: string }>(`/api/template-branches/${id}`, { method: 'DELETE' }),
   },
+  templates: {
+    list: () => request<Template[]>('/api/templates'),
+  },
   settings: {
     sharedToken: () => request<{ token: string }>('/api/settings/shared-token'),
     resetSharedToken: () => request<{ token: string }>('/api/settings/shared-token/reset', { method: 'POST' }),
@@ -202,6 +229,44 @@ export const api = {
     const res = await fetch(`${apiBase()}/mihomo?token=${encodeURIComponent(token)}`)
     if (!res.ok) throw new ApiError(res.status, `订阅拉取失败 (${res.status})`)
     return res.text()
+  },
+  releaseLogs: {
+    list: (params?: {
+      page?: number
+      limit?: number
+      page_size?: number
+      subscription_id?: string
+      endpoint_id?: number
+      credential_id?: string
+      external_ref?: string
+      caller_ip?: string
+      request_id?: string
+      http_status?: number
+      business_code?: number
+      error_code?: string
+      delivered?: boolean
+      agent_online?: boolean
+      since?: string
+      until?: string
+      q?: string
+    }) => {
+      const qs = new URLSearchParams()
+      if (params)
+        for (const [k, v] of Object.entries(params)) {
+          if (v === undefined || v === null || v === '') continue
+          qs.set(k, String(v))
+        }
+      const suffix = qs.toString() ? `?${qs}` : ''
+      return request<{ items: import('./types').ServiceReleaseLog[]; total: number; page: number; limit: number; total_pages: number }>(`/api/admin/service-release-logs${suffix}`).then(r => (r as unknown as { data: { items: import('./types').ServiceReleaseLog[]; total: number; page: number; limit: number; total_pages: number } }).data ?? r as unknown as { items: import('./types').ServiceReleaseLog[]; total: number; page: number; limit: number; total_pages: number })
+    },
+    get: (id: number) => request<import('./types').ServiceReleaseLog>(`/api/admin/service-release-logs/${id}`).then(r => (r as unknown as { data: import('./types').ServiceReleaseLog }).data ?? r as unknown as import('./types').ServiceReleaseLog),
+    stats: (params?: { since?: string; until?: string }) => {
+      const qs = new URLSearchParams()
+      if (params?.since) qs.set('since', params.since)
+      if (params?.until) qs.set('until', params.until)
+      const suffix = qs.toString() ? `?${qs}` : ''
+      return request<import('./types').ServiceReleaseLogStats>(`/api/admin/service-release-logs/stats${suffix}`).then(r => (r as unknown as { data: import('./types').ServiceReleaseLogStats }).data ?? r as unknown as import('./types').ServiceReleaseLogStats)
+    },
   },
   // 用户侧节点 JSON（无需 Admin Token）
   userNodes: async (token: string): Promise<Record<string, unknown>[]> => {

@@ -61,18 +61,27 @@ export function parseJsonConfigs(jsonStr: string): {
   let raw: unknown
   try {
     raw = tryParseJsonWithArrayFallback(trimmed)
-  } catch (e: any) {
-    return { configs: [], error: `JSON 解析错误: ${e.message}`, warnings: [] }
+  } catch (e: unknown) {
+    return { configs: [], error: `JSON 解析错误: ${e instanceof Error ? e.message : String(e)}`, warnings: [] }
   }
 
   const supportedHandlers = getAllHandlers()
   const supportedProtocols = supportedHandlers.map((h) => h.protocol)
 
-  let candidates: unknown[] = []
+  function hasOutboundsArray(v: unknown): v is { outbounds: unknown[] } {
+    return (
+      !!v &&
+      typeof v === 'object' &&
+      'outbounds' in v &&
+      Array.isArray((v as { outbounds: unknown }).outbounds)
+    )
+  }
+
+  let candidates: unknown[]
   if (Array.isArray(raw)) {
     candidates = raw
-  } else if (raw && typeof raw === 'object' && Array.isArray((raw as any).outbounds)) {
-    candidates = (raw as any).outbounds
+  } else if (hasOutboundsArray(raw)) {
+    candidates = raw.outbounds
   } else if (raw && typeof raw === 'object') {
     candidates = [raw]
   } else {
@@ -93,10 +102,10 @@ export function parseJsonConfigs(jsonStr: string): {
       continue
     }
 
-    const type = (item as any).type
-    if (!type || !supportedProtocols.includes(type)) {
+    const type: unknown = (item as { type?: unknown }).type
+    if (typeof type !== 'string' || !supportedProtocols.includes(type)) {
       // 如果输入的是完整 sing-box 配置里的其他非代理出站（如 direct, block, dns 等），在数组中跳过，不报阻断性错误
-      if (candidates.length > 1 && type && ['direct', 'block', 'dns'].includes(type)) {
+      if (candidates.length > 1 && typeof type === 'string' && ['direct', 'block', 'dns'].includes(type)) {
         continue
       }
       errors.push(
@@ -159,12 +168,10 @@ export function parseLinkToConfig(link: string): BaseOutboundConfig {
     throw new Error(`未知的分享链接格式，必须以 ${supportedSchemes} 开头`)
   }
 
-  let url: URL
-  try {
-    url = new URL(cleanLink)
-  } catch (e: any) {
-    throw new Error(`链接格式不合法: ${e.message}`)
+  if (!URL.canParse(cleanLink)) {
+    throw new Error('链接格式不合法: 无法解析为 URL')
   }
+  const url = new URL(cleanLink)
 
   return handler.parseUrl(url)
 }
@@ -198,8 +205,9 @@ export function parseLinksToConfigs(linksStr: string): {
     try {
       const cfg = parseLinkToConfig(line)
       configs.push(cfg)
-    } catch (e: any) {
-      warnings.push(lines.length > 1 ? `第 ${i + 1} 行链接解析失败: ${e.message}` : `链接解析错误: ${e.message}`)
+    } catch (e: unknown) {
+      const reason = e instanceof Error ? e.message : String(e)
+      warnings.push(lines.length > 1 ? `第 ${i + 1} 行链接解析失败: ${reason}` : `链接解析错误: ${reason}`)
     }
   }
 
