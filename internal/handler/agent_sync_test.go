@@ -423,3 +423,205 @@ func TestCreateDesiredDeployments(t *testing.T) {
 	}
 }
 
+func TestAgentStateSyncFullySynced(t *testing.T) {
+	r, agent, node, cleanup := setupAgentTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	credID := "cred_sync_001"
+	dep := &model.CredentialDeployment{
+		CredentialID: credID, EndpointID: node.ID, AgentNodeID: agent.ID,
+		DesiredState: "active", AppliedState: "active", Revision: "100",
+	}
+	if _, err := db.DB.NewInsert().Model(dep).Exec(ctx); err != nil {
+		t.Fatalf("insert dep: %v", err)
+	}
+
+	present := true
+	body := map[string]interface{}{
+		"items": []map[string]interface{}{
+			{"credential_id": credID, "endpoint_id": node.ID, "applied_state": "active", "revision": "100", "present": present},
+		},
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest("POST", "/api/agent/v1/state/sync", bytes.NewReader(b))
+	req.Header.Set("X-Agent-Token", *agent.ControlTokenCiphertext)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			Drift       []map[string]interface{} `json:"drift"`
+			Conflicts   []map[string]interface{} `json:"conflicts"`
+			NextSyncSec int                      `json:"next_sync_sec"`
+			ServerTime  string                   `json:"server_time"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Data.Drift) != 0 {
+		t.Fatalf("expected 0 drift when fully synced, got %d: %+v", len(resp.Data.Drift), resp.Data.Drift)
+	}
+	if len(resp.Data.Conflicts) != 0 {
+		t.Fatalf("expected 0 conflicts, got %+v", resp.Data.Conflicts)
+	}
+	if resp.Data.NextSyncSec != 30 {
+		t.Fatalf("expected next_sync_sec 30, got %d", resp.Data.NextSyncSec)
+	}
+	if resp.Data.ServerTime == "" {
+		t.Fatalf("expected server_time")
+	}
+	if _, err := time.Parse(time.RFC3339, resp.Data.ServerTime); err != nil {
+		t.Fatalf("server_time not RFC3339: %v", err)
+	}
+	// verify DB last_sync_at updated and last_error cleared
+	var updated model.CredentialDeployment
+	if err := db.DB.NewSelect().Model(&updated).Where("credential_id = ? AND endpoint_id = ? AND agent_node_id = ?", credID, node.ID, agent.ID).Scan(ctx); err != nil {
+		t.Fatalf("load dep: %v", err)
+	}
+	if updated.LastSyncAt == nil {
+		t.Fatalf("expected last_sync_at set")
+	}
+	if updated.LastError != nil {
+		t.Fatalf("expected last_error nil, got %v", *updated.LastError)
+	}
+}
+
+func TestAgentStateSyncDrift(t *testing.T) {
+	r, agent, node, cleanup := setupAgentTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// desired active but agent missing -> add
+	credAdd := "cred_drift_add"
+	depAdd := &model.CredentialDeployment{CredentialID: credAdd, EndpointID: node.ID, AgentNodeID: agent.ID, DesiredState: "active", AppliedState: "unknown", Revision: "200"}
+	// desired active but revision mismatch -> update
+	credUpd := "cred_drift_upd"
+	depUpd := &model.CredentialDeployment{CredentialID: credUpd, EndpointID: node.ID, AgentNodeID: agent.ID, DesiredState: "active", AppliedState: "active", Revision: "300"}
+	// desired revoked but agent present active -> remove
+	credRem := "cred_drift_rem"
+	depRem := &model.CredentialDeployment{CredentialID: credRem, EndpointID: node.ID, AgentNodeID: agent.ID, DesiredState: "revoked", AppliedState: "active", Revision: "400"}
+	for _, d := range []*model.CredentialDeployment{depAdd, depUpd, depRem} {
+		if _, err := db.DB.NewInsert().Model(d).Exec(ctx); err != nil {
+			t.Fatalf("insert %s: %v", d.CredentialID, err)
+		}
+	}
+
+	body := map[string]interface{}{
+		"items": []map[string]interface{}{
+			// credAdd: present=false -> should trigger add
+			{"credential_id": credAdd, "endpoint_id": node.ID, "applied_state": "active", "revision": "200", "present": false},
+			// credUpd: wrong revision -> update
+			{"credential_id": credUpd, "endpoint_id": node.ID, "applied_state": "active", "revision": "299", "present": true},
+			// credRem: agent still active but desired revoked -> remove
+			{"credential_id": credRem, "endpoint_id": node.ID, "applied_state": "active", "revision": "400", "present": true},
+			// extra on agent with no desired -> remove
+			{"credential_id": "cred_extra_unknown", "endpoint_id": node.ID, "applied_state": "active", "revision": "1", "present": true},
+		},
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest("POST", "/api/agent/v1/state/sync", bytes.NewReader(b))
+	req.Header.Set("X-Agent-Token", *agent.ControlTokenCiphertext)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			Drift       []map[string]interface{} `json:"drift"`
+			Conflicts   []map[string]interface{} `json:"conflicts"`
+			NextSyncSec int                      `json:"next_sync_sec"`
+			ServerTime  string                   `json:"server_time"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Data.Drift) < 3 {
+		t.Fatalf("expected at least 3 drift entries, got %d: %+v", len(resp.Data.Drift), resp.Data.Drift)
+	}
+	actions := map[string]int{}
+	for _, d := range resp.Data.Drift {
+		if a, ok := d["action"].(string); ok {
+			actions[a]++
+		}
+	}
+	if actions["add"] < 1 {
+		t.Fatalf("expected at least 1 add drift, got %+v", actions)
+	}
+	if actions["remove"] < 1 {
+		t.Fatalf("expected at least 1 remove drift, got %+v", actions)
+	}
+	if actions["update"] < 1 {
+		t.Fatalf("expected at least 1 update drift, got %+v", actions)
+	}
+	if resp.Data.NextSyncSec != 30 {
+		t.Fatalf("expected next_sync_sec 30, got %d", resp.Data.NextSyncSec)
+	}
+	// verify drift DB markers
+	var upd model.CredentialDeployment
+	if err := db.DB.NewSelect().Model(&upd).Where("credential_id = ? AND endpoint_id = ? AND agent_node_id = ?", credAdd, node.ID, agent.ID).Scan(ctx); err != nil {
+		t.Fatalf("load add dep: %v", err)
+	}
+	if upd.LastSyncAt == nil {
+		t.Fatalf("expected last_sync_at set for add drift")
+	}
+	if upd.LastError == nil || *upd.LastError == "" {
+		t.Fatalf("expected last_error drift for missing present=false, got %+v", upd.LastError)
+	}
+}
+
+func TestAgentStateSyncNotBound(t *testing.T) {
+	r, agent, node, cleanup := setupAgentTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// create another node without binding
+	otherNode := &model.Node{ID: 999, Tag: "other-01", NodeName: "other", Protocol: "vless", ServerAddress: "5.5.5.5", ServerPort: 443, IsActive: true, Status: "active"}
+	if _, err := db.DB.NewInsert().Model(otherNode).Exec(ctx); err != nil {
+		t.Fatalf("insert other node: %v", err)
+	}
+	_ = node // keep bound node exists
+
+	credID := "cred_notbound_001"
+	body := map[string]interface{}{
+		"items": []map[string]interface{}{
+			{"credential_id": credID, "endpoint_id": otherNode.ID, "applied_state": "active", "revision": "1", "present": true},
+		},
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest("POST", "/api/agent/v1/state/sync", bytes.NewReader(b))
+	req.Header.Set("X-Agent-Token", *agent.ControlTokenCiphertext)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			Drift       []map[string]interface{} `json:"drift"`
+			Conflicts   []map[string]interface{} `json:"conflicts"`
+			NextSyncSec int                      `json:"next_sync_sec"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Data.Conflicts) != 1 {
+		t.Fatalf("expected 1 conflict, got %d: %+v", len(resp.Data.Conflicts), resp.Data.Conflicts)
+	}
+	if resp.Data.Conflicts[0]["reason"] != "not_bound" {
+		t.Fatalf("expected reason not_bound, got %+v", resp.Data.Conflicts[0])
+	}
+	if len(resp.Data.Drift) != 0 {
+		t.Fatalf("expected 0 drift for not_bound item, got %+v", resp.Data.Drift)
+	}
+}
+

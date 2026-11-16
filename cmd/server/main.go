@@ -67,6 +67,8 @@ func main() {
 	handler.RegisterSubscriptionRoutes(r)
 	handler.RegisterServiceRoutes(r)
 	handler.RegisterAgentRoutes(r)
+	handler.RegisterAgentAdminRoutes(r)
+	handler.RegisterServiceReleaseLogRoutes(r)
 
 	// 挂载 SPA 前端静态资源
 	mountSPA(r)
@@ -101,7 +103,7 @@ func main() {
 		JWTSecret:   config.AdminSecretToken,
 		Routers: []string{
 			"Auth", "Node", "User", "Domain", "Template", "Settings",
-			"File", "Download", "Subscription", "Service", "AgentV1", "SPA",
+			"File", "Download", "Subscription", "Service", "AgentV1", "AgentAdmin", "SPA",
 		},
 	})
 

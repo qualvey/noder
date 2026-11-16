@@ -32,6 +32,7 @@ func InitDB() (*bun.DB, error) {
 		(*model.Credential)(nil), (*model.AccessGrant)(nil), (*model.AgentNode)(nil),
 		(*model.EndpointAgentBinding)(nil), (*model.CredentialDeployment)(nil), (*model.LegacyMigrationMap)(nil),
 		(*model.SubscriptionOperation)(nil), (*model.AgentTrafficReport)(nil),
+		(*model.ServiceReleaseLog)(nil),
 	)
 
 	ctx := context.Background()
@@ -71,6 +72,7 @@ func OpenDB() (*bun.DB, error) {
 		(*model.Credential)(nil), (*model.AccessGrant)(nil), (*model.AgentNode)(nil),
 		(*model.EndpointAgentBinding)(nil), (*model.CredentialDeployment)(nil), (*model.LegacyMigrationMap)(nil),
 		(*model.SubscriptionOperation)(nil), (*model.AgentTrafficReport)(nil),
+		(*model.ServiceReleaseLog)(nil),
 	)
 	return DB, nil
 }
@@ -95,6 +97,7 @@ func CreateDBAndTables(ctx context.Context) error {
 		(*model.LegacyMigrationMap)(nil),
 		(*model.SubscriptionOperation)(nil),
 		(*model.AgentTrafficReport)(nil),
+		(*model.ServiceReleaseLog)(nil),
 	}
 
 	for _, m := range models {
@@ -207,6 +210,9 @@ func CreateDBAndTables(ctx context.Context) error {
 	if _, err := DB.NewCreateIndex().Model((*model.CredentialDeployment)(nil)).IfNotExists().Index("credential_deployment_agent_endpoint_rev_idx").Column("agent_node_id", "endpoint_id", "revision").Exec(ctx); err != nil {
 		return err
 	}
+	if _, err := DB.NewCreateIndex().Model((*model.CredentialDeployment)(nil)).IfNotExists().Index("credential_deployment_agent_last_sync_idx").Column("agent_node_id", "last_sync_at").Exec(ctx); err != nil {
+		return err
+	}
 	if _, err := DB.NewCreateIndex().Model((*model.AgentTrafficReport)(nil)).IfNotExists().Index("agent_traffic_report_created_idx").Column("created_at").Exec(ctx); err != nil {
 		return err
 	}
@@ -229,6 +235,13 @@ func CreateDBAndTables(ctx context.Context) error {
 
 	_, _ = DB.ExecContext(ctx, "ALTER TABLE node ADD COLUMN is_agentless BOOLEAN NOT NULL DEFAULT false")
 	_, _ = DB.ExecContext(ctx, "UPDATE node SET is_agentless = false WHERE is_agentless IS NULL")
+
+	if _, err := DB.NewCreateIndex().Model((*model.ServiceReleaseLog)(nil)).IfNotExists().Index("service_release_logs_sub_time_idx").Column("subscription_id", "created_at").Exec(ctx); err != nil {
+		return err
+	}
+	if _, err := DB.NewCreateIndex().Model((*model.ServiceReleaseLog)(nil)).IfNotExists().Index("service_release_logs_endpoint_time_idx").Column("endpoint_id", "created_at").Exec(ctx); err != nil {
+		return err
+	}
 
 	return nil
 }

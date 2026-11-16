@@ -233,6 +233,29 @@ type SubscriptionOperation struct {
 	CreatedAt   time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
 }
 
+// ServiceReleaseLog records every micro-service call to POST /api/service/subscriptions/{id}/release
+// and its execution result. Used for audit / troubleshooting the two-step delivery (activate->release).
+type ServiceReleaseLog struct {
+	bun.BaseModel `bun:"table:service_release_logs"`
+
+	ID              int64     `bun:"id,pk,autoincrement" json:"id"`
+	SubscriptionID  string    `bun:"subscription_id,notnull" json:"subscription_id"`
+	CredentialID    *string   `bun:"credential_id" json:"credential_id,omitempty"`
+	EndpointID      int64     `bun:"endpoint_id,notnull" json:"endpoint_id"`
+	ExternalRef     *string   `bun:"external_ref" json:"external_ref,omitempty"`
+	CallerIP        string    `bun:"caller_ip,notnull" json:"caller_ip"`
+	RequestID       *string   `bun:"request_id" json:"request_id,omitempty"`
+	HttpStatus      int       `bun:"http_status,notnull" json:"http_status"`
+	BusinessCode    int       `bun:"business_code,notnull" json:"business_code"`
+	ErrorCode       *string   `bun:"error_code" json:"error_code,omitempty"`
+	Message         *string   `bun:"message" json:"message,omitempty"`
+	Delivered       bool      `bun:"delivered,notnull" json:"delivered"`
+	DeploymentCount int       `bun:"deployment_count,notnull,default:0" json:"deployment_count"`
+	AgentOnline     bool      `bun:"agent_online,notnull" json:"agent_online"`
+	LatencyMs       int64     `bun:"latency_ms,notnull,default:0" json:"latency_ms"`
+	CreatedAt       time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+}
+
 // Endpoint 完整节点实体（入口节点 + 鉴权凭证 + 路由 Tag）
 type Endpoint struct {
 	bun.BaseModel `bun:"table:endpoint"`

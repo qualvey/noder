@@ -24,6 +24,7 @@ func RegisterAgentRoutes(r chi.Router) {
 		r.Get("/deployments", AgentGetDeployments)
 		r.Post("/deployments/report", AgentReportDeployments)
 		r.Post("/traffic/report", AgentReportTraffic)
+		r.Post("/state/sync", AgentSyncState)
 	})
 }
 
@@ -568,6 +569,270 @@ func AgentReportTraffic(w http.ResponseWriter, r *http.Request) {
 	)
 	RespondServiceJSON(w, http.StatusOK, map[string]interface{}{
 		"code": 0, "message": "success", "data": map[string]interface{}{"accepted": true},
+	})
+}
+
+type agentStateSyncReq struct {
+	Items []struct {
+		CredentialID string `json:"credential_id"`
+		EndpointID   int64  `json:"endpoint_id"`
+		AppliedState string `json:"applied_state"`
+		Revision     string `json:"revision"`
+		Present      *bool  `json:"present"`
+	} `json:"items"`
+}
+
+func AgentSyncState(w http.ResponseWriter, r *http.Request) {
+	agent := AgentNodeFromContext(r.Context())
+	if agent == nil {
+		respondAgentErr(w, http.StatusUnauthorized, "ERR_INVALID_TOKEN", "unauthorized")
+		return
+	}
+	var req agentStateSyncReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondAgentErr(w, http.StatusBadRequest, "ERR_BAD_REQUEST", "invalid JSON body")
+		return
+	}
+	if req.Items == nil {
+		req.Items = []struct {
+			CredentialID string `json:"credential_id"`
+			EndpointID   int64  `json:"endpoint_id"`
+			AppliedState string `json:"applied_state"`
+			Revision     string `json:"revision"`
+			Present      *bool  `json:"present"`
+		}{}
+	}
+	now := time.Now().UTC()
+	conflicts := make([]map[string]interface{}, 0)
+	drift := make([]map[string]interface{}, 0)
+
+	// reportMap: key credential_id:endpoint_id -> item index, only for bound items
+	type syncItem struct {
+		CredentialID string
+		EndpointID   int64
+		AppliedState string
+		Revision     string
+		Present      bool
+	}
+	reportMap := make(map[string]syncItem)
+	// per-item binding validation
+	for _, it := range req.Items {
+		credID := strings.TrimSpace(it.CredentialID)
+		epID := it.EndpointID
+		if credID == "" || epID <= 0 {
+			conflicts = append(conflicts, map[string]interface{}{
+				"credential_id": it.CredentialID,
+				"endpoint_id":   it.EndpointID,
+				"reason":        "invalid_argument",
+			})
+			logger.WarnContext(r.Context(), "agent state sync invalid item",
+				"agent_id", agent.ID,
+				"credential_id", it.CredentialID,
+				"endpoint_id", it.EndpointID,
+			)
+			continue
+		}
+		// Reuse binding logic from requireAgentEndpointAccess (active binding check)
+		exists, err := db.DB.NewSelect().Model((*model.EndpointAgentBinding)(nil)).
+			Where("agent_node_id = ? AND endpoint_id = ? AND status = ?", agent.ID, epID, "active").
+			Exists(r.Context())
+		if err != nil || !exists {
+			conflicts = append(conflicts, map[string]interface{}{
+				"credential_id": credID,
+				"endpoint_id":   epID,
+				"reason":        "not_bound",
+			})
+			logger.WarnContext(r.Context(), "agent state sync not bound",
+				"agent_id", agent.ID,
+				"endpoint_id", epID,
+				"credential_id", credID,
+			)
+			continue
+		}
+		present := true
+		if it.Present != nil {
+			present = *it.Present
+		}
+		key := fmt.Sprintf("%s:%d", credID, epID)
+		reportMap[key] = syncItem{
+			CredentialID: credID,
+			EndpointID:   epID,
+			AppliedState: normalizeAppliedState(it.AppliedState),
+			Revision:     strings.TrimSpace(it.Revision),
+			Present:      present,
+		}
+	}
+
+	// Load desired deployments for this agent (all bound endpoints)
+	var deps []*model.CredentialDeployment
+	if err := db.DB.NewSelect().Model(&deps).
+		Where("agent_node_id = ?", agent.ID).
+		Scan(r.Context()); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		respondAgentErr(w, http.StatusInternalServerError, "ERR_INTERNAL", "failed to load deployments")
+		return
+	}
+
+	// For last_sync_at aggregation: primary endpoint_id for logging (first dep or first item)
+	var primaryEndpointID int64
+	if len(deps) > 0 {
+		primaryEndpointID = deps[0].EndpointID
+	} else if len(req.Items) > 0 {
+		primaryEndpointID = req.Items[0].EndpointID
+	}
+
+	// Build drift by comparing desired vs reported
+	for _, d := range deps {
+		key := fmt.Sprintf("%s:%d", d.CredentialID, d.EndpointID)
+		rep, ok := reportMap[key]
+		desired := normalizeDesiredState(d.DesiredState)
+
+		if !ok || !rep.Present {
+			// Agent missing this deployment
+			appliedMismatch := false
+			if ok {
+				appliedMismatch = rep.AppliedState != desired
+			} else {
+				// No report at all => treat as drift if desired active (present=false)
+				// For drift last_error logic: applied_state != desired && present==false
+				// Here applied is essentially unknown, count as drift when desired active
+				appliedMismatch = d.AppliedState != desired
+			}
+			// Update last_sync_at/last_error
+			upd := db.DB.NewUpdate().Model((*model.CredentialDeployment)(nil)).
+				Set("last_sync_at = ?", now).
+				Where("credential_id = ? AND endpoint_id = ? AND agent_node_id = ?", d.CredentialID, d.EndpointID, d.AgentNodeID)
+			if appliedMismatch && !ok || (ok && !rep.Present && rep.AppliedState != desired) {
+				// present=false and drift
+				upd = upd.Set("last_error = ?", "drift: present=false")
+			} else if !ok && desired == "active" {
+				upd = upd.Set("last_error = ?", "drift: missing on agent")
+			} else if !rep.Present && desired == "active" {
+				upd = upd.Set("last_error = ?", "drift: present=false")
+			} else {
+				upd = upd.Set("last_error = NULL")
+			}
+			_, _ = upd.Exec(r.Context())
+
+			if desired == "active" {
+				drift = append(drift, map[string]interface{}{
+					"credential_id": d.CredentialID,
+					"endpoint_id":   d.EndpointID,
+					"action":        "add",
+					"desired_state": desired,
+					"revision":      d.Revision,
+					"reason":        "missing_on_agent",
+				})
+			} else {
+				// desired revoked/disabled but agent already absent -> in sync, no drift
+				// ensure last_error cleared handled above
+			}
+			continue
+		}
+		// present == true
+		applied := rep.AppliedState
+		if applied == "unknown" && rep.AppliedState == "" {
+			applied = ""
+		}
+		needDrift := false
+		action := "update"
+		reason := ""
+		if applied != desired {
+			needDrift = true
+			if desired == "revoked" || desired == "disabled" {
+				action = "remove"
+				reason = "desired_revoked"
+			} else {
+				action = "update"
+				reason = "state_mismatch"
+			}
+		} else if rep.Revision != d.Revision {
+			needDrift = true
+			action = "update"
+			reason = "revision_mismatch"
+		}
+		// Update DB sync markers
+		upd := db.DB.NewUpdate().Model((*model.CredentialDeployment)(nil)).
+			Set("last_sync_at = ?", now).
+			Where("credential_id = ? AND endpoint_id = ? AND agent_node_id = ?", d.CredentialID, d.EndpointID, d.AgentNodeID)
+		if needDrift && !rep.Present {
+			upd = upd.Set("last_error = ?", "drift")
+		} else if needDrift {
+			// still mark drift as last_error when applied != desired? spec says present=false, but keep clear for update case
+			upd = upd.Set("last_error = NULL")
+		} else {
+			upd = upd.Set("last_error = NULL")
+		}
+		_, _ = upd.Exec(r.Context())
+
+		if needDrift {
+			entry := map[string]interface{}{
+				"credential_id": d.CredentialID,
+				"endpoint_id":   d.EndpointID,
+				"action":        action,
+				"desired_state": desired,
+				"revision":      d.Revision,
+			}
+			if reason != "" {
+				entry["reason"] = reason
+			}
+			if applied != desired {
+				entry["applied_state"] = applied
+			}
+			drift = append(drift, entry)
+		}
+	}
+
+	// Detect extra items on agent that have no desired deployment -> need remove
+	for key, rep := range reportMap {
+		if !rep.Present {
+			continue
+		}
+		found := false
+		for _, d := range deps {
+			if fmt.Sprintf("%s:%d", d.CredentialID, d.EndpointID) == key {
+				found = true
+				break
+			}
+		}
+		if !found {
+			drift = append(drift, map[string]interface{}{
+				"credential_id": rep.CredentialID,
+				"endpoint_id":   rep.EndpointID,
+				"action":        "remove",
+				"reason":        "not_desired",
+			})
+			logger.WarnContext(r.Context(), "agent state sync extra deployment on agent",
+				"agent_id", agent.ID,
+				"credential_id", rep.CredentialID,
+				"endpoint_id", rep.EndpointID,
+			)
+		}
+	}
+
+	logger.InfoContext(r.Context(), "agent state sync completed",
+		"agent_id", agent.ID,
+		"endpoint_id", primaryEndpointID,
+		"drift_count", len(drift),
+		"conflicts", len(conflicts),
+	)
+
+	if len(drift) > 0 {
+		logger.WarnContext(r.Context(), "agent drift detected",
+			"agent_id", agent.ID,
+			"endpoint_id", primaryEndpointID,
+			"drift_count", len(drift),
+		)
+	}
+
+	RespondServiceJSON(w, http.StatusOK, map[string]interface{}{
+		"code":    0,
+		"message": "success",
+		"data": map[string]interface{}{
+			"drift":         drift,
+			"conflicts":     conflicts,
+			"next_sync_sec": 30,
+			"server_time":   now.Format(time.RFC3339),
+		},
 	})
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"noder/internal/db"
+	"noder/internal/logger"
 	"noder/internal/model"
 )
 
@@ -622,23 +623,32 @@ func QuotaSubscription(w http.ResponseWriter, r *http.Request) {
 }
 
 func ReleaseSubscription(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	id := strings.TrimSpace(chi.URLParam(r, "id"))
 	if id == "" {
 		RespondServiceCodedError(w, http.StatusBadRequest, 40001, "INVALID_ARGUMENT", "id is required")
+		persistServiceReleaseLog(r, start, id, nil, nil, http.StatusBadRequest, 40001, "INVALID_ARGUMENT", "id is required", false, 0, false)
 		return
 	}
 	var grant model.AccessGrant
 	if err := db.DB.NewSelect().Model(&grant).Where("id = ?", id).Scan(r.Context()); err != nil {
 		RespondServiceCodedError(w, http.StatusNotFound, 40402, "SUBSCRIPTION_NOT_FOUND", "subscription not found")
+		persistServiceReleaseLog(r, start, id, nil, nil, http.StatusNotFound, 40402, "SUBSCRIPTION_NOT_FOUND", "subscription not found", false, 0, false)
 		return
 	}
 	if grant.Status == model.AccessGrantStatusRevoked {
 		RespondServiceCodedError(w, http.StatusConflict, 40901, "SUBSCRIPTION_REVOKED", "subscription is revoked")
+		var epTmp model.Node
+		_ = db.DB.NewSelect().Model(&epTmp).Where("id = ?", grant.EndpointID).Scan(r.Context())
+		persistServiceReleaseLog(r, start, grant.ID, &grant, &epTmp, http.StatusConflict, 40901, "SUBSCRIPTION_REVOKED", "subscription is revoked", false, 0, false)
 		return
 	}
 	var user model.User
 	if err := db.DB.NewSelect().Model(&user).Where("id = ?", grant.UserID).Scan(r.Context()); err != nil {
 		RespondServiceError(w, http.StatusInternalServerError, "failed to load user")
+		var epTmp model.Node
+		_ = db.DB.NewSelect().Model(&epTmp).Where("id = ?", grant.EndpointID).Scan(r.Context())
+		persistServiceReleaseLog(r, start, grant.ID, &grant, &epTmp, http.StatusInternalServerError, 500, "", "failed to load user", false, 0, false)
 		return
 	}
 	// Binding check: landing 必须有 agent 绑定，否则无法下发 (spec §7.1.1 BINDING_MISSING)
@@ -651,16 +661,19 @@ func ReleaseSubscription(w http.ResponseWriter, r *http.Request) {
 		if err := db.DB.NewSelect().Model(&ep).Where("id = ?", grant.EndpointID).Scan(r.Context()); err != nil {
 			RespondServiceCodedError(w, http.StatusNotFound, 40401, "ENDPOINT_NOT_FOUND",
 				fmt.Sprintf("endpoint %d not found", grant.EndpointID))
+			persistServiceReleaseLog(r, start, grant.ID, &grant, nil, http.StatusNotFound, 40401, "ENDPOINT_NOT_FOUND", fmt.Sprintf("endpoint %d not found", grant.EndpointID), false, 0, false)
 			return
 		}
 		if ep.Protocol != "socks5" {
 			RespondServiceCodedError(w, http.StatusConflict, 40902, "ENDPOINT_PROTOCOL_MISMATCH",
 				fmt.Sprintf("endpoint %d protocol is %s, expected socks5", grant.EndpointID, ep.Protocol))
+			persistServiceReleaseLog(r, start, grant.ID, &grant, &ep, http.StatusConflict, 40902, "ENDPOINT_PROTOCOL_MISMATCH", fmt.Sprintf("endpoint %d protocol is %s, expected socks5", grant.EndpointID, ep.Protocol), false, 0, false)
 			return
 		}
 		if !ep.IsActive || (ep.Status != "" && ep.Status != model.AccessGrantStatusActive) {
 			RespondServiceCodedError(w, http.StatusConflict, 40902, "ENDPOINT_INACTIVE",
 				fmt.Sprintf("endpoint %d is inactive or status=%s", grant.EndpointID, ep.Status))
+			persistServiceReleaseLog(r, start, grant.ID, &grant, &ep, http.StatusConflict, 40902, "ENDPOINT_INACTIVE", fmt.Sprintf("endpoint %d is inactive or status=%s", grant.EndpointID, ep.Status), false, 0, false)
 			return
 		}
 		endpointActive = true
@@ -677,23 +690,30 @@ func ReleaseSubscription(w http.ResponseWriter, r *http.Request) {
 		if bindingCount == 0 {
 			log.Printf("WARN release: no active binding endpoint_id=%d subscription_id=%s", grant.EndpointID, grant.ID)
 			RespondServiceCodedError(w, http.StatusConflict, 40902, "BINDING_MISSING", fmt.Sprintf("endpoint %d has no active agent binding", grant.EndpointID))
+			persistServiceReleaseLog(r, start, grant.ID, &grant, &ep, http.StatusConflict, 40902, "BINDING_MISSING", fmt.Sprintf("endpoint %d has no active agent binding", grant.EndpointID), false, 0, false)
 			return
 		}
 	}
 
 	if grant.Status == model.AccessGrantStatusActive {
 		var delivered bool
+		var n int
+		agentOnline := false
 		if isAgentless {
 			delivered = endpointActive
+			agentOnline = endpointActive
 		} else {
-			n := createDesiredDeployments(r.Context(), grant.CredentialID, grant.EndpointID, model.CredentialStatusActive)
-			delivered = n > 0 && isAgentOnlineForEndpoint(r.Context(), grant.EndpointID) && endpointActive
+			n = createDesiredDeployments(r.Context(), grant.CredentialID, grant.EndpointID, model.CredentialStatusActive)
+			agentOnline = isAgentOnlineForEndpoint(r.Context(), grant.EndpointID)
+			delivered = n > 0 && agentOnline && endpointActive
 		}
 		RespondServiceSuccess(w, activateResponse(r, &grant, &user, delivered, endpointActive))
+		persistServiceReleaseLog(r, start, grant.ID, &grant, &ep, http.StatusOK, 0, "", "success (idempotent active)", delivered, n, agentOnline)
 		return
 	}
 	if grant.Status != model.AccessGrantStatusPendingActivation && grant.Status != model.AccessGrantStatusActivationFailed {
 		RespondServiceCodedError(w, http.StatusConflict, 40902, "INVALID_SUBSCRIPTION_STATE", fmt.Sprintf("cannot release subscription in state %s", grant.Status))
+		persistServiceReleaseLog(r, start, grant.ID, &grant, &ep, http.StatusConflict, 40902, "INVALID_SUBSCRIPTION_STATE", fmt.Sprintf("cannot release subscription in state %s", grant.Status), false, 0, false)
 		return
 	}
 
@@ -703,6 +723,7 @@ func ReleaseSubscription(w http.ResponseWriter, r *http.Request) {
 	if _, err := db.DB.NewUpdate().Model(&grant).Column("status", "updated_at").WherePK().Exec(r.Context()); err != nil {
 		log.Printf("release: update grant failed subscription_id=%s endpoint_id=%d error=%v", grant.ID, grant.EndpointID, err)
 		RespondServiceError(w, http.StatusInternalServerError, "failed to release subscription")
+		persistServiceReleaseLog(r, start, grant.ID, &grant, &ep, http.StatusInternalServerError, 500, "", "failed to release subscription", false, 0, false)
 		return
 	}
 	if _, err := db.DB.NewUpdate().Model((*model.Credential)(nil)).
@@ -711,24 +732,122 @@ func ReleaseSubscription(w http.ResponseWriter, r *http.Request) {
 		Where("id = ?", grant.CredentialID).Exec(r.Context()); err != nil {
 		log.Printf("release: update credential failed subscription_id=%s endpoint_id=%d error=%v", grant.ID, grant.EndpointID, err)
 		RespondServiceError(w, http.StatusInternalServerError, "failed to activate credential")
+		persistServiceReleaseLog(r, start, grant.ID, &grant, &ep, http.StatusInternalServerError, 500, "", "failed to activate credential", false, 0, false)
 		return
 	}
 	var delivered bool
 	var n int
+	agentOnline := false
 	isAgentless2 := isSocks || ep.IsAgentless
 	if isAgentless2 {
 		n = 0
 		delivered = endpointActive
+		agentOnline = endpointActive
 	} else {
 		n = createDesiredDeployments(r.Context(), grant.CredentialID, grant.EndpointID, model.CredentialStatusActive)
-		delivered = n > 0 && isAgentOnlineForEndpoint(r.Context(), grant.EndpointID) && endpointActive
+		agentOnline = isAgentOnlineForEndpoint(r.Context(), grant.EndpointID)
+		delivered = n > 0 && agentOnline && endpointActive
 	}
 	orderRef := ""
 	if grant.ExternalRef != nil {
 		orderRef = *grant.ExternalRef
 	}
 	log.Printf("release: subscription released subscription_id=%s endpoint_id=%d order_item_ref=%s deployments=%d delivered=%v", grant.ID, grant.EndpointID, orderRef, n, delivered)
+	logger.InfoContext(r.Context(), "service release executed",
+		"subscription_id", grant.ID,
+		"endpoint_id", grant.EndpointID,
+		"order_ref", orderRef,
+		"deployments", n,
+		"delivered", delivered,
+		"agent_online", agentOnline,
+	)
 	RespondServiceSuccess(w, activateResponse(r, &grant, &user, delivered, endpointActive))
+	persistServiceReleaseLog(r, start, grant.ID, &grant, &ep, http.StatusOK, 0, "", "success", delivered, n, agentOnline)
+}
+
+func serviceReleaseCallerIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if s := strings.TrimSpace(parts[0]); s != "" {
+			return s
+		}
+	}
+	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
+		if s := strings.TrimSpace(xrip); s != "" {
+			return s
+		}
+	}
+	if idx := strings.LastIndex(r.RemoteAddr, ":"); idx > 0 {
+		return r.RemoteAddr[:idx]
+	}
+	return r.RemoteAddr
+}
+
+func persistServiceReleaseLog(r *http.Request, start time.Time, subscriptionID string, grant *model.AccessGrant, ep *model.Node, httpStatus, businessCode int, errorCode, message string, delivered bool, deploymentCount int, agentOnline bool) {
+	if db.DB == nil {
+		return
+	}
+	latencyMs := time.Since(start).Milliseconds()
+	callerIP := serviceReleaseCallerIP(r)
+	var requestID *string
+	if v := strings.TrimSpace(r.Header.Get("X-Request-ID")); v != "" {
+		requestID = &v
+	} else if wID := strings.TrimSpace(r.Header.Get("X-Request-Id")); wID != "" {
+		requestID = &wID
+	}
+	var endpointID int64
+	var credentialID *string
+	var externalRef *string
+	if grant != nil {
+		endpointID = grant.EndpointID
+		credentialID = &grant.CredentialID
+		externalRef = grant.ExternalRef
+	} else if ep != nil {
+		endpointID = ep.ID
+	}
+	if ep != nil && endpointID == 0 {
+		endpointID = ep.ID
+	}
+	// Fallback: subscriptionID may be grant ID even when grant not found; endpointID stays 0
+	var errCodePtr *string
+	if strings.TrimSpace(errorCode) != "" {
+		s := strings.TrimSpace(errorCode)
+		errCodePtr = &s
+	}
+	var msgPtr *string
+	if strings.TrimSpace(message) != "" {
+		s := strings.TrimSpace(message)
+		// truncate to avoid huge payloads
+		if len(s) > 1024 {
+			s = s[:1024]
+		}
+		msgPtr = &s
+	}
+	rec := &model.ServiceReleaseLog{
+		SubscriptionID:  subscriptionID,
+		CredentialID:    credentialID,
+		EndpointID:      endpointID,
+		ExternalRef:     externalRef,
+		CallerIP:        callerIP,
+		RequestID:       requestID,
+		HttpStatus:      httpStatus,
+		BusinessCode:    businessCode,
+		ErrorCode:       errCodePtr,
+		Message:         msgPtr,
+		Delivered:       delivered,
+		DeploymentCount: deploymentCount,
+		AgentOnline:     agentOnline,
+		LatencyMs:       latencyMs,
+		CreatedAt:       time.Now().UTC(),
+	}
+	if _, err := db.DB.NewInsert().Model(rec).Exec(r.Context()); err != nil {
+		// Best-effort: never fail the request because of log persistence
+		logger.WarnContext(r.Context(), "failed to persist service_release_log",
+			"subscription_id", subscriptionID,
+			"error", err.Error(),
+		)
+		log.Printf("WARN persistServiceReleaseLog: failed subscription_id=%s error=%v", subscriptionID, err)
+	}
 }
 
 func RevokeSubscription(w http.ResponseWriter, r *http.Request) {
