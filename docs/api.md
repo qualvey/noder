@@ -73,6 +73,25 @@ Token 下载时进行个性化渲染；远程文件还包含 `source_url`、`cac
 
 以下接口均需要管理员鉴权。
 
+### Agent `/api/agents`（新增）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/agents` | 查询 Agent 列表（含 `is_online`/`binding_count`，支持 `?status=&q=&page=&limit=`） |
+| `POST` | `/api/agents` | 创建 Agent，返回一次性 `control_token`（`{id?, name}`） |
+| `GET` | `/api/agents/{id}` | 查询单个 Agent |
+| `PUT` | `/api/agents/{id}` | 更新 `name`/`status`（`disabled` 后拒绝 `X-Agent-Token`） |
+| `DELETE` | `/api/agents/{id}` | 删除 Agent；有 active 绑定时 `409`，`?force=true` 强制解绑并清理 `credential_deployments` |
+| `POST` | `/api/agents/{id}/token/rotate` | 轮换 `control_token`，旧 token 立即失效 |
+| `GET` | `/api/agents/{id}/bindings` | 查询该 Agent 绑定的端点 |
+| `POST` | `/api/agents/{id}/bindings` | 绑定端点 `{"endpoint_id":1}` 或 `{"endpoint_ids":[1,2]}` 幂等 |
+| `DELETE` | `/api/agents/{id}/bindings/{endpointId}` | 解绑 |
+| `GET` | `/api/endpoints/{id}/bindings` | 端点视角：查询绑定的 Agent |
+| `POST` | `/api/endpoints/{id}/bindings` | 端点视角：绑定 `{"agent_id":"ag_xx"}` 或 `{"agent_ids":[...]}` |
+| `DELETE` | `/api/endpoints/{id}/bindings/{agentId}` | 端点视角：解绑 |
+
+详见 `docs/spec/agent-admin-spec.md`。
+
 ### 节点 `/api/nodes`
 
 | 方法 | 路径 | 说明 |
@@ -373,7 +392,311 @@ X-Service-Token: <service_token>
 
 详见 `doc/attach-mall.md#7` 与 `doc/spec/mall-attach-noder.md#7`。
 
-## 6. 配置与安全提示
+## 6. Agent 控制面 API（xray-agent）
+
+统一前缀 `/api/agent/v1`，鉴权 `X-Agent-Token: <control_token>`（`AgentAuth`），外壳 `{code,message,data}` 或 `{code,error,message}`。实现见 `internal/handler/agent_sync.go:19`、`internal/handler/agent_auth.go:29`。
+
+### 6.0 通用约定
+
+| 项 | 说明 |
+| --- | --- |
+| 鉴权头 | `X-Agent-Token: <agent.control_token_ciphertext>`，缺失/错误返回 `401` `{code:401,error:"ERR_INVALID_TOKEN"}`；`status=disabled` 的 Agent 直接 `401` |
+| 越权 | `endpoint_id` 非绑定时返回 `403` `{code:403,error:"ERR_FORBIDDEN",message:"agent not bound to endpoint"}`（`internal/handler/agent_auth.go:60`） |
+| 成功外壳 | `{code:0,message:"success",data:{...}}` |
+| 失败外壳 | `{code:<httpStatus>,message:"...",error:"ERR_*"} `，通过 `internal/handler/agent_sync.go:839` 的 `respondAgentErr` 返回 |
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/agent/v1/heartbeat` | 心跳上报，驱动 `agent_nodes.status=online`、`last_heartbeat_at` 与 `grant.readiness.agent_online` |
+| `GET` | `/api/agent/v1/deployments` | 拉取期望部署（支持 `endpoint_id`/`since_revision`/`limit`/`cursor` 增量分页） |
+| `POST` | `/api/agent/v1/deployments/report` | 上报 `applied_state`，单调 `revision` 冲突检测 |
+| `POST` | `/api/agent/v1/traffic/report` | 流量上报，`report_id` 去重 24h 幂等 |
+| `POST` | `/api/agent/v1/state/sync` | 全量对账，返回 `drift`（add/update/remove）与 `conflicts` |
+
+详见 `docs/spec/noder-alignment.md` 与 `docs/e2e/xray-agent-integration.md`。
+
+### 6.1 心跳 `POST /api/agent/v1/heartbeat`
+
+Agent 定时（建议 15s）上报，Noder 置 `status=online`、`last_heartbeat_at=now`、`metadata`，并对 `endpoints[].ready=true` 的绑定刷新 `endpoint_agent_bindings.last_sync_at`。
+
+**Request**
+
+```http
+POST /api/agent/v1/heartbeat
+X-Agent-Token: <control_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "agent_version": "1.0.0",
+  "xray_version": "1.8.24",
+  "hostname": "line-hk-01",
+  "capabilities": ["xray.vless", "xray.vmess", "xray.trojan", "xray.shadowsocks", "traffic"],
+  "endpoints": [
+    {"endpoint_id": 2, "inbound_tag": "in-443", "ready": true}
+  ]
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `agent_version` | 否 | Agent 版本，写入 `metadata` |
+| `xray_version` | 否 | Xray-core 版本 |
+| `hostname` | 否 | 主机名 |
+| `capabilities` | 否 | 能力集 |
+| `endpoints` | 否 | 端点就绪列表；`ready=true` 时刷新 `last_sync_at` |
+| `endpoints[].endpoint_id` | 是 | 端点 ID |
+| `endpoints[].inbound_tag` | 否 | 入站 Tag |
+| `endpoints[].ready` | 否 | 是否就绪 |
+
+**Response 200**
+
+```json
+{"code":0,"message":"success","data":{"server_time":"2026-11-10T04:00:00Z","sync_interval_sec":15}}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `server_time` | RFC3339 服务端时间 |
+| `sync_interval_sec` | 建议下次拉取间隔，固定 `15` |
+
+**Failure**
+
+```json
+{"code":401,"error":"ERR_INVALID_TOKEN","message":"missing X-Agent-Token"}
+{"code":401,"error":"ERR_INVALID_TOKEN","message":"invalid agent token"}
+```
+
+### 6.2 拉取期望部署 `GET /api/agent/v1/deployments`
+
+**Request**
+
+```http
+GET /api/agent/v1/deployments?endpoint_id=2&since_revision=1710000000100&limit=500&cursor=0
+X-Agent-Token: <control_token>
+```
+
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `endpoint_id` | 否 | 按端点过滤；缺省返回该 Agent 全部 `status=active` 绑定的端点 |
+| `since_revision` | 否 | 仅返回 `CAST(revision AS INTEGER) > since_revision` 的条目 |
+| `limit` | 否 | 默认 `500`，最大 `2000`，超出截断；内部 `limit+1` 探测 `has_more` |
+| `cursor` | 否 | 基于 `offset` 的分页游标，非负整数 |
+
+鉴权后按 `endpoint_id ASC, revision ASC, credential_id ASC` 排序（`internal/handler/agent_sync.go:146`）。
+
+**Response 200**
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "agent_id": "ag_hk_01",
+    "generated_at": "2026-11-10T04:00:00Z",
+    "has_more": false,
+    "next_cursor": null,
+    "items": [
+      {
+        "deployment_key": {"credential_id": "cred_001", "endpoint_id": 2, "agent_node_id": "ag_hk_01"},
+        "desired_state": "active",
+        "revision": "1710000000100",
+        "grant": {"grant_id": "grant_001", "status": "active", "format": "landing", "expires_at": "2026-12-09T12:00:00Z", "traffic_quota_bytes": 107374182400, "traffic_used_bytes": 200000},
+        "endpoint": {"endpoint_id": 2, "inbound_tag": "in-443", "server_address": "1.2.3.4", "server_port": 443, "protocol": "vless"},
+        "credential": {"credential_id": "cred_001", "scheme": "vless", "email": "c_cred_001@line-hk-01", "uuid": "8b9e59d9-...", "username": null, "password": null, "flow": "xtls-rprx-vision", "cipher": null}
+      }
+    ]
+  }
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `desired_state` | `active`/`revoked`/`disabled`（`normalizeDesiredState`）；若 `grant` 已过期/超额或 `credential` 已撤销，会被服务端校正为 `disabled`/`revoked` |
+| `revision` | 字符串单调递增，空为 `"0"` |
+| `grant` | 取 `(credential_id,endpoint_id)` 最新 `active` 优先的 grant；`expires_at` 为 RFC3339，`status` 经 `effectiveGrantStatus` 计算 |
+| `endpoint.inbound_tag` | 由 `node.EffectiveInboundTag()` 解析 |
+| `credential.scheme` | `landing` 归一为 `vless`；`uuid`/`username`/`password`/`flow`/`cipher` 按协议填充（shadowsocks 取 `secret_config.method` 或 `node.method`） |
+| `credential.email` | `c_<credential_id>@<endpoint.tag>` 幂等键（`internal/handler/agent_sync.go:314`） |
+| `has_more`/`next_cursor` | `next_cursor` 为 `offset+limit` 的字符串，`has_more=false` 时为 `null` |
+
+**Failure**
+
+```json
+{"code":401,"error":"ERR_INVALID_TOKEN","message":"unauthorized"}
+{"code":403,"error":"ERR_FORBIDDEN","message":"agent not bound to endpoint"}
+```
+
+### 6.3 上报部署结果 `POST /api/agent/v1/deployments/report`
+
+批量回传本地 Xray 收敛结果，仅在 `applied_state` 变更时调用。
+
+**Request**
+
+```http
+POST /api/agent/v1/deployments/report
+X-Agent-Token: <control_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "items": [
+    {
+      "credential_id": "cred_001",
+      "endpoint_id": 2,
+      "applied_state": "active",
+      "revision": "1710000000100",
+      "applied_at": "2026-11-10T04:00:05Z",
+      "error": "",
+      "xray_user_key": "c_cred_001@line-hk-01"
+    }
+  ]
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `credential_id` | 是 |  |
+| `endpoint_id` | 是 | 需已绑定，否则整批 `403` |
+| `applied_state` | 是 | `active`/`revoked`/`disabled`/`failed`，其他归一为 `unknown` |
+| `revision` | 是 | 本次应用的期望版本；`report_rev < db_rev` 判 `stale_revision` |
+| `applied_at` | 否 | RFC3339，解析失败用服务端 `now` |
+| `error` | 否 | 非空写入 `last_error`，空则 `NULL` |
+| `xray_user_key` | 否 | 透传字段，当前仅日志 |
+
+**Response 200**
+
+```json
+{"code":0,"message":"success","data":{"accepted":1,"conflicts":[{"credential_id":"cred_old","endpoint_id":2,"reason":"stale_revision","current_revision":"1710000000200"}]}}
+```
+
+| `reason` | 含义 |
+| --- | --- |
+| `not_found` | `(credential_id,endpoint_id,agent_node_id)` 无部署 |
+| `stale_revision` | `report_rev < current_rev`，拒绝更新 |
+| `update_failed` | DB 更新失败 |
+
+成功时 `SET applied_state, last_sync_at=applied_at, last_error, revision`（`internal/handler/agent_sync.go:425`）。
+
+### 6.4 流量上报 `POST /api/agent/v1/traffic/report`
+
+**Request**
+
+```http
+POST /api/agent/v1/traffic/report
+X-Agent-Token: <control_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "report_id": "b1b0f580-c081-42cb-b70d-327c1514781a",
+  "endpoint_id": 2,
+  "observed_at": "2026-11-10T04:20:00Z",
+  "items": [
+    {"credential_id": "cred_001", "grant_id": "grant_001", "uplink_bytes": 5242880, "downlink_bytes": 5242880}
+  ]
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `report_id` | 是 | 全局唯一幂等键，缺失 `400 ERR_BAD_REQUEST` |
+| `endpoint_id` | 否 | 若提供则校验绑定，非绑定 `403` |
+| `observed_at` | 否 | 观测时间 |
+| `items[].credential_id` | 否 | 与 `grant_id` 二选一；`grant_id` 优先 |
+| `items[].grant_id` | 否 | 有则 `SET traffic_used_bytes += delta, traffic_updated_at=now WHERE id=?` |
+| `items[].uplink_bytes`/`downlink_bytes` | 是 | `delta = uplink+downlink`，`<=0` 跳过；无 `grant_id` 时按 `credential_id (+endpoint_id)` 批量加算 |
+
+**去重**：`INSERT agent_traffic_reports(report_id, agent_node_id)` 冲突即判重复，直接返回 `{accepted:true}` 不再加算；后台 `DELETE created_at < now-24h` 清理（`internal/handler/agent_sync.go:519`）。
+
+**Response 200**
+
+```json
+{"code":0,"message":"success","data":{"accepted":true}}
+```
+
+**Failure**
+
+```json
+{"code":400,"error":"ERR_BAD_REQUEST","message":"report_id is required"}
+{"code":403,"error":"ERR_FORBIDDEN","message":"agent not bound to endpoint"}
+```
+
+### 6.5 全量对账 `POST /api/agent/v1/state/sync`
+
+Agent 上报本地全量 `present` 集合，Noder 对比期望 `credential_deployments` 计算 `drift`，驱动 Agent 增删改。
+
+**Request**
+
+```http
+POST /api/agent/v1/state/sync
+X-Agent-Token: <control_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "items": [
+    {"credential_id": "cred_001", "endpoint_id": 2, "applied_state": "active", "revision": "100", "present": true},
+    {"credential_id": "cred_002", "endpoint_id": 2, "applied_state": "active", "revision": "200", "present": false}
+  ]
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `credential_id` | 是 | 空或缺失计入 `conflicts: invalid_argument` |
+| `endpoint_id` | 是 | `<=0` 计 `invalid_argument`；未绑定计 `not_bound` |
+| `applied_state` | 否 | 归一 `active`/`revoked`/`disabled`/`failed`/`unknown` |
+| `revision` | 否 | 字符串版本 |
+| `present` | 否 | 是否在 Agent 本地存在，缺省 `true` |
+
+**Response 200**
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "drift": [
+      {"credential_id": "cred_001", "endpoint_id": 2, "action": "add", "desired_state": "active", "revision": "100", "reason": "missing_on_agent"},
+      {"credential_id": "cred_002", "endpoint_id": 2, "action": "update", "desired_state": "active", "revision": "300", "reason": "revision_mismatch"},
+      {"credential_id": "cred_003", "endpoint_id": 2, "action": "remove", "desired_state": "revoked", "revision": "400", "reason": "desired_revoked"},
+      {"credential_id": "cred_extra", "endpoint_id": 2, "action": "remove", "reason": "not_desired"}
+    ],
+    "conflicts": [
+      {"credential_id": "cred_x", "endpoint_id": 999, "reason": "not_bound"},
+      {"credential_id": "", "endpoint_id": 2, "reason": "invalid_argument"}
+    ],
+    "next_sync_sec": 30,
+    "server_time": "2026-11-10T04:00:00Z"
+  }
+}
+```
+
+| `drift.action` | 触发条件 |
+| --- | --- |
+| `add` | 期望 `active` 但 Agent `present=false` 或无上报 |
+| `update` | `present=true` 且 `applied_state != desired` 或 `revision` 不一致 |
+| `remove` | 期望 `revoked`/`disabled` 但 Agent 仍 `present=true`，或 Agent 侧多余条目 `not_desired` |
+
+`reason` 枚举：`missing_on_agent`/`state_mismatch`/`revision_mismatch`/`desired_revoked`/`not_desired`。服务端同时 `SET last_sync_at=now, last_error`（`drift: present=false` 时写 `drift: present=false`/`drift: missing on agent`，否则 `NULL`）。
+
+| 字段 | 说明 |
+| --- | --- |
+| `next_sync_sec` | 固定 `30` |
+| `server_time` | RFC3339 |
+
+**Failure**
+
+```json
+{"code":401,"error":"ERR_INVALID_TOKEN","message":"unauthorized"}
+```
+
+## 7. 配置与安全提示
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
