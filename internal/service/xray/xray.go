@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"noder/internal/config"
 	"noder/internal/contract"
@@ -34,7 +35,7 @@ func BuildXrayEndpointOutbound(ep *model.Endpoint) (map[string]interface{}, erro
 		return nil, errors.New("endpoint and node are required")
 	}
 	node := ep.Node
-	if node.Protocol != "vless" {
+	if !strings.EqualFold(node.Protocol, "vless") {
 		return nil, contract.NewBadRequest(fmt.Sprintf("Xray only supports vless, got '%s'", node.Protocol))
 	}
 	if node.ServerAddress == "" || node.ServerPort <= 0 {
@@ -192,7 +193,7 @@ func GenerateXrayConfigFromTemplate(cfg map[string]interface{}, endpoints []*mod
 
 	var generatedOutbounds []interface{}
 	for _, ep := range endpoints {
-		if !ep.IsActive || ep.Node == nil || !ep.Node.IsActive || ep.Node.Protocol != "vless" {
+		if !ep.IsActive || ep.Node == nil || !ep.Node.IsActive || !strings.EqualFold(ep.Node.Protocol, "vless") {
 			continue
 		}
 		outbound, err := BuildXrayEndpointOutbound(ep)
@@ -216,7 +217,7 @@ func GenerateXrayConfigFromTemplate(cfg map[string]interface{}, endpoints []*mod
 	if len(generatedOutbounds) > 0 {
 		if first, ok := generatedOutbounds[0].(map[string]interface{}); ok {
 			if tag, ok := first["tag"].(string); ok && tag != "" {
-				setXrayRoutingOutboundTag(cfg, "dns-proxy", tag)
+				reconcileXrayRoutingRules(cfg, tag)
 			}
 		}
 	}
@@ -224,7 +225,29 @@ func GenerateXrayConfigFromTemplate(cfg map[string]interface{}, endpoints []*mod
 	return cfg, nil
 }
 
-func setXrayRoutingOutboundTag(cfg map[string]interface{}, inboundTag, outboundTag string) {
+func collectValidOutboundTags(cfg map[string]interface{}) map[string]bool {
+	validTags := make(map[string]bool)
+	outbounds, ok := cfg["outbounds"].([]interface{})
+	if !ok {
+		return validTags
+	}
+	for _, raw := range outbounds {
+		if outbound, ok := raw.(map[string]interface{}); ok {
+			if tag, ok := outbound["tag"].(string); ok {
+				trimmed := strings.TrimSpace(tag)
+				if trimmed != "" {
+					validTags[trimmed] = true
+				}
+			}
+		}
+	}
+	return validTags
+}
+
+func reconcileXrayRoutingRules(cfg map[string]interface{}, primaryOutboundTag string) {
+	if primaryOutboundTag == "" {
+		return
+	}
 	routing, ok := cfg["routing"].(map[string]interface{})
 	if !ok {
 		return
@@ -233,28 +256,50 @@ func setXrayRoutingOutboundTag(cfg map[string]interface{}, inboundTag, outboundT
 	if !ok {
 		return
 	}
+
+	validTags := collectValidOutboundTags(cfg)
+
 	for _, raw := range rules {
 		rule, ok := raw.(map[string]interface{})
-		if !ok || !xrayRuleHasInboundTag(rule, inboundTag) {
+		if !ok {
 			continue
 		}
-		rule["outboundTag"] = outboundTag
+
+		// 1. dns-proxy queries must be routed through the primary proxy node
+		if xrayRuleHasInboundTag(rule, "dns-proxy") {
+			rule["outboundTag"] = primaryOutboundTag
+			delete(rule, "balancerTag")
+			continue
+		}
+
+		// Balancer rules route traffic via balancerTag rather than outboundTag
+		if _, hasBalancer := rule["balancerTag"]; hasBalancer {
+			continue
+		}
+
+		// 2. Rules pointing to invalid/placeholder tags (e.g. "usp", "proxy") are rewritten to primary node
+		if rawTag, exists := rule["outboundTag"]; exists {
+			curTag, _ := rawTag.(string)
+			if !validTags[strings.TrimSpace(curTag)] {
+				rule["outboundTag"] = primaryOutboundTag
+			}
+		}
 	}
 }
 
 func xrayRuleHasInboundTag(rule map[string]interface{}, want string) bool {
 	switch v := rule["inboundTag"].(type) {
 	case string:
-		return v == want
+		return strings.TrimSpace(v) == want
 	case []interface{}:
 		for _, item := range v {
-			if s, ok := item.(string); ok && s == want {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) == want {
 				return true
 			}
 		}
 	case []string:
 		for _, s := range v {
-			if s == want {
+			if strings.TrimSpace(s) == want {
 				return true
 			}
 		}
