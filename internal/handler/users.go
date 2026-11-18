@@ -559,7 +559,7 @@ func GetUser(w http.ResponseWriter, r *http.Request) {
 			return q.Order("endpoint.sort_order ASC", "endpoint.id ASC")
 		}).
 		Relation("Endpoints.Node").
-		Where("user.id = ?", id).
+		Where("?TableAlias.id = ?", id).
 		Scan(r.Context())
 	if err != nil {
 		RespondError(w, http.StatusNotFound, "User not found")
@@ -616,7 +616,7 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user model.User
-	if err := db.DB.NewSelect().Model(&user).Relation("Nodes").Where("user.id = ?", id).Scan(r.Context()); err != nil {
+	if err := db.DB.NewSelect().Model(&user).Relation("Nodes").Where("?TableAlias.id = ?", id).Scan(r.Context()); err != nil {
 		RespondError(w, http.StatusNotFound, "User not found")
 		return
 	}
@@ -953,7 +953,7 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 			return q.Order("endpoint.sort_order ASC", "endpoint.id ASC")
 		}).
 		Relation("Endpoints.Node").
-		Where("user.id = ?", id).
+		Where("?TableAlias.id = ?", id).
 		Scan(r.Context())
 	response := []UserReadResp{toUserRead(&user)}
 	attachDownloadStats(r.Context(), []*model.User{&user}, response)

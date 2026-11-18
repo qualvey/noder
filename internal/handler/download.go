@@ -92,7 +92,7 @@ func HandleDownload(w http.ResponseWriter, r *http.Request) {
 				return q.Order("endpoint.sort_order ASC", "endpoint.id ASC")
 			}).
 			Relation("Endpoints.Node").
-			Where("user.token = ?", token).Scan(r.Context())
+			Where("?TableAlias.token = ?", token).Scan(r.Context())
 		if err == nil && u.IsActive {
 			matchedUser = &u
 		}

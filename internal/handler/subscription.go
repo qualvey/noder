@@ -38,7 +38,7 @@ func getActiveUser(ctx context.Context, token string) (*model.User, error) {
 		}).
 		Relation("Endpoints.Node").
 		Relation("Nodes").
-		Where("user.token = ?", token).
+		Where("?TableAlias.token = ?", token).
 		Scan(ctx)
 	if err != nil || !user.IsActive || user.Status == "disabled" {
 		return nil, &contract.APIError{StatusCode: http.StatusUnauthorized, Detail: "Invalid or inactive user token"}

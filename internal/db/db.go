@@ -142,10 +142,10 @@ func CreateDBAndTables(ctx context.Context) error {
 		       COALESCE(NULLIF(n.tag, ''), n.node_name, 'Node-' || n.id),
 		       COALESCE(NULLIF(u.uuid, ''), NULLIF(u.token, ''), 'legacy-' || CAST(u.id AS TEXT)),
 		       u.password,
-		       1,
+		       TRUE,
 		       0
 		FROM usernodelink l
-		JOIN user u ON l.user_id = u.id
+		JOIN "user" u ON l.user_id = u.id
 		JOIN node n ON l.node_id = n.id
 		WHERE NOT EXISTS (
 			SELECT 1 FROM endpoint e WHERE e.user_id = l.user_id AND e.node_id = l.node_id
@@ -163,9 +163,9 @@ func CreateDBAndTables(ctx context.Context) error {
 
 	userCols := []string{"remark", "config_override", "node_order", "template_branch_id", "external_id", "independent_node_ids", "status"}
 	for _, col := range userCols {
-		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE user ADD COLUMN %s VARCHAR", col))
+		_, _ = DB.ExecContext(ctx, fmt.Sprintf("ALTER TABLE \"user\" ADD COLUMN %s VARCHAR", col))
 	}
-	_, _ = DB.ExecContext(ctx, "UPDATE user SET status = 'active' WHERE status IS NULL OR status = ''")
+	_, _ = DB.ExecContext(ctx, "UPDATE \"user\" SET status = 'active' WHERE status IS NULL OR status = ''")
 	if _, err := DB.NewCreateIndex().Model((*model.User)(nil)).IfNotExists().Index("user_external_id_idx").Column("external_id").Exec(ctx); err != nil {
 		return err
 	}
@@ -182,13 +182,13 @@ func CreateDBAndTables(ctx context.Context) error {
 		SET is_urltest = FALSE
 		WHERE node_id IS NOT NULL
 		  AND EXISTS (
-			SELECT 1 FROM user u
+			SELECT 1 FROM "user" u
 			WHERE u.id = endpoint.user_id
 			  AND (',' || replace(replace(replace(COALESCE(u.independent_node_ids, ''), '[', ''), ']', ''), ' ', '') || ',')
 			      LIKE '%,' || CAST(endpoint.node_id AS TEXT) || ',%'
 		  )
 	`)
-	_, _ = DB.ExecContext(ctx, "UPDATE user SET independent_node_ids = NULL WHERE independent_node_ids IS NOT NULL")
+	_, _ = DB.ExecContext(ctx, "UPDATE \"user\" SET independent_node_ids = NULL WHERE independent_node_ids IS NOT NULL")
 
 	// D10 Mall delivery: subscription fields on access_grants.
 	_, _ = DB.ExecContext(ctx, "ALTER TABLE access_grants ADD COLUMN format VARCHAR")
