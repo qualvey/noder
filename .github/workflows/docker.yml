@@ -47,6 +47,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
+            type=sha,prefix=sha-,format=long
             type=sha,prefix=sha-
             type=ref,event=branch
             type=semver,pattern={{version}}
