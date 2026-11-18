@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,8 @@ func RegisterAgentRoutes(r chi.Router) {
 	r.Route("/api/agent/v1", func(r chi.Router) {
 		r.Use(AgentAuth)
 		r.Post("/heartbeat", AgentHeartbeat)
+		r.Get("/config", AgentGetNodeConfig)
+		r.Post("/health/report", AgentReportHealth)
 		r.Get("/deployments", AgentGetDeployments)
 		r.Post("/deployments/report", AgentReportDeployments)
 		r.Post("/traffic/report", AgentReportTraffic)
@@ -70,16 +73,42 @@ func AgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		respondAgentErr(w, http.StatusInternalServerError, "ERR_INTERNAL", "failed to update heartbeat")
 		return
 	}
-	// Update last_sync_at on bound endpoints that reported ready (best effort).
+	// Update last_sync_at on bound endpoints and auto-project endpoints if ready.
 	for _, ep := range req.Endpoints {
-		if ep.EndpointID <= 0 {
+		if ep.InboundTag == "" && ep.EndpointID <= 0 {
 			continue
 		}
-		_, _ = db.DB.NewUpdate().Model((*model.EndpointAgentBinding)(nil)).
-			Set("last_sync_at = ?", now).
-			Set("last_error = NULL").
-			Where("agent_node_id = ? AND endpoint_id = ?", agent.ID, ep.EndpointID).
-			Exec(r.Context())
+		if ep.EndpointID > 0 {
+			if ep.Ready {
+				_, _ = db.DB.NewUpdate().Model((*model.EndpointAgentBinding)(nil)).
+					Set("last_sync_at = ?", now).
+					Set("last_error = NULL").
+					Where("agent_node_id = ? AND endpoint_id = ?", agent.ID, ep.EndpointID).
+					Exec(r.Context())
+			}
+			continue
+		}
+		// ep.EndpointID <= 0 and InboundTag != "": check if already bound to this agent
+		var existing model.Node
+		err := db.DB.NewSelect().Model(&existing).
+			Where("inbound_tag = ? OR (inbound_tag IS NULL AND tag = ?)", ep.InboundTag, ep.InboundTag).
+			Where("id IN (SELECT endpoint_id FROM endpoint_agent_bindings WHERE agent_node_id = ?)", agent.ID).
+			Scan(r.Context())
+		if err == nil {
+			if ep.Ready {
+				_, _ = db.DB.NewUpdate().Model((*model.EndpointAgentBinding)(nil)).
+					Set("last_sync_at = ?", now).
+					Set("last_error = NULL").
+					Where("agent_node_id = ? AND endpoint_id = ?", agent.ID, existing.ID).
+					Exec(r.Context())
+				projectInboundToEndpoint(r.Context(), agent, ep.InboundTag, req.Hostname, now)
+			}
+			continue
+		}
+		// Auto-project if ready
+		if ep.Ready {
+			projectInboundToEndpoint(r.Context(), agent, ep.InboundTag, req.Hostname, now)
+		}
 	}
 	logger.DebugContext(r.Context(), "received agent heartbeat",
 		"agent_id", agent.ID,
@@ -93,6 +122,282 @@ func AgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		"data": map[string]interface{}{
 			"server_time":       now.Format(time.RFC3339),
 			"sync_interval_sec": 15,
+		},
+	})
+}
+
+func projectInboundToEndpoint(ctx context.Context, agent *model.AgentNode, inboundTag, hostname string, now time.Time) {
+	topoStr := agent.TopologyConfig
+	var curAgent model.AgentNode
+	if err := db.DB.NewSelect().Model(&curAgent).Where("id = ?", agent.ID).Scan(ctx); err == nil {
+		topoStr = curAgent.TopologyConfig
+	}
+
+	var topo struct {
+		Inbounds []struct {
+			Tag         string   `json:"tag"`
+			Protocol    string   `json:"protocol"`
+			Listen      string   `json:"listen"`
+			Port        int      `json:"port"`
+			Network     string   `json:"network"`
+			Security    string   `json:"security"`
+			ServerNames []string `json:"server_names"`
+			PublicKey   string   `json:"public_key"`
+			ShortIDs    []string `json:"short_ids"`
+		} `json:"inbounds"`
+	}
+	if strings.TrimSpace(topoStr) != "" && strings.TrimSpace(topoStr) != "{}" {
+		_ = json.Unmarshal([]byte(topoStr), &topo)
+	}
+
+	proto := "vless"
+	port := 443
+	security := "none"
+	transport := "tcp"
+	var sni *string
+	var pubKey *string
+	var shortID *string
+
+	for _, ib := range topo.Inbounds {
+		if ib.Tag == inboundTag {
+			if ib.Protocol != "" {
+				proto = ib.Protocol
+			}
+			if ib.Port > 0 {
+				port = ib.Port
+			}
+			if ib.Security != "" {
+				security = ib.Security
+			}
+			if ib.Network != "" {
+				transport = ib.Network
+			}
+			if len(ib.ServerNames) > 0 && ib.ServerNames[0] != "" {
+				s := ib.ServerNames[0]
+				sni = &s
+			}
+			if ib.PublicKey != "" {
+				pk := ib.PublicKey
+				pubKey = &pk
+			}
+			if len(ib.ShortIDs) > 0 && ib.ShortIDs[0] != "" {
+				sid := ib.ShortIDs[0]
+				shortID = &sid
+			}
+			break
+		}
+	}
+
+	serverAddr := hostname
+	if serverAddr == "" {
+		serverAddr = "127.0.0.1"
+	}
+
+	var existingNode model.Node
+	err := db.DB.NewSelect().Model(&existingNode).
+		Where("inbound_tag = ? OR (inbound_tag IS NULL AND tag = ?)", inboundTag, inboundTag).
+		Where("id IN (SELECT endpoint_id FROM endpoint_agent_bindings WHERE agent_node_id = ?)", agent.ID).
+		Order("id ASC").Limit(1).Scan(ctx)
+
+	var endpointID int64
+	if err == nil {
+		endpointID = existingNode.ID
+		if !existingNode.IsAgentless {
+			_, _ = db.DB.NewUpdate().Model((*model.Node)(nil)).
+				Set("protocol = ?", proto).
+				Set("server_address = ?", serverAddr).
+				Set("server_port = ?", port).
+				Set("security = ?", security).
+				Set("transport_type = ?", transport).
+				Set("sni = ?", sni).
+				Set("public_key = ?", pubKey).
+				Set("short_id = ?", shortID).
+				Set("status = 'active'").
+				Set("is_active = true").
+				Where("id = ?", existingNode.ID).
+				Exec(ctx)
+		}
+	} else {
+		tagStr := inboundTag
+		newNode := &model.Node{
+			Tag:           inboundTag,
+			InboundTag:    &tagStr,
+			NodeName:      inboundTag,
+			Protocol:      proto,
+			ServerAddress: serverAddr,
+			ServerPort:    port,
+			Security:      security,
+			TransportType: transport,
+			SNI:           sni,
+			PublicKey:     pubKey,
+			ShortID:       shortID,
+			IsActive:      true,
+			Status:        "active",
+			IsAgentless:   false,
+		}
+		if _, err := db.DB.NewInsert().Model(newNode).Exec(ctx); err != nil {
+			logger.WarnContext(ctx, "failed to insert projected node", "inbound_tag", inboundTag, "err", err)
+			return
+		}
+		endpointID = newNode.ID
+	}
+
+	exists, _ := db.DB.NewSelect().Model((*model.EndpointAgentBinding)(nil)).
+		Where("endpoint_id = ? AND agent_node_id = ?", endpointID, agent.ID).
+		Exists(ctx)
+	if exists {
+		_, _ = db.DB.NewUpdate().Model((*model.EndpointAgentBinding)(nil)).
+			Set("status = 'active'").
+			Set("last_sync_at = ?", now).
+			Set("last_error = NULL").
+			Where("endpoint_id = ? AND agent_node_id = ?", endpointID, agent.ID).
+			Exec(ctx)
+	} else {
+		binding := &model.EndpointAgentBinding{
+			EndpointID:  endpointID,
+			AgentNodeID: agent.ID,
+			Status:      "active",
+			LastSyncAt:  &now,
+			CreatedAt:   now,
+		}
+		_, _ = db.DB.NewInsert().Model(binding).Exec(ctx)
+	}
+}
+
+// AgentGetNodeConfig handles GET /api/agent/v1/config.
+func AgentGetNodeConfig(w http.ResponseWriter, r *http.Request) {
+	agent := AgentNodeFromContext(r.Context())
+	if agent == nil {
+		respondAgentErr(w, http.StatusUnauthorized, "ERR_INVALID_TOKEN", "unauthorized")
+		return
+	}
+
+	var topoCfg struct {
+		Inbounds  []json.RawMessage `json:"inbounds"`
+		Outbounds []json.RawMessage `json:"outbounds"`
+		Routing   json.RawMessage   `json:"routing"`
+	}
+
+	topoStr := strings.TrimSpace(agent.TopologyConfig)
+	if topoStr != "" && topoStr != "{}" {
+		_ = json.Unmarshal([]byte(topoStr), &topoCfg)
+	}
+	if topoCfg.Inbounds == nil {
+		topoCfg.Inbounds = []json.RawMessage{}
+	}
+	if topoCfg.Outbounds == nil {
+		topoCfg.Outbounds = []json.RawMessage{}
+	}
+	if len(topoCfg.Routing) == 0 || string(topoCfg.Routing) == "null" {
+		topoCfg.Routing = json.RawMessage(`{"domain_strategy":"AsIs","rules":[]}`)
+	}
+
+	revision := strings.TrimSpace(agent.ConfigRevision)
+	if revision == "" {
+		revision = "0"
+	}
+
+	RespondServiceJSON(w, http.StatusOK, map[string]interface{}{
+		"code":    0,
+		"message": "success",
+		"data": map[string]interface{}{
+			"revision":  revision,
+			"inbounds":  topoCfg.Inbounds,
+			"outbounds": topoCfg.Outbounds,
+			"routing":   topoCfg.Routing,
+		},
+	})
+}
+
+type agentHealthReportReq struct {
+	AgentVersion  string                   `json:"agent_version"`
+	XrayVersion   string                   `json:"xray_version"`
+	Hostname      string                   `json:"hostname"`
+	OverallStatus string                   `json:"overall_status"`
+	Dimensions    map[string]string        `json:"dimensions"`
+	Anomalies     []map[string]interface{} `json:"anomalies"`
+	ObservedAt    string                   `json:"observed_at"`
+}
+
+// AgentReportHealth handles POST /api/agent/v1/health/report.
+func AgentReportHealth(w http.ResponseWriter, r *http.Request) {
+	agent := AgentNodeFromContext(r.Context())
+	if agent == nil {
+		respondAgentErr(w, http.StatusUnauthorized, "ERR_INVALID_TOKEN", "unauthorized")
+		return
+	}
+
+	var req agentHealthReportReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondAgentErr(w, http.StatusBadRequest, "ERR_BAD_REQUEST", "invalid JSON body")
+		return
+	}
+
+	overallStatus := strings.ToLower(strings.TrimSpace(req.OverallStatus))
+	if overallStatus == "" {
+		overallStatus = "unknown"
+	}
+	if req.Dimensions == nil {
+		req.Dimensions = map[string]string{}
+	}
+	if req.Anomalies == nil {
+		req.Anomalies = []map[string]interface{}{}
+	}
+
+	dimBytes, _ := json.Marshal(req.Dimensions)
+	dimJSON := string(dimBytes)
+	anomBytes, _ := json.Marshal(req.Anomalies)
+	anomJSON := string(anomBytes)
+
+	now := time.Now().UTC()
+	observedAt := now
+	if req.ObservedAt != "" {
+		if t, err := time.Parse(time.RFC3339, req.ObservedAt); err == nil {
+			observedAt = t
+		}
+	}
+
+	var lastLog model.AgentHealthLog
+	err := db.DB.NewSelect().Model(&lastLog).
+		Where("agent_node_id = ?", agent.ID).
+		Order("id DESC").
+		Limit(1).
+		Scan(r.Context())
+	hasLog := err == nil
+	shouldLog := !hasLog || lastLog.OverallStatus != overallStatus || lastLog.Dimensions != dimJSON || lastLog.Anomalies != anomJSON
+
+	_, _ = db.DB.NewUpdate().Model((*model.AgentNode)(nil)).
+		Set("overall_status = ?", overallStatus).
+		Set("health_dimensions = ?", dimJSON).
+		Set("updated_at = ?", now).
+		Where("id = ?", agent.ID).
+		Exec(r.Context())
+
+	if shouldLog {
+		log := &model.AgentHealthLog{
+			AgentNodeID:   agent.ID,
+			OverallStatus: overallStatus,
+			Dimensions:    dimJSON,
+			Anomalies:     anomJSON,
+			AgentVersion:  req.AgentVersion,
+			XrayVersion:   req.XrayVersion,
+			Hostname:      req.Hostname,
+			ObservedAt:    observedAt,
+			CreatedAt:     now,
+		}
+		_, _ = db.DB.NewInsert().Model(log).Exec(r.Context())
+	}
+
+	cutoff := now.AddDate(0, 0, -30)
+	_, _ = db.DB.NewDelete().Model((*model.AgentHealthLog)(nil)).
+		Where("created_at < ?", cutoff).
+		Exec(r.Context())
+
+	RespondServiceJSON(w, http.StatusOK, map[string]interface{}{
+		"code":    0,
+		"message": "success",
+		"data": map[string]interface{}{
+			"accepted": true,
 		},
 	})
 }
@@ -572,8 +877,18 @@ func AgentReportTraffic(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type StateSyncPresentItem struct {
+	CredentialID string `json:"credential_id"`
+	EndpointID   int64  `json:"endpoint_id"`
+	Revision     string `json:"revision"`
+	AppliedState string `json:"applied_state"`
+	XrayUserKey  string `json:"xray_user_key"`
+}
+
 type agentStateSyncReq struct {
-	Items []struct {
+	LastRevision string                 `json:"last_revision"`
+	Present      []StateSyncPresentItem `json:"present"`
+	Items        []struct {
 		CredentialID string `json:"credential_id"`
 		EndpointID   int64  `json:"endpoint_id"`
 		AppliedState string `json:"applied_state"`
@@ -593,15 +908,6 @@ func AgentSyncState(w http.ResponseWriter, r *http.Request) {
 		respondAgentErr(w, http.StatusBadRequest, "ERR_BAD_REQUEST", "invalid JSON body")
 		return
 	}
-	if req.Items == nil {
-		req.Items = []struct {
-			CredentialID string `json:"credential_id"`
-			EndpointID   int64  `json:"endpoint_id"`
-			AppliedState string `json:"applied_state"`
-			Revision     string `json:"revision"`
-			Present      *bool  `json:"present"`
-		}{}
-	}
 	now := time.Now().UTC()
 	conflicts := make([]map[string]interface{}, 0)
 	drift := make([]map[string]interface{}, 0)
@@ -615,51 +921,95 @@ func AgentSyncState(w http.ResponseWriter, r *http.Request) {
 		Present      bool
 	}
 	reportMap := make(map[string]syncItem)
-	// per-item binding validation
-	for _, it := range req.Items {
-		credID := strings.TrimSpace(it.CredentialID)
-		epID := it.EndpointID
-		if credID == "" || epID <= 0 {
-			conflicts = append(conflicts, map[string]interface{}{
-				"credential_id": it.CredentialID,
-				"endpoint_id":   it.EndpointID,
-				"reason":        "invalid_argument",
-			})
-			logger.WarnContext(r.Context(), "agent state sync invalid item",
-				"agent_id", agent.ID,
-				"credential_id", it.CredentialID,
-				"endpoint_id", it.EndpointID,
-			)
-			continue
+
+	if len(req.Present) > 0 || (req.Present != nil && len(req.Items) == 0) {
+		for _, it := range req.Present {
+			credID := strings.TrimSpace(it.CredentialID)
+			epID := it.EndpointID
+			if credID == "" || epID <= 0 {
+				conflicts = append(conflicts, map[string]interface{}{
+					"credential_id": it.CredentialID,
+					"endpoint_id":   it.EndpointID,
+					"reason":        "invalid_argument",
+				})
+				logger.WarnContext(r.Context(), "agent state sync invalid item",
+					"agent_id", agent.ID,
+					"credential_id", it.CredentialID,
+					"endpoint_id", it.EndpointID,
+				)
+				continue
+			}
+			exists, err := db.DB.NewSelect().Model((*model.EndpointAgentBinding)(nil)).
+				Where("agent_node_id = ? AND endpoint_id = ? AND status = ?", agent.ID, epID, "active").
+				Exists(r.Context())
+			if err != nil || !exists {
+				conflicts = append(conflicts, map[string]interface{}{
+					"credential_id": credID,
+					"endpoint_id":   epID,
+					"reason":        "not_bound",
+				})
+				logger.WarnContext(r.Context(), "agent state sync not bound",
+					"agent_id", agent.ID,
+					"endpoint_id", epID,
+					"credential_id", credID,
+				)
+				continue
+			}
+			key := fmt.Sprintf("%s:%d", credID, epID)
+			reportMap[key] = syncItem{
+				CredentialID: credID,
+				EndpointID:   epID,
+				AppliedState: normalizeAppliedState(it.AppliedState),
+				Revision:     strings.TrimSpace(it.Revision),
+				Present:      true,
+			}
 		}
-		// Reuse binding logic from requireAgentEndpointAccess (active binding check)
-		exists, err := db.DB.NewSelect().Model((*model.EndpointAgentBinding)(nil)).
-			Where("agent_node_id = ? AND endpoint_id = ? AND status = ?", agent.ID, epID, "active").
-			Exists(r.Context())
-		if err != nil || !exists {
-			conflicts = append(conflicts, map[string]interface{}{
-				"credential_id": credID,
-				"endpoint_id":   epID,
-				"reason":        "not_bound",
-			})
-			logger.WarnContext(r.Context(), "agent state sync not bound",
-				"agent_id", agent.ID,
-				"endpoint_id", epID,
-				"credential_id", credID,
-			)
-			continue
-		}
-		present := true
-		if it.Present != nil {
-			present = *it.Present
-		}
-		key := fmt.Sprintf("%s:%d", credID, epID)
-		reportMap[key] = syncItem{
-			CredentialID: credID,
-			EndpointID:   epID,
-			AppliedState: normalizeAppliedState(it.AppliedState),
-			Revision:     strings.TrimSpace(it.Revision),
-			Present:      present,
+	} else {
+		for _, it := range req.Items {
+			credID := strings.TrimSpace(it.CredentialID)
+			epID := it.EndpointID
+			if credID == "" || epID <= 0 {
+				conflicts = append(conflicts, map[string]interface{}{
+					"credential_id": it.CredentialID,
+					"endpoint_id":   it.EndpointID,
+					"reason":        "invalid_argument",
+				})
+				logger.WarnContext(r.Context(), "agent state sync invalid item",
+					"agent_id", agent.ID,
+					"credential_id", it.CredentialID,
+					"endpoint_id", it.EndpointID,
+				)
+				continue
+			}
+			// Reuse binding logic from requireAgentEndpointAccess (active binding check)
+			exists, err := db.DB.NewSelect().Model((*model.EndpointAgentBinding)(nil)).
+				Where("agent_node_id = ? AND endpoint_id = ? AND status = ?", agent.ID, epID, "active").
+				Exists(r.Context())
+			if err != nil || !exists {
+				conflicts = append(conflicts, map[string]interface{}{
+					"credential_id": credID,
+					"endpoint_id":   epID,
+					"reason":        "not_bound",
+				})
+				logger.WarnContext(r.Context(), "agent state sync not bound",
+					"agent_id", agent.ID,
+					"endpoint_id", epID,
+					"credential_id", credID,
+				)
+				continue
+			}
+			present := true
+			if it.Present != nil {
+				present = *it.Present
+			}
+			key := fmt.Sprintf("%s:%d", credID, epID)
+			reportMap[key] = syncItem{
+				CredentialID: credID,
+				EndpointID:   epID,
+				AppliedState: normalizeAppliedState(it.AppliedState),
+				Revision:     strings.TrimSpace(it.Revision),
+				Present:      present,
+			}
 		}
 	}
 
@@ -676,6 +1026,8 @@ func AgentSyncState(w http.ResponseWriter, r *http.Request) {
 	var primaryEndpointID int64
 	if len(deps) > 0 {
 		primaryEndpointID = deps[0].EndpointID
+	} else if len(req.Present) > 0 {
+		primaryEndpointID = req.Present[0].EndpointID
 	} else if len(req.Items) > 0 {
 		primaryEndpointID = req.Items[0].EndpointID
 	}
@@ -692,9 +1044,6 @@ func AgentSyncState(w http.ResponseWriter, r *http.Request) {
 			if ok {
 				appliedMismatch = rep.AppliedState != desired
 			} else {
-				// No report at all => treat as drift if desired active (present=false)
-				// For drift last_error logic: applied_state != desired && present==false
-				// Here applied is essentially unknown, count as drift when desired active
 				appliedMismatch = d.AppliedState != desired
 			}
 			// Update last_sync_at/last_error
@@ -702,7 +1051,6 @@ func AgentSyncState(w http.ResponseWriter, r *http.Request) {
 				Set("last_sync_at = ?", now).
 				Where("credential_id = ? AND endpoint_id = ? AND agent_node_id = ?", d.CredentialID, d.EndpointID, d.AgentNodeID)
 			if appliedMismatch && !ok || (ok && !rep.Present && rep.AppliedState != desired) {
-				// present=false and drift
 				upd = upd.Set("last_error = ?", "drift: present=false")
 			} else if !ok && desired == "active" {
 				upd = upd.Set("last_error = ?", "drift: missing on agent")
@@ -715,16 +1063,14 @@ func AgentSyncState(w http.ResponseWriter, r *http.Request) {
 
 			if desired == "active" {
 				drift = append(drift, map[string]interface{}{
-					"credential_id": d.CredentialID,
-					"endpoint_id":   d.EndpointID,
-					"action":        "add",
-					"desired_state": desired,
-					"revision":      d.Revision,
-					"reason":        "missing_on_agent",
+					"credential_id":    d.CredentialID,
+					"endpoint_id":      d.EndpointID,
+					"action":           "add",
+					"desired_state":    desired,
+					"revision":         d.Revision,
+					"current_revision": d.Revision,
+					"reason":           "missing",
 				})
-			} else {
-				// desired revoked/disabled but agent already absent -> in sync, no drift
-				// ensure last_error cleared handled above
 			}
 			continue
 		}
@@ -740,7 +1086,7 @@ func AgentSyncState(w http.ResponseWriter, r *http.Request) {
 			needDrift = true
 			if desired == "revoked" || desired == "disabled" {
 				action = "remove"
-				reason = "desired_revoked"
+				reason = "state_mismatch"
 			} else {
 				action = "update"
 				reason = "state_mismatch"
@@ -756,9 +1102,6 @@ func AgentSyncState(w http.ResponseWriter, r *http.Request) {
 			Where("credential_id = ? AND endpoint_id = ? AND agent_node_id = ?", d.CredentialID, d.EndpointID, d.AgentNodeID)
 		if needDrift && !rep.Present {
 			upd = upd.Set("last_error = ?", "drift")
-		} else if needDrift {
-			// still mark drift as last_error when applied != desired? spec says present=false, but keep clear for update case
-			upd = upd.Set("last_error = NULL")
 		} else {
 			upd = upd.Set("last_error = NULL")
 		}
@@ -766,14 +1109,13 @@ func AgentSyncState(w http.ResponseWriter, r *http.Request) {
 
 		if needDrift {
 			entry := map[string]interface{}{
-				"credential_id": d.CredentialID,
-				"endpoint_id":   d.EndpointID,
-				"action":        action,
-				"desired_state": desired,
-				"revision":      d.Revision,
-			}
-			if reason != "" {
-				entry["reason"] = reason
+				"credential_id":    d.CredentialID,
+				"endpoint_id":      d.EndpointID,
+				"action":           action,
+				"desired_state":    desired,
+				"revision":         d.Revision,
+				"current_revision": d.Revision,
+				"reason":           reason,
 			}
 			if applied != desired {
 				entry["applied_state"] = applied
@@ -796,10 +1138,13 @@ func AgentSyncState(w http.ResponseWriter, r *http.Request) {
 		}
 		if !found {
 			drift = append(drift, map[string]interface{}{
-				"credential_id": rep.CredentialID,
-				"endpoint_id":   rep.EndpointID,
-				"action":        "remove",
-				"reason":        "not_desired",
+				"credential_id":    rep.CredentialID,
+				"endpoint_id":      rep.EndpointID,
+				"action":           "remove",
+				"desired_state":    "revoked",
+				"revision":         rep.Revision,
+				"current_revision": rep.Revision,
+				"reason":           "extra",
 			})
 			logger.WarnContext(r.Context(), "agent state sync extra deployment on agent",
 				"agent_id", agent.ID,

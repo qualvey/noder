@@ -167,10 +167,30 @@ type AgentNode struct {
 	Name                   string     `bun:"name,notnull" json:"name"`
 	ControlTokenCiphertext *string    `bun:"control_token_ciphertext" json:"-"`
 	Status                 string     `bun:"status,notnull,default:'offline'" json:"status"`
+	TopologyConfig         string     `bun:"topology_config,notnull,default:'{}'" json:"topology_config"`
+	ConfigRevision         string     `bun:"config_revision,notnull,default:'0'" json:"config_revision"`
+	OverallStatus          string     `bun:"overall_status,notnull,default:'unknown'" json:"overall_status"`
+	HealthDimensions       string     `bun:"health_dimensions,notnull,default:'{}'" json:"health_dimensions"`
 	LastHeartbeatAt        *time.Time `bun:"last_heartbeat_at" json:"last_heartbeat_at,omitempty"`
 	Metadata               string     `bun:"metadata,notnull,default:'{}'" json:"metadata"`
 	CreatedAt              time.Time  `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt              time.Time  `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
+}
+
+// AgentHealthLog 记录四维巡检状态变更与异常明细（仅在状态变化时写入，保留 30 天）
+type AgentHealthLog struct {
+	bun.BaseModel `bun:"table:agent_health_logs"`
+
+	ID            int64     `bun:"id,pk,autoincrement" json:"id"`
+	AgentNodeID   string    `bun:"agent_node_id,notnull" json:"agent_node_id"`
+	OverallStatus string    `bun:"overall_status,notnull" json:"overall_status"`
+	Dimensions    string    `bun:"dimensions,notnull,default:'{}'" json:"dimensions"`
+	Anomalies     string    `bun:"anomalies,notnull,default:'[]'" json:"anomalies"`
+	AgentVersion  string    `bun:"agent_version" json:"agent_version"`
+	XrayVersion   string    `bun:"xray_version" json:"xray_version"`
+	Hostname      string    `bun:"hostname" json:"hostname"`
+	ObservedAt    time.Time `bun:"observed_at,notnull" json:"observed_at"`
+	CreatedAt     time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
 }
 
 type EndpointAgentBinding struct {

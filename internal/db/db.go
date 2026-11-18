@@ -32,7 +32,7 @@ func InitDB() (*bun.DB, error) {
 		(*model.Credential)(nil), (*model.AccessGrant)(nil), (*model.AgentNode)(nil),
 		(*model.EndpointAgentBinding)(nil), (*model.CredentialDeployment)(nil), (*model.LegacyMigrationMap)(nil),
 		(*model.SubscriptionOperation)(nil), (*model.AgentTrafficReport)(nil),
-		(*model.ServiceReleaseLog)(nil),
+		(*model.ServiceReleaseLog)(nil), (*model.AgentHealthLog)(nil),
 	)
 
 	ctx := context.Background()
@@ -72,7 +72,7 @@ func OpenDB() (*bun.DB, error) {
 		(*model.Credential)(nil), (*model.AccessGrant)(nil), (*model.AgentNode)(nil),
 		(*model.EndpointAgentBinding)(nil), (*model.CredentialDeployment)(nil), (*model.LegacyMigrationMap)(nil),
 		(*model.SubscriptionOperation)(nil), (*model.AgentTrafficReport)(nil),
-		(*model.ServiceReleaseLog)(nil),
+		(*model.ServiceReleaseLog)(nil), (*model.AgentHealthLog)(nil),
 	)
 	return DB, nil
 }
@@ -98,6 +98,7 @@ func CreateDBAndTables(ctx context.Context) error {
 		(*model.SubscriptionOperation)(nil),
 		(*model.AgentTrafficReport)(nil),
 		(*model.ServiceReleaseLog)(nil),
+		(*model.AgentHealthLog)(nil),
 	}
 
 	for _, m := range models {
@@ -214,6 +215,19 @@ func CreateDBAndTables(ctx context.Context) error {
 		return err
 	}
 	if _, err := DB.NewCreateIndex().Model((*model.AgentTrafficReport)(nil)).IfNotExists().Index("agent_traffic_report_created_idx").Column("created_at").Exec(ctx); err != nil {
+		return err
+	}
+
+	// Xray Agent v2 alignment (noder-api-alignment.md): agent_nodes topology/status and agent_health_logs.
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE agent_nodes ADD COLUMN topology_config TEXT NOT NULL DEFAULT '{}'")
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE agent_nodes ADD COLUMN config_revision TEXT NOT NULL DEFAULT '0'")
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE agent_nodes ADD COLUMN overall_status TEXT NOT NULL DEFAULT 'unknown'")
+	_, _ = DB.ExecContext(ctx, "ALTER TABLE agent_nodes ADD COLUMN health_dimensions TEXT NOT NULL DEFAULT '{}'")
+	_, _ = DB.ExecContext(ctx, "UPDATE agent_nodes SET topology_config = '{}' WHERE topology_config IS NULL")
+	_, _ = DB.ExecContext(ctx, "UPDATE agent_nodes SET config_revision = '0' WHERE config_revision IS NULL")
+	_, _ = DB.ExecContext(ctx, "UPDATE agent_nodes SET overall_status = 'unknown' WHERE overall_status IS NULL")
+	_, _ = DB.ExecContext(ctx, "UPDATE agent_nodes SET health_dimensions = '{}' WHERE health_dimensions IS NULL")
+	if _, err := DB.NewCreateIndex().Model((*model.AgentHealthLog)(nil)).IfNotExists().Index("agent_health_log_agent_idx").Column("agent_node_id", "created_at").Exec(ctx); err != nil {
 		return err
 	}
 

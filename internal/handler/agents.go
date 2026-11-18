@@ -55,15 +55,19 @@ func RegisterAgentAdminRoutes(r chi.Router) {
 }
 
 type agentListItem struct {
-	ID              string     `json:"id"`
-	Name            string     `json:"name"`
-	Status          string     `json:"status"`
-	LastHeartbeatAt *time.Time `json:"last_heartbeat_at,omitempty"`
-	IsOnline        bool       `json:"is_online"`
-	Metadata        string     `json:"metadata"`
-	BindingCount    int        `json:"binding_count"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID               string     `json:"id"`
+	Name             string     `json:"name"`
+	Status           string     `json:"status"`
+	OverallStatus    string     `json:"overall_status"`
+	HealthDimensions string     `json:"health_dimensions"`
+	ConfigRevision   string     `json:"config_revision"`
+	TopologyConfig   string     `json:"topology_config,omitempty"`
+	LastHeartbeatAt  *time.Time `json:"last_heartbeat_at,omitempty"`
+	IsOnline         bool       `json:"is_online"`
+	Metadata         string     `json:"metadata"`
+	BindingCount     int        `json:"binding_count"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 func ListAgents(w http.ResponseWriter, r *http.Request) {
@@ -120,15 +124,19 @@ func ListAgents(w http.ResponseWriter, r *http.Request) {
 	items := make([]agentListItem, 0, len(agents))
 	for _, a := range agents {
 		items = append(items, agentListItem{
-			ID:              a.ID,
-			Name:            a.Name,
-			Status:          a.Status,
-			LastHeartbeatAt: a.LastHeartbeatAt,
-			IsOnline:        isAgentOnline(a),
-			Metadata:        a.Metadata,
-			BindingCount:    bindingCounts[a.ID],
-			CreatedAt:       a.CreatedAt,
-			UpdatedAt:       a.UpdatedAt,
+			ID:               a.ID,
+			Name:             a.Name,
+			Status:           a.Status,
+			OverallStatus:    a.OverallStatus,
+			HealthDimensions: a.HealthDimensions,
+			ConfigRevision:   a.ConfigRevision,
+			TopologyConfig:   a.TopologyConfig,
+			LastHeartbeatAt:  a.LastHeartbeatAt,
+			IsOnline:         isAgentOnline(a),
+			Metadata:         a.Metadata,
+			BindingCount:     bindingCounts[a.ID],
+			CreatedAt:        a.CreatedAt,
+			UpdatedAt:        a.UpdatedAt,
 		})
 	}
 	if items == nil {
@@ -148,8 +156,9 @@ func ListAgents(w http.ResponseWriter, r *http.Request) {
 
 func CreateAgent(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID   *string `json:"id"`
-		Name *string `json:"name"`
+		ID             *string          `json:"id"`
+		Name           *string          `json:"name"`
+		TopologyConfig *json.RawMessage `json:"topology_config"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		RespondError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -181,8 +190,33 @@ func CreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		id = uuid.NewString()
-		// also generate short style like ag_xxx if uuid?
 	}
+
+	topoCfgStr := "{}"
+	configRev := "0"
+	if req.TopologyConfig != nil && len(*req.TopologyConfig) > 0 {
+		raw := *req.TopologyConfig
+		var rawStr string
+		if err := json.Unmarshal(raw, &rawStr); err == nil {
+			var test interface{}
+			if err := json.Unmarshal([]byte(rawStr), &test); err != nil {
+				RespondError(w, http.StatusBadRequest, "invalid topology_config JSON")
+				return
+			}
+			topoCfgStr = rawStr
+		} else {
+			var test interface{}
+			if err := json.Unmarshal(raw, &test); err != nil {
+				RespondError(w, http.StatusBadRequest, "invalid topology_config JSON")
+				return
+			}
+			topoCfgStr = string(raw)
+		}
+		if topoCfgStr != "{}" && strings.TrimSpace(topoCfgStr) != "" {
+			configRev = strconv.FormatInt(time.Now().UnixMilli(), 10)
+		}
+	}
+
 	token := "agt_live_" + agentRandomHex(16)
 	now := time.Now().UTC()
 	agent := &model.AgentNode{
@@ -190,6 +224,10 @@ func CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Name:                   name,
 		ControlTokenCiphertext: &token,
 		Status:                 "offline",
+		TopologyConfig:         topoCfgStr,
+		ConfigRevision:         configRev,
+		OverallStatus:          "unknown",
+		HealthDimensions:       "{}",
 		Metadata:               "{}",
 		CreatedAt:              now,
 		UpdatedAt:              now,
@@ -202,12 +240,16 @@ func CreateAgent(w http.ResponseWriter, r *http.Request) {
 		"code":    0,
 		"message": "success",
 		"data": map[string]interface{}{
-			"id":            agent.ID,
-			"name":          agent.Name,
-			"status":        agent.Status,
-			"control_token": token,
-			"created_at":    agent.CreatedAt,
-			"updated_at":    agent.UpdatedAt,
+			"id":                agent.ID,
+			"name":              agent.Name,
+			"status":            agent.Status,
+			"control_token":     token,
+			"topology_config":   agent.TopologyConfig,
+			"config_revision":   agent.ConfigRevision,
+			"overall_status":    agent.OverallStatus,
+			"health_dimensions": agent.HealthDimensions,
+			"created_at":        agent.CreatedAt,
+			"updated_at":        agent.UpdatedAt,
 		},
 	})
 }
@@ -231,6 +273,10 @@ func GetAgent(w http.ResponseWriter, r *http.Request) {
 			"id":                agent.ID,
 			"name":              agent.Name,
 			"status":            agent.Status,
+			"overall_status":    agent.OverallStatus,
+			"health_dimensions": agent.HealthDimensions,
+			"config_revision":   agent.ConfigRevision,
+			"topology_config":   agent.TopologyConfig,
 			"last_heartbeat_at": agent.LastHeartbeatAt,
 			"is_online":         isAgentOnline(&agent),
 			"metadata":          agent.Metadata,
@@ -249,8 +295,9 @@ func UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name   *string `json:"name"`
-		Status *string `json:"status"`
+		Name           *string          `json:"name"`
+		Status         *string          `json:"status"`
+		TopologyConfig *json.RawMessage `json:"topology_config"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		RespondError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -279,6 +326,33 @@ func UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		agent.Status = s
 		updated = true
 	}
+	if req.TopologyConfig != nil {
+		raw := *req.TopologyConfig
+		var topoCfgStr string
+		var rawStr string
+		if err := json.Unmarshal(raw, &rawStr); err == nil {
+			var test interface{}
+			if err := json.Unmarshal([]byte(rawStr), &test); err != nil {
+				RespondError(w, http.StatusBadRequest, "invalid topology_config JSON")
+				return
+			}
+			topoCfgStr = rawStr
+		} else {
+			var test interface{}
+			if err := json.Unmarshal(raw, &test); err != nil {
+				RespondError(w, http.StatusBadRequest, "invalid topology_config JSON")
+				return
+			}
+			topoCfgStr = string(raw)
+		}
+		agent.TopologyConfig = topoCfgStr
+		nowMilli := time.Now().UnixMilli()
+		if prev, err := strconv.ParseInt(agent.ConfigRevision, 10, 64); err == nil && nowMilli <= prev {
+			nowMilli = prev + 1
+		}
+		agent.ConfigRevision = strconv.FormatInt(nowMilli, 10)
+		updated = true
+	}
 	if !updated {
 		RespondError(w, http.StatusBadRequest, "no fields to update")
 		return
@@ -295,9 +369,14 @@ func UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			"id":                agent.ID,
 			"name":              agent.Name,
 			"status":            agent.Status,
+			"overall_status":    agent.OverallStatus,
+			"health_dimensions": agent.HealthDimensions,
+			"config_revision":   agent.ConfigRevision,
+			"topology_config":   agent.TopologyConfig,
 			"last_heartbeat_at": agent.LastHeartbeatAt,
 			"is_online":         isAgentOnline(&agent),
 			"metadata":          agent.Metadata,
+			"created_at":        agent.CreatedAt,
 			"updated_at":        agent.UpdatedAt,
 		},
 	})

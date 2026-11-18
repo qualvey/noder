@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -624,4 +625,657 @@ func TestAgentStateSyncNotBound(t *testing.T) {
 		t.Fatalf("expected 0 drift for not_bound item, got %+v", resp.Data.Drift)
 	}
 }
+
+func TestAgentGetNodeConfig(t *testing.T) {
+	r, agent, _, cleanup := setupAgentTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	topoConfig := `{
+		"inbounds": [
+			{"tag": "in-443", "protocol": "vless", "port": 443, "security": "reality"}
+		],
+		"outbounds": [
+			{"tag": "direct", "protocol": "freedom"}
+		],
+		"routing": {
+			"domain_strategy": "AsIs",
+			"rules": [
+				{"rule_tag": "r1", "outbound_tag": "direct"}
+			]
+		}
+	}`
+	rev := "1710000000200"
+	_, err := db.DB.NewUpdate().Model((*model.AgentNode)(nil)).
+		Set("topology_config = ?", topoConfig).
+		Set("config_revision = ?", rev).
+		Where("id = ?", agent.ID).Exec(ctx)
+	if err != nil {
+		t.Fatalf("failed to update agent topo: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/agent/v1/config", nil)
+	req.Header.Set("X-Agent-Token", *agent.ControlTokenCiphertext)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			Revision  string            `json:"revision"`
+			Inbounds  []json.RawMessage `json:"inbounds"`
+			Outbounds []json.RawMessage `json:"outbounds"`
+			Routing   json.RawMessage   `json:"routing"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if resp.Code != 0 {
+		t.Fatalf("expected code 0, got %d", resp.Code)
+	}
+	if resp.Data.Revision != rev {
+		t.Fatalf("expected revision %s, got %s", rev, resp.Data.Revision)
+	}
+	if len(resp.Data.Inbounds) != 1 || len(resp.Data.Outbounds) != 1 {
+		t.Fatalf("unexpected inbounds/outbounds count: %+v", resp.Data)
+	}
+	if len(resp.Data.Routing) == 0 {
+		t.Fatalf("expected non-empty routing")
+	}
+}
+
+func TestAgentGetNodeConfigEmpty(t *testing.T) {
+	r, agent, _, cleanup := setupAgentTest(t)
+	defer cleanup()
+
+	req := httptest.NewRequest("GET", "/api/agent/v1/config", nil)
+	req.Header.Set("X-Agent-Token", *agent.ControlTokenCiphertext)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			Revision  string                 `json:"revision"`
+			Inbounds  []json.RawMessage      `json:"inbounds"`
+			Outbounds []json.RawMessage      `json:"outbounds"`
+			Routing   map[string]interface{} `json:"routing"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if resp.Code != 0 {
+		t.Fatalf("expected code 0, got %d", resp.Code)
+	}
+	if resp.Data.Revision != "0" {
+		t.Fatalf("expected revision 0, got %s", resp.Data.Revision)
+	}
+	if len(resp.Data.Inbounds) != 0 || len(resp.Data.Outbounds) != 0 {
+		t.Fatalf("expected empty inbounds/outbounds, got %+v", resp.Data)
+	}
+	if resp.Data.Routing["domain_strategy"] != "AsIs" {
+		t.Fatalf("expected default routing domain_strategy AsIs, got %v", resp.Data.Routing)
+	}
+}
+
+func TestAgentReportHealth(t *testing.T) {
+	r, agent, _, cleanup := setupAgentTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	body := map[string]interface{}{
+		"agent_version":  "1.0.0",
+		"xray_version":   "26.10.0",
+		"hostname":       "line-hk-01",
+		"overall_status": "degraded",
+		"dimensions": map[string]string{
+			"inbound":  "healthy",
+			"user":     "healthy",
+			"outbound": "degraded",
+			"routing":  "healthy",
+		},
+		"anomalies": []map[string]interface{}{
+			{
+				"dimension":    "outbound",
+				"resource_key": "landing-hk-01",
+				"error_type":   "missing",
+				"detail":       "outbound absent in xray runtime",
+				"observed_at":  "2026-11-16T12:01:00Z",
+			},
+		},
+		"observed_at": "2026-11-16T12:01:00Z",
+	}
+
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest("POST", "/api/agent/v1/health/report", bytes.NewReader(b))
+	req.Header.Set("X-Agent-Token", *agent.ControlTokenCiphertext)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			Accepted bool `json:"accepted"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if !resp.Data.Accepted {
+		t.Fatalf("expected accepted: true")
+	}
+
+	// Verify agent_nodes snapshot
+	var updatedAgent model.AgentNode
+	if err := db.DB.NewSelect().Model(&updatedAgent).Where("id = ?", agent.ID).Scan(ctx); err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+	if updatedAgent.OverallStatus != "degraded" {
+		t.Fatalf("expected overall_status degraded, got %s", updatedAgent.OverallStatus)
+	}
+	if !strings.Contains(updatedAgent.HealthDimensions, `"outbound":"degraded"`) {
+		t.Fatalf("expected health_dimensions with outbound degraded, got %s", updatedAgent.HealthDimensions)
+	}
+
+	// Verify agent_health_logs
+	var logs []model.AgentHealthLog
+	if err := db.DB.NewSelect().Model(&logs).Where("agent_node_id = ?", agent.ID).Scan(ctx); err != nil {
+		t.Fatalf("load logs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 health log, got %d", len(logs))
+	}
+	if logs[0].OverallStatus != "degraded" || logs[0].Hostname != "line-hk-01" {
+		t.Fatalf("unexpected log entry: %+v", logs[0])
+	}
+}
+
+func TestAgentReportHealthIdempotent(t *testing.T) {
+	r, agent, _, cleanup := setupAgentTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	body := map[string]interface{}{
+		"agent_version":  "1.0.0",
+		"xray_version":   "26.10.0",
+		"hostname":       "line-hk-01",
+		"overall_status": "healthy",
+		"dimensions": map[string]string{
+			"inbound":  "healthy",
+			"user":     "healthy",
+			"outbound": "healthy",
+			"routing":  "healthy",
+		},
+		"anomalies":   []map[string]interface{}{},
+		"observed_at": "2026-11-16T12:00:00Z",
+	}
+	b, _ := json.Marshal(body)
+
+	// Call 1 -> creates 1 log
+	req1 := httptest.NewRequest("POST", "/api/agent/v1/health/report", bytes.NewReader(b))
+	req1.Header.Set("X-Agent-Token", *agent.ControlTokenCiphertext)
+	w1 := httptest.NewRecorder()
+	r.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w1.Code, w1.Body.String())
+	}
+
+	// Call 2 (same content) -> idempotent, should NOT create another log
+	req2 := httptest.NewRequest("POST", "/api/agent/v1/health/report", bytes.NewReader(b))
+	req2.Header.Set("X-Agent-Token", *agent.ControlTokenCiphertext)
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	count, _ := db.DB.NewSelect().Model((*model.AgentHealthLog)(nil)).Where("agent_node_id = ?", agent.ID).Count(ctx)
+	if count != 1 {
+		t.Fatalf("expected exactly 1 log record after duplicate report, got %d", count)
+	}
+
+	// Call 3 (status changed to degraded) -> creates 2nd log
+	body["overall_status"] = "degraded"
+	body["dimensions"] = map[string]string{
+		"inbound":  "healthy",
+		"user":     "healthy",
+		"outbound": "degraded",
+		"routing":  "healthy",
+	}
+	b3, _ := json.Marshal(body)
+	req3 := httptest.NewRequest("POST", "/api/agent/v1/health/report", bytes.NewReader(b3))
+	req3.Header.Set("X-Agent-Token", *agent.ControlTokenCiphertext)
+	w3 := httptest.NewRecorder()
+	r.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w3.Code, w3.Body.String())
+	}
+
+	countAfter, _ := db.DB.NewSelect().Model((*model.AgentHealthLog)(nil)).Where("agent_node_id = ?", agent.ID).Count(ctx)
+	if countAfter != 2 {
+		t.Fatalf("expected 2 logs after status change, got %d", countAfter)
+	}
+}
+
+func TestAgentStateSyncV2Present(t *testing.T) {
+	r, agent, node, cleanup := setupAgentTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// 1. Desired active, agent missing -> drift missing (action: add)
+	credMissing := "cred_v2_missing"
+	depMissing := &model.CredentialDeployment{CredentialID: credMissing, EndpointID: node.ID, AgentNodeID: agent.ID, DesiredState: "active", AppliedState: "unknown", Revision: "200"}
+
+	// 2. Desired active, agent present with old revision -> drift revision_mismatch (action: update)
+	credRevMismatch := "cred_v2_rev_mismatch"
+	depRevMismatch := &model.CredentialDeployment{CredentialID: credRevMismatch, EndpointID: node.ID, AgentNodeID: agent.ID, DesiredState: "active", AppliedState: "active", Revision: "300"}
+
+	// 3. Desired revoked, agent present active -> drift state_mismatch (action: remove)
+	credStateMismatch := "cred_v2_state_mismatch"
+	depStateMismatch := &model.CredentialDeployment{CredentialID: credStateMismatch, EndpointID: node.ID, AgentNodeID: agent.ID, DesiredState: "revoked", AppliedState: "active", Revision: "400"}
+
+	for _, d := range []*model.CredentialDeployment{depMissing, depRevMismatch, depStateMismatch} {
+		if _, err := db.DB.NewInsert().Model(d).Exec(ctx); err != nil {
+			t.Fatalf("insert %s: %v", d.CredentialID, err)
+		}
+	}
+
+	// V2 format: last_revision + present list
+	v2Req := map[string]interface{}{
+		"last_revision": "1710000000300",
+		"present": []map[string]interface{}{
+			// credRevMismatch reported with revision 299
+			{
+				"credential_id": credRevMismatch,
+				"endpoint_id":   node.ID,
+				"revision":      "299",
+				"applied_state": "active",
+				"xray_user_key": "c_" + credRevMismatch + "@line-hk-01",
+			},
+			// credStateMismatch reported with active
+			{
+				"credential_id": credStateMismatch,
+				"endpoint_id":   node.ID,
+				"revision":      "400",
+				"applied_state": "active",
+				"xray_user_key": "c_" + credStateMismatch + "@line-hk-01",
+			},
+			// extra item present on agent but not desired
+			{
+				"credential_id": "cred_v2_extra",
+				"endpoint_id":   node.ID,
+				"revision":      "100",
+				"applied_state": "active",
+				"xray_user_key": "c_extra@line-hk-01",
+			},
+		},
+	}
+
+	b, _ := json.Marshal(v2Req)
+	req := httptest.NewRequest("POST", "/api/agent/v1/state/sync", bytes.NewReader(b))
+	req.Header.Set("X-Agent-Token", *agent.ControlTokenCiphertext)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			Drift       []map[string]interface{} `json:"drift"`
+			Conflicts   []map[string]interface{} `json:"conflicts"`
+			NextSyncSec int                      `json:"next_sync_sec"`
+			ServerTime  string                   `json:"server_time"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if resp.Data.NextSyncSec != 30 {
+		t.Fatalf("expected next_sync_sec 30, got %d", resp.Data.NextSyncSec)
+	}
+
+	reasons := map[string]int{}
+	actions := map[string]int{}
+	for _, d := range resp.Data.Drift {
+		if r, ok := d["reason"].(string); ok {
+			reasons[r]++
+		}
+		if a, ok := d["action"].(string); ok {
+			actions[a]++
+		}
+	}
+
+	// Verify normalized reasons: missing, extra, revision_mismatch, state_mismatch
+	if reasons["missing"] != 1 {
+		t.Fatalf("expected 1 missing drift, got %+v", reasons)
+	}
+	if reasons["extra"] != 1 {
+		t.Fatalf("expected 1 extra drift, got %+v", reasons)
+	}
+	if reasons["revision_mismatch"] != 1 {
+		t.Fatalf("expected 1 revision_mismatch drift, got %+v", reasons)
+	}
+	if reasons["state_mismatch"] != 1 {
+		t.Fatalf("expected 1 state_mismatch drift, got %+v", reasons)
+	}
+
+	if actions["add"] != 1 {
+		t.Fatalf("expected 1 add action, got %+v", actions)
+	}
+	if actions["remove"] != 2 { // state_mismatch (revoked) + extra
+		t.Fatalf("expected 2 remove actions, got %+v", actions)
+	}
+	if actions["update"] != 1 {
+		t.Fatalf("expected 1 update action, got %+v", actions)
+	}
+}
+
+func TestAgentHeartbeatEndpointProjection(t *testing.T) {
+	r, agent, _, cleanup := setupAgentTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	topoConfig := `{
+		"inbounds": [
+			{
+				"tag": "in-8443",
+				"protocol": "trojan",
+				"port": 8443,
+				"network": "ws",
+				"security": "tls",
+				"server_names": ["hk-node.example.com"]
+			}
+		]
+	}`
+	_, _ = db.DB.NewUpdate().Model((*model.AgentNode)(nil)).
+		Set("topology_config = ?", topoConfig).
+		Where("id = ?", agent.ID).Exec(ctx)
+
+	hbBody := map[string]interface{}{
+		"agent_version": "1.0.0",
+		"xray_version":  "1.8.24",
+		"hostname":      "edge-hk-02.example.com",
+		"capabilities":  []string{"xray.trojan"},
+		"endpoints": []map[string]interface{}{
+			{
+				"endpoint_id": 0,
+				"inbound_tag": "in-8443",
+				"ready":       true,
+			},
+		},
+	}
+	b, _ := json.Marshal(hbBody)
+	req := httptest.NewRequest("POST", "/api/agent/v1/heartbeat", bytes.NewReader(b))
+	req.Header.Set("X-Agent-Token", *agent.ControlTokenCiphertext)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify Node was auto-projected
+	var projectedNode model.Node
+	err := db.DB.NewSelect().Model(&projectedNode).Where("inbound_tag = ?", "in-8443").Scan(ctx)
+	if err != nil {
+		t.Fatalf("expected projected node in DB: %v", err)
+	}
+	if projectedNode.Protocol != "trojan" || projectedNode.ServerPort != 8443 || projectedNode.Security != "tls" {
+		t.Fatalf("unexpected node config: %+v", projectedNode)
+	}
+	if projectedNode.ServerAddress != "edge-hk-02.example.com" {
+		t.Fatalf("expected ServerAddress edge-hk-02.example.com, got %s", projectedNode.ServerAddress)
+	}
+
+	// Verify EndpointAgentBinding was created
+	var binding model.EndpointAgentBinding
+	err = db.DB.NewSelect().Model(&binding).
+		Where("endpoint_id = ? AND agent_node_id = ?", projectedNode.ID, agent.ID).
+		Scan(ctx)
+	if err != nil {
+		t.Fatalf("expected binding created: %v", err)
+	}
+	if binding.Status != "active" || binding.LastSyncAt == nil {
+		t.Fatalf("unexpected binding state: %+v", binding)
+	}
+}
+
+func TestAgentStateSyncV1Compat(t *testing.T) {
+	r, agent, node, cleanup := setupAgentTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// 1. Desired active, agent reports present: false -> drift missing (action: add)
+	credMissing := "cred_v1_missing"
+	depMissing := &model.CredentialDeployment{CredentialID: credMissing, EndpointID: node.ID, AgentNodeID: agent.ID, DesiredState: "active", AppliedState: "unknown", Revision: "200"}
+
+	// 2. Desired active, agent reports old revision -> drift revision_mismatch (action: update)
+	credRevMismatch := "cred_v1_rev_mismatch"
+	depRevMismatch := &model.CredentialDeployment{CredentialID: credRevMismatch, EndpointID: node.ID, AgentNodeID: agent.ID, DesiredState: "active", AppliedState: "active", Revision: "300"}
+
+	// 3. Desired revoked, agent reports active -> drift state_mismatch (action: remove)
+	credStateMismatch := "cred_v1_state_mismatch"
+	depStateMismatch := &model.CredentialDeployment{CredentialID: credStateMismatch, EndpointID: node.ID, AgentNodeID: agent.ID, DesiredState: "revoked", AppliedState: "active", Revision: "400"}
+
+	for _, d := range []*model.CredentialDeployment{depMissing, depRevMismatch, depStateMismatch} {
+		if _, err := db.DB.NewInsert().Model(d).Exec(ctx); err != nil {
+			t.Fatalf("insert %s: %v", d.CredentialID, err)
+		}
+	}
+
+	// Legacy V1 format: "items" array with present boolean flags
+	v1Req := map[string]interface{}{
+		"items": []map[string]interface{}{
+			// credMissing: present=false -> missing
+			{
+				"credential_id": credMissing,
+				"endpoint_id":   node.ID,
+				"revision":      "200",
+				"applied_state": "active",
+				"present":       false,
+			},
+			// credRevMismatch: present=true but revision 299 != 300 -> revision_mismatch
+			{
+				"credential_id": credRevMismatch,
+				"endpoint_id":   node.ID,
+				"revision":      "299",
+				"applied_state": "active",
+				"present":       true,
+			},
+			// credStateMismatch: desired revoked but present active -> state_mismatch
+			{
+				"credential_id": credStateMismatch,
+				"endpoint_id":   node.ID,
+				"revision":      "400",
+				"applied_state": "active",
+				"present":       true,
+			},
+			// extra on agent
+			{
+				"credential_id": "cred_v1_extra",
+				"endpoint_id":   node.ID,
+				"revision":      "100",
+				"applied_state": "active",
+				"present":       true,
+			},
+		},
+	}
+
+	b, _ := json.Marshal(v1Req)
+	req := httptest.NewRequest("POST", "/api/agent/v1/state/sync", bytes.NewReader(b))
+	req.Header.Set("X-Agent-Token", *agent.ControlTokenCiphertext)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			Drift       []map[string]interface{} `json:"drift"`
+			Conflicts   []map[string]interface{} `json:"conflicts"`
+			NextSyncSec int                      `json:"next_sync_sec"`
+			ServerTime  string                   `json:"server_time"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if resp.Data.NextSyncSec != 30 {
+		t.Fatalf("expected next_sync_sec 30, got %d", resp.Data.NextSyncSec)
+	}
+
+	reasons := map[string]int{}
+	actions := map[string]int{}
+	for _, d := range resp.Data.Drift {
+		if r, ok := d["reason"].(string); ok {
+			reasons[r]++
+		}
+		if a, ok := d["action"].(string); ok {
+			actions[a]++
+		}
+	}
+
+	// Verify normalized reasons in V1 legacy mode
+	if reasons["missing"] != 1 {
+		t.Fatalf("expected 1 missing drift, got %+v", reasons)
+	}
+	if reasons["extra"] != 1 {
+		t.Fatalf("expected 1 extra drift, got %+v", reasons)
+	}
+	if reasons["revision_mismatch"] != 1 {
+		t.Fatalf("expected 1 revision_mismatch drift, got %+v", reasons)
+	}
+	if reasons["state_mismatch"] != 1 {
+		t.Fatalf("expected 1 state_mismatch drift, got %+v", reasons)
+	}
+
+	if actions["add"] != 1 {
+		t.Fatalf("expected 1 add action, got %+v", actions)
+	}
+	if actions["remove"] != 2 {
+		t.Fatalf("expected 2 remove actions, got %+v", actions)
+	}
+	if actions["update"] != 1 {
+		t.Fatalf("expected 1 update action, got %+v", actions)
+	}
+}
+
+func TestAgentHeartbeatEndpointProjectionMultiAgentIsolation(t *testing.T) {
+	r, agent1, _, cleanup := setupAgentTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create Agent 2
+	token2 := "agt_tok_agent_002"
+	now := time.Now().UTC()
+	agent2 := &model.AgentNode{
+		ID:                     "ag_test_002",
+		Name:                   "agent-2",
+		ControlTokenCiphertext: &token2,
+		Status:                 "offline",
+		TopologyConfig: `{
+			"inbounds": [
+				{"tag": "in-shared-443", "protocol": "vless", "port": 443}
+			]
+		}`,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if _, err := db.DB.NewInsert().Model(agent2).Exec(ctx); err != nil {
+		t.Fatalf("insert agent2: %v", err)
+	}
+
+	// Update Agent 1 topology
+	_, _ = db.DB.NewUpdate().Model((*model.AgentNode)(nil)).
+		Set("topology_config = ?", `{"inbounds": [{"tag": "in-shared-443", "protocol": "vless", "port": 443}]}`).
+		Where("id = ?", agent1.ID).Exec(ctx)
+
+	// Agent 1 heartbeat
+	hb1 := map[string]interface{}{
+		"agent_version": "1.0.0",
+		"hostname":      "host-agent-1.example.com",
+		"endpoints": []map[string]interface{}{
+			{"endpoint_id": 0, "inbound_tag": "in-shared-443", "ready": true},
+		},
+	}
+	b1, _ := json.Marshal(hb1)
+	req1 := httptest.NewRequest("POST", "/api/agent/v1/heartbeat", bytes.NewReader(b1))
+	req1.Header.Set("X-Agent-Token", *agent1.ControlTokenCiphertext)
+	w1 := httptest.NewRecorder()
+	r.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("hb1 failed %d %s", w1.Code, w1.Body.String())
+	}
+
+	// Agent 2 heartbeat with identical inbound_tag
+	hb2 := map[string]interface{}{
+		"agent_version": "1.0.0",
+		"hostname":      "host-agent-2.example.com",
+		"endpoints": []map[string]interface{}{
+			{"endpoint_id": 0, "inbound_tag": "in-shared-443", "ready": true},
+		},
+	}
+	b2, _ := json.Marshal(hb2)
+	req2 := httptest.NewRequest("POST", "/api/agent/v1/heartbeat", bytes.NewReader(b2))
+	req2.Header.Set("X-Agent-Token", token2)
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("hb2 failed %d %s", w2.Code, w2.Body.String())
+	}
+
+	// Both agents must have their own separate projected node
+	var binding1 model.EndpointAgentBinding
+	if err := db.DB.NewSelect().Model(&binding1).
+		Where("agent_node_id = ?", agent1.ID).
+		Where("endpoint_id IN (SELECT id FROM node WHERE inbound_tag = ?)", "in-shared-443").
+		Scan(ctx); err != nil {
+		t.Fatalf("agent1 binding missing: %v", err)
+	}
+	var binding2 model.EndpointAgentBinding
+	if err := db.DB.NewSelect().Model(&binding2).
+		Where("agent_node_id = ?", agent2.ID).
+		Where("endpoint_id IN (SELECT id FROM node WHERE inbound_tag = ?)", "in-shared-443").
+		Scan(ctx); err != nil {
+		t.Fatalf("agent2 binding missing: %v", err)
+	}
+
+	if binding1.EndpointID == binding2.EndpointID {
+		t.Fatalf("isolation violation: agent1 and agent2 projected the same endpoint ID %d", binding1.EndpointID)
+	}
+
+	var node1, node2 model.Node
+	_ = db.DB.NewSelect().Model(&node1).Where("id = ?", binding1.EndpointID).Scan(ctx)
+	_ = db.DB.NewSelect().Model(&node2).Where("id = ?", binding2.EndpointID).Scan(ctx)
+
+	if node1.ServerAddress != "host-agent-1.example.com" {
+		t.Fatalf("expected node1 host host-agent-1.example.com, got %s", node1.ServerAddress)
+	}
+	if node2.ServerAddress != "host-agent-2.example.com" {
+		t.Fatalf("expected node2 host host-agent-2.example.com, got %s", node2.ServerAddress)
+	}
+}
+
 

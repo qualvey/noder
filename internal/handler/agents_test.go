@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"noder/internal/config"
@@ -273,6 +275,107 @@ func TestAgentBindingFlow(t *testing.T) {
 	r.ServeHTTP(wUnbind, reqUnbind)
 	if wUnbind.Code != http.StatusOK {
 		t.Fatalf("unbind failed %d %s", wUnbind.Code, wUnbind.Body.String())
+	}
+}
+
+func TestAgentTopologyConfigRevision(t *testing.T) {
+	r, cleanup := setupAgentAdminTest(t)
+	defer cleanup()
+
+	// 1. Create agent with topology_config
+	topo := map[string]interface{}{
+		"inbounds": []map[string]interface{}{
+			{"tag": "in-443", "protocol": "vless", "port": 443},
+		},
+	}
+	body, _ := json.Marshal(map[string]interface{}{
+		"name":            "TopoAgent",
+		"topology_config": topo,
+	})
+	req := httptest.NewRequest("POST", "/api/agents", bytes.NewReader(body))
+	req.Header.Set("X-Admin-Token", "admin-secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create agent failed %d %s", w.Code, w.Body.String())
+	}
+
+	var createResp struct {
+		Code int `json:"code"`
+		Data struct {
+			ID             string `json:"id"`
+			ConfigRevision string `json:"config_revision"`
+			TopologyConfig string `json:"topology_config"`
+			OverallStatus  string `json:"overall_status"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &createResp)
+	if createResp.Data.ConfigRevision == "0" || createResp.Data.ConfigRevision == "" {
+		t.Fatalf("expected non-zero config_revision, got %s", createResp.Data.ConfigRevision)
+	}
+	if !strings.Contains(createResp.Data.TopologyConfig, "in-443") {
+		t.Fatalf("expected topology_config in create response, got %s", createResp.Data.TopologyConfig)
+	}
+	if createResp.Data.OverallStatus != "unknown" {
+		t.Fatalf("expected overall_status unknown, got %s", createResp.Data.OverallStatus)
+	}
+
+	agentID := createResp.Data.ID
+	oldRev := createResp.Data.ConfigRevision
+
+	time.Sleep(10 * time.Millisecond)
+
+	// 2. Update agent with modified topology_config
+	topo2 := map[string]interface{}{
+		"inbounds": []map[string]interface{}{
+			{"tag": "in-8443", "protocol": "trojan", "port": 8443},
+		},
+	}
+	updBody, _ := json.Marshal(map[string]interface{}{
+		"topology_config": topo2,
+	})
+	reqUpd := httptest.NewRequest("PUT", "/api/agents/"+agentID, bytes.NewReader(updBody))
+	reqUpd.Header.Set("X-Admin-Token", "admin-secret")
+	wUpd := httptest.NewRecorder()
+	r.ServeHTTP(wUpd, reqUpd)
+	if wUpd.Code != http.StatusOK {
+		t.Fatalf("update agent failed %d %s", wUpd.Code, wUpd.Body.String())
+	}
+
+	var updResp struct {
+		Code int `json:"code"`
+		Data struct {
+			ConfigRevision string `json:"config_revision"`
+			TopologyConfig string `json:"topology_config"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(wUpd.Body.Bytes(), &updResp)
+	if updResp.Data.ConfigRevision == oldRev {
+		t.Fatalf("expected config_revision to advance on update, got %s == %s", updResp.Data.ConfigRevision, oldRev)
+	}
+	if !strings.Contains(updResp.Data.TopologyConfig, "in-8443") {
+		t.Fatalf("expected new topology_config, got %s", updResp.Data.TopologyConfig)
+	}
+
+	// 3. GetAgent checks
+	reqGet := httptest.NewRequest("GET", "/api/agents/"+agentID, nil)
+	reqGet.Header.Set("X-Admin-Token", "admin-secret")
+	wGet := httptest.NewRecorder()
+	r.ServeHTTP(wGet, reqGet)
+	if wGet.Code != http.StatusOK {
+		t.Fatalf("get failed %d %s", wGet.Code, wGet.Body.String())
+	}
+	var getResp struct {
+		Code int `json:"code"`
+		Data struct {
+			ConfigRevision string `json:"config_revision"`
+			TopologyConfig string `json:"topology_config"`
+			OverallStatus  string `json:"overall_status"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(wGet.Body.Bytes(), &getResp)
+	if getResp.Data.ConfigRevision != updResp.Data.ConfigRevision {
+		t.Fatalf("get mismatch: %s != %s", getResp.Data.ConfigRevision, updResp.Data.ConfigRevision)
 	}
 }
 
