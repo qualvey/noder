@@ -152,7 +152,7 @@
           "0.0.0.0/0",
           "::/0"
         ],
-        "autoOutboundsInterface": "end0"
+        "autoOutboundsInterface": "auto"
       }
     }
   ],
