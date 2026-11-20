@@ -89,7 +89,6 @@ function openTokenModal() {
     @mouseleave="handleMouseLeave"
   >
     <div class="sidebar-header">
-      <div class="brand-badge">⚡</div>
       <div class="brand-text" v-show="isExpanded">
         <div class="brand-title">欢喜飞机</div>
         <div class="brand-subtitle">
